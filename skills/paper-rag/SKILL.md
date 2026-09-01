@@ -1,0 +1,56 @@
+---
+name: paper-rag
+description: Retrieve and reference the radio-wave fall detection / human activity sensing paper collection in the radio-fall-detection project. Use when the user asks about fall detection using WiFi, CSI, radar, UWB, mmWave, RSSI, Doppler, activity recognition, or related topics covered by these papers.
+---
+
+# Paper RAG — radio-fall-detection
+
+Retrieve and reference the academic paper collection on fall detection and human activity sensing using radio waves (WiFi CSI, mmWave/UWB radar, RSSI, Doppler).
+
+## Collection
+
+- Papers: `Resources/Papers/md/` (converted Markdown)
+- Raw PDFs: `Resources/Papers/`
+- Metadata catalog: `tools/index.json` (`papers` entries)
+- Search index: built by `tools/rag.py` into `tools/.rag-index/`
+
+## Retrieval Workflow
+
+1. **Scan metadata** — read `tools/index.json` to find candidate papers by title, methods, or keywords.
+
+2. **Semantic search**:
+
+```bash
+python3 tools/rag.py query "fall detection using WiFi channel state information"
+python3 tools/rag.py query "radar based human activity recognition" --top 10
+```
+
+Queries work in English and Indonesian; results show source file, section heading, and context lines.
+
+3. **Exact-match verification** — use ripgrep for specific terms:
+
+```bash
+rg -i "ultra-wideband" Resources/Papers/md/
+rg -l "CSI amplitude" Resources/Papers/md/
+```
+
+4. **Deep read** — read the abstract and conclusion of the most relevant papers:
+
+```bash
+head -40 Resources/Papers/md/<paper>.md
+tail -50 Resources/Papers/md/<paper>.md
+```
+
+5. **Index maintenance** — after adding or converting papers:
+
+```bash
+python3 tools/rag.py index
+python3 tools/rag.py check
+```
+
+## Notes
+
+- Run all commands from the project root.
+- If search results are poor, try synonyms or re-index after adding files.
+- If `rag.py` reports no index, run `python3 tools/rag.py index` first.
+- `rag.py check` exits non-zero when converted Markdown is missing from `tools/index.json`; keep the catalog current.

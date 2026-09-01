@@ -1,0 +1,412 @@
+{
+  "papers": [
+    {
+      "id": "radar-based-fall-detection-survey-2024",
+      "title": "Radar-Based Fall Detection: A Survey",
+      "file": "Papers/md/radar-based-fall-detection-survey-2024.md",
+      "year": 2024,
+      "methods": [
+        "Survey",
+        "Micro-Doppler",
+        "Range-Doppler",
+        "Deep Learning"
+      ],
+      "keywords": [
+        "radar",
+        "fall detection",
+        "micro-doppler",
+        "survey",
+        "elderly"
+      ],
+      "language": "en",
+      "lines": 1060,
+      "summary": "Survey 74 studi radar fall detection (2000-2023): micro-Doppler, range-Doppler, range-Doppler-angle, ML/DL, tantangan dan arah riset.",
+      "status": "converted",
+      "doi": "10.1109/MRA.2024.3352851",
+      "url": "https://ieeexplore.ieee.org/document/10420485",
+      "note": "PDF tersimpan adalah versi arXiv 2312.04037 dari versi terbit IEEE Robotics & Automation Magazine 31(3):170-185."
+    },
+    {
+      "id": "low-cost-xband-doppler-radar-hb100-2025",
+      "title": "Low-Cost X-band Doppler Radar for Nadir Velocity Detection",
+      "file": "Papers/md/low-cost-xband-doppler-radar-hb100-2025.md",
+      "year": 2025,
+      "methods": [
+        "Doppler radar",
+        "Velocity measurement",
+        "HB100"
+      ],
+      "keywords": [
+        "HB100",
+        "10.525 GHz",
+        "X-band",
+        "Doppler",
+        "velocity"
+      ],
+      "language": "en",
+      "lines": 163,
+      "summary": "Karakterisasi modul HB100 10.525 GHz untuk pengukuran kecepatan radial (accepted manuscript, 2025 6th Australian Microwave Symposium).",
+      "status": "converted",
+      "doi": "10.1109/AMS63679.2025.10937823",
+      "url": "https://research-repository.griffith.edu.au/server/api/core/bitstreams/e31ff39f-b010-48fc-8999-403a06d2d21e/content"
+    },
+    {
+      "id": "indoor-fall-detector-doppler-kuleuven-2013",
+      "title": "Indoor Fall Detector Based on Doppler Radar",
+      "file": "Papers/md/indoor-fall-detector-doppler-kuleuven-2013.md",
+      "year": 2013,
+      "methods": [
+        "CW Doppler radar",
+        "Machine learning",
+        "Speed measurement"
+      ],
+      "keywords": [
+        "fall detection",
+        "Doppler",
+        "continuous wave",
+        "activity classification"
+      ],
+      "language": "en",
+      "lines": 63,
+      "summary": "Poster KU Leuven: deteksi jatuh dengan CW Doppler 5.8 GHz; aktivitas falling, walking, sitting down, standing up; sukses 95% tanpa false positive.",
+      "status": "converted",
+      "url": "https://lirias.kuleuven.be/retrieve/4f3f06b4-cc38-4ce0-9f65-907a3aae4f30"
+    },
+    {
+      "id": "radar-signal-processing-elderly-fall-2016",
+      "title": "Radar Signal Processing for Elderly Fall Detection: The Future for In-Home Monitoring",
+      "file": "Papers/md/radar-signal-processing-elderly-fall-2016.md",
+      "year": 2016,
+      "methods": [
+        "Signal processing",
+        "Micro-Doppler",
+        "Review"
+      ],
+      "keywords": [
+        "radar",
+        "fall detection",
+        "signal processing",
+        "elderly"
+      ],
+      "language": "en",
+      "lines": 721,
+      "summary": "Artikel klasik IEEE SPM: pipeline sinyal radar untuk deteksi jatuh di rumah, fitur, klasifikasi, dan tantangan.",
+      "status": "converted",
+      "doi": "10.1109/MSP.2015.2502784",
+      "url": "https://ieeexplore.ieee.org/document/7426551"
+    },
+    {
+      "id": "human-activity-microdoppler-svm-2009",
+      "title": "Human Activity Classification Based on Micro-Doppler Signatures Using a Support Vector Machine",
+      "file": "Papers/md/human-activity-microdoppler-svm-2009.md",
+      "year": 2009,
+      "methods": [
+        "Micro-Doppler",
+        "SVM",
+        "Feature extraction"
+      ],
+      "keywords": [
+        "micro-doppler",
+        "activity classification",
+        "SVM",
+        "spectrogram"
+      ],
+      "language": "en",
+      "lines": 511,
+      "summary": "Fondasi klasifikasi aktivitas manusia dari micro-Doppler dengan SVM.",
+      "status": "converted",
+      "doi": "10.1109/TGRS.2009.2012849"
+    },
+    {
+      "id": "automatic-fall-doppler-mfcc-2011",
+      "title": "Automatic Fall Detection Based on Doppler Radar Motion Signature",
+      "file": "Papers/md/automatic-fall-doppler-mfcc-2011.md",
+      "year": 2011,
+      "methods": [
+        "MFCC",
+        "Doppler radar",
+        "Classification"
+      ],
+      "keywords": [
+        "Doppler",
+        "fall detection",
+        "MFCC",
+        "spectrogram"
+      ],
+      "language": "en",
+      "lines": 473,
+      "summary": "Paper klasik: fitur MFCC dari tanda Doppler untuk membedakan walking, bending, falling.",
+      "status": "converted",
+      "url": "https://ieeexplore.ieee.org/document/6038799"
+    },
+    {
+      "id": "doppler-sensor-positioning-2012",
+      "title": "Doppler Radar Sensor Positioning in a Fall Detection System",
+      "file": "Papers/md/doppler-sensor-positioning-2012.md",
+      "year": 2012,
+      "methods": [
+        "Doppler radar",
+        "Sensor positioning",
+        "Experiment"
+      ],
+      "keywords": [
+        "Doppler",
+        "fall detection",
+        "sensor placement",
+        "positioning"
+      ],
+      "language": "en",
+      "lines": 386,
+      "summary": "Studi posisi sensor: konfigurasi overhead/ceiling lebih baik untuk menangkap komponen vertikal jatuh.",
+      "status": "converted",
+      "doi": "10.1109/EMBC.2012.6345918",
+      "url": "https://ieeexplore.ieee.org/document/6345918"
+    },
+    {
+      "id": "doppler-fall-fusion-2014",
+      "title": "An Automatic Fall Detection Framework Using Data Fusion of Doppler Radar and Motion Sensor Network",
+      "file": "Papers/md/doppler-fall-fusion-2014.md",
+      "year": 2014,
+      "methods": [
+        "Data fusion",
+        "Doppler radar",
+        "Motion sensors"
+      ],
+      "keywords": [
+        "fall detection",
+        "Doppler",
+        "data fusion",
+        "motion sensors"
+      ],
+      "language": "en",
+      "lines": 305,
+      "summary": "Fusi radar Doppler (ceiling) + sensor gerak di apartemen lansia; berguna untuk desain ground truth.",
+      "status": "converted",
+      "doi": "10.1109/EMBC.2014.6944981",
+      "url": "https://ieeexplore.ieee.org/document/6944981"
+    },
+    {
+      "id": "doppler-fall-wavelet-2015",
+      "title": "Doppler Radar Fall Activity Detection Using the Wavelet Transform",
+      "file": "Papers/md/doppler-fall-wavelet-2015.md",
+      "year": 2015,
+      "methods": [
+        "Wavelet transform",
+        "CW Doppler radar"
+      ],
+      "keywords": [
+        "Doppler",
+        "fall detection",
+        "wavelet",
+        "ceiling radar"
+      ],
+      "language": "en",
+      "lines": 775,
+      "summary": "Deteksi jatuh dengan radar CW di langit-langit menggunakan wavelet transform.",
+      "status": "converted",
+      "doi": "10.1109/TBME.2014.2367038",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/25376033/"
+    },
+    {
+      "id": "in-home-doppler-fall-2016",
+      "title": "An Automatic In-Home Fall Detection System Using Doppler Radar Signatures",
+      "file": "Papers/md/in-home-doppler-fall-2016.md",
+      "year": 2016,
+      "methods": [
+        "Doppler radar",
+        "Classification",
+        "Field study"
+      ],
+      "keywords": [
+        "fall detection",
+        "Doppler",
+        "in-home",
+        "senior apartments"
+      ],
+      "language": "en",
+      "lines": 708,
+      "summary": "Uji di apartemen lansia: radar ceiling mendeteksi 6/6 jatuh alami; ceiling lebih baik daripada floor.",
+      "status": "converted",
+      "doi": "10.3233/AIS-160388",
+      "url": "https://content.iospress.com/articles/journal-of-ambient-intelligence-and-smart-environments/ais388"
+    },
+    {
+      "id": "single-doppler-lstm-2022",
+      "title": "Fall Detection with a Single Doppler Radar Sensor and LSTM Recurrent Neural Network",
+      "file": "Papers/md/single-doppler-lstm-2022.md",
+      "year": 2022,
+      "methods": [
+        "CW Doppler radar",
+        "LSTM",
+        "Time-frequency"
+      ],
+      "keywords": [
+        "single sensor",
+        "Doppler",
+        "LSTM",
+        "fall detection"
+      ],
+      "language": "en",
+      "lines": 299,
+      "summary": "Paling dekat dengan setup skripsi: satu CW Doppler + LSTM pada karakteristik time-frequency.",
+      "status": "converted",
+      "doi": "10.1109/MWSCAS54063.2022.9859430"
+    },
+    {
+      "id": "contactless-fall-tfa-cnn-2021",
+      "title": "Contactless Fall Detection Using Time-Frequency Analysis and Convolutional Neural Networks",
+      "file": "Papers/md/contactless-fall-tfa-cnn-2021.md",
+      "year": 2021,
+      "methods": [
+        "Time-frequency analysis",
+        "CNN"
+      ],
+      "keywords": [
+        "fall detection",
+        "spectrogram",
+        "CNN",
+        "contactless"
+      ],
+      "language": "en",
+      "lines": 646,
+      "summary": "Deteksi jatuh tanpa kontak via analisis time-frequency + CNN (IEEE Trans. Industrial Informatics).",
+      "status": "converted",
+      "url": "https://ieeexplore.ieee.org/document/9314269"
+    },
+    {
+      "id": "gan-microdoppler-fall-2022",
+      "title": "GAN-Based Radar Micro-Doppler Augmentation for High Accuracy Fall Detection System",
+      "file": "Papers/md/gan-microdoppler-fall-2022.md",
+      "year": 2022,
+      "methods": [
+        "GAN",
+        "CNN",
+        "Micro-Doppler"
+      ],
+      "keywords": [
+        "GAN",
+        "augmentation",
+        "micro-doppler",
+        "CNN",
+        "fall detection"
+      ],
+      "language": "en",
+      "lines": 408,
+      "summary": "Augmentasi data micro-Doppler dengan GAN untuk deteksi jatuh; akurasi 97.2%.",
+      "status": "converted",
+      "url": "https://ieeexplore.ieee.org/document/9968957"
+    },
+    {
+      "id": "elderly-fall-24ghz-2022",
+      "title": "Implementation of Fall Detection for The Elderly Home Support Using 24-GHz Radar Sensor",
+      "file": "Papers/md/elderly-fall-24ghz-2022.md",
+      "year": 2022,
+      "methods": [
+        "24 GHz radar",
+        "CNN",
+        "Spectrogram"
+      ],
+      "keywords": [
+        "24 GHz",
+        "fall detection",
+        "CNN",
+        "spectrogram",
+        "ceiling"
+      ],
+      "language": "en",
+      "lines": 295,
+      "summary": "Radar 24 GHz di langit-langit, segmen Doppler 2.5 detik, klasifikasi spektrogram dengan CNN.",
+      "status": "converted",
+      "url": "https://ieeexplore.ieee.org/document/9888595"
+    },
+    {
+      "id": "fmcw-microdoppler-burst-2025",
+      "title": "Lightweight Fall Detection Based on FMCW Micro-Doppler and Power Burst Signatures Extraction",
+      "file": "Papers/md/fmcw-microdoppler-burst-2025.md",
+      "year": 2025,
+      "methods": [
+        "FMCW",
+        "Micro-Doppler",
+        "Lightweight features"
+      ],
+      "keywords": [
+        "FMCW",
+        "micro-doppler",
+        "lightweight",
+        "fall detection"
+      ],
+      "language": "en",
+      "lines": 294,
+      "summary": "Fitur ringan berbasis micro-Doppler FMCW dan power burst untuk deteksi jatuh hemat komputasi.",
+      "status": "converted",
+      "url": "https://ieeexplore.ieee.org/document/11170524"
+    },
+    {
+      "id": "uwb-cnn-lstm-fall-2021",
+      "title": "Fall Detection With UWB Radars and CNN-LSTM Architecture",
+      "file": "Papers/md/uwb-cnn-lstm-fall-2021.md",
+      "year": 2021,
+      "methods": [
+        "UWB radar",
+        "CNN-LSTM"
+      ],
+      "keywords": [
+        "UWB",
+        "CNN",
+        "LSTM",
+        "fall detection",
+        "apartment"
+      ],
+      "language": "en",
+      "lines": 689,
+      "summary": "Deteksi jatuh di apartemen 40 m2 dengan tiga radar UWB + arsitektur CNN-LSTM.",
+      "status": "converted",
+      "doi": "10.1109/JBHI.2020.3027967"
+    },
+    {
+      "id": "wifi-human-sensing-dl-2024",
+      "title": "WiFi-Based Human Sensing With Deep Learning: Recent Advances, Challenges, and Opportunities",
+      "file": "Papers/md/wifi-human-sensing-dl-2024.md",
+      "year": 2024,
+      "methods": [
+        "WiFi CSI",
+        "Deep learning",
+        "Survey"
+      ],
+      "keywords": [
+        "WiFi",
+        "CSI",
+        "deep learning",
+        "sensing",
+        "fall detection"
+      ],
+      "language": "en",
+      "lines": 1848,
+      "summary": "Survei sensing manusia berbasis WiFi dengan DL; mencakup fall detection sebagai aplikasi.",
+      "status": "converted",
+      "url": "https://ieeexplore.ieee.org/document/10552143"
+    },
+    {
+      "id": "optimum-rangebin-fall-2022",
+      "title": "Optimum Target Range Bin Selection Method for Time-Frequency Analysis to Detect Falls Using Wideband Radar and a Lightweight Network",
+      "file": "Papers/md/optimum-rangebin-fall-2022.md",
+      "year": 2022,
+      "methods": [
+        "Wideband FMCW",
+        "Time-frequency",
+        "Lightweight network"
+      ],
+      "keywords": [
+        "wideband radar",
+        "fall detection",
+        "range bin",
+        "lightweight network"
+      ],
+      "language": "en",
+      "lines": 579,
+      "summary": "Paper Elsevier (Biomedical Signal Processing and Control): pemilihan range bin optimum + jaringan ringan untuk deteksi jatuh radar wideband.",
+      "status": "converted",
+      "doi": "10.1016/j.bspc.2022.103741"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "radio-fall-detection-processor"
+version = "0.1.0"
+description = "USB CSI collector and live viewer for the ESP32 fall-detection prototype"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "pyserial>=3.5",
+    "PySide6>=6.6",
+    "pyqtgraph>=0.13",
+]
+
+[project.scripts]
+csi-viewer = "radio_processor.gui.app:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.pytest.ini_options]
+testpaths = ["../../tests/processor"]
+
+[tool.setuptools.packages.find]
+where = ["."]

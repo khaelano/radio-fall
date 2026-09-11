@@ -2,6 +2,25 @@ tools/.rag-index/
 __pycache__/
 *.pyc
 
+# ESP-IDF generated output and local configuration
+**/build/
+**/sdkconfig
+**/sdkconfig.old
+
+# Python environments and generated metadata
+.venv/
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+src/processor/*.egg-info/
+
+# Local CSI captures (raw data is intentionally not versioned)
+data/raw/
+
+# Codex local build and validation artifacts
+.codex-build/
+.codex-finalizer/
+
 # Re-include files ignored by the global gitignore (/home/khaelano/.gitignore)
 !AGENTS.md
 !docs/

@@ -407,6 +407,269 @@
       "summary": "Paper Elsevier (Biomedical Signal Processing and Control): pemilihan range bin optimum + jaringan ringan untuk deteksi jatuh radar wideband.",
       "status": "converted",
       "doi": "10.1016/j.bspc.2022.103741"
+    },
+    {
+      "id": "defall-2022",
+      "title": "DeFall: Environment-Independent Passive Fall Detection Using WiFi",
+      "file": "Papers/md/defall-2022.md",
+      "year": 2022,
+      "methods": [
+        "WiFi CSI",
+        "Speed estimation",
+        "Dynamic time warping"
+      ],
+      "keywords": [
+        "WiFi",
+        "CSI",
+        "fall detection",
+        "environment independence",
+        "device-free"
+      ],
+      "language": "en",
+      "lines": 1278,
+      "summary": "DeFall menggunakan pola kecepatan dan percepatan dari CSI untuk mendeteksi jatuh tanpa pelatihan ulang pada lingkungan baru.",
+      "status": "converted",
+      "doi": "10.1109/JIOT.2021.3116136",
+      "url": "https://ieeexplore.ieee.org/document/9547345"
+    },
+    {
+      "id": "igual-fall-detection-review-2013",
+      "title": "Challenges, Issues and Trends in Fall Detection Systems",
+      "file": "Papers/md/igual-fall-detection-review-2013.md",
+      "year": 2013,
+      "methods": [
+        "Systematic literature review",
+        "Fall detection taxonomy"
+      ],
+      "keywords": [
+        "fall detection",
+        "review",
+        "privacy",
+        "usability",
+        "real-world evaluation"
+      ],
+      "language": "en",
+      "lines": 1210,
+      "summary": "Tinjauan sistem deteksi jatuh yang mengidentifikasi tantangan kondisi nyata, penerimaan pengguna, privasi, konsumsi daya, dan pencatatan jatuh alami.",
+      "status": "converted",
+      "doi": "10.1186/1475-925X-12-66",
+      "url": "https://biomedical-engineering-online.biomedcentral.com/articles/10.1186/1475-925X-12-66"
+    },
+    {
+      "id": "indonesia-falls-2020",
+      "title": "Prevalence and Risk Factors Associated with Falls among Community-Dwelling and Institutionalized Older Adults in Indonesia",
+      "file": "Papers/md/indonesia-falls-2020.md",
+      "year": 2020,
+      "methods": [
+        "Cross-sectional study",
+        "STEADI screening",
+        "Logistic regression"
+      ],
+      "keywords": [
+        "falls",
+        "older adults",
+        "Indonesia",
+        "prevalence",
+        "fall risk"
+      ],
+      "language": "en",
+      "lines": 628,
+      "summary": "Studi pada 427 lansia Indonesia melaporkan prevalensi jatuh satu tahun sebesar 29,0% dan proporsi risiko jatuh sebesar 45,4%.",
+      "status": "converted",
+      "url": "https://e-mfp.org/wp-content/uploads/2020/03/v15n1-original-article-4.pdf"
+    },
+    {
+      "id": "long-lie-systematic-review-2022-manuscript",
+      "title": "Exploring the Impact of Experiencing a Long Lie Fall on Physical and Clinical Outcomes in Older People Requiring an Ambulance: A Systematic Review",
+      "file": "Papers/md/long-lie-systematic-review-2022-manuscript.md",
+      "year": 2022,
+      "methods": [
+        "Systematic review",
+        "PRISMA",
+        "CASP appraisal"
+      ],
+      "keywords": [
+        "long lie",
+        "falls",
+        "older adults",
+        "ambulance",
+        "automatic fall detection"
+      ],
+      "language": "en",
+      "lines": 3724,
+      "summary": "Tinjauan sistematis mengenai dampak long lie setelah jatuh dan kebutuhan teknologi alarm atau deteksi otomatis yang lebih efektif.",
+      "status": "converted",
+      "doi": "10.1016/j.ienj.2022.101148",
+      "url": "https://doi.org/10.1016/j.ienj.2022.101148",
+      "note": "PDF yang tersimpan merupakan accepted manuscript."
+    },
+    {
+      "id": "rf-privacy-usenix-2025",
+      "title": "Privacy Solution or Menace? Investigating Perceptions of Radio-Frequency Sensing",
+      "file": "Papers/md/rf-privacy-usenix-2025.md",
+      "year": 2025,
+      "methods": [
+        "Qualitative interviews",
+        "Vignette survey",
+        "Privacy perception study"
+      ],
+      "keywords": [
+        "radio-frequency sensing",
+        "privacy",
+        "user perception",
+        "camera comparison"
+      ],
+      "language": "en",
+      "lines": 1285,
+      "summary": "Studi wawancara dan survei mengenai persepsi privasi RF sensing; preferensi terhadap RF atau kamera bergantung pada lokasi dan konteks penggunaan.",
+      "status": "converted",
+      "url": "https://www.usenix.org/conference/usenixsecurity25/presentation/windl"
+    },
+    {
+      "id": "vision-fall-detection-review-2024",
+      "title": "Deep Learning for Computer Vision Based Activity Recognition and Fall Detection of the Elderly: A Systematic Review",
+      "file": "Papers/md/vision-fall-detection-review-2024.md",
+      "year": 2024,
+      "methods": [
+        "Systematic review",
+        "Computer vision",
+        "Deep learning"
+      ],
+      "keywords": [
+        "fall detection",
+        "computer vision",
+        "deep learning",
+        "privacy",
+        "elderly"
+      ],
+      "language": "en",
+      "lines": 1670,
+      "summary": "Tinjauan 151 studi computer vision untuk pengenalan aktivitas dan deteksi jatuh lansia, termasuk privasi dan penerapan dunia nyata.",
+      "status": "converted",
+      "doi": "10.1007/s10489-024-05645-1",
+      "url": "https://link.springer.com/article/10.1007/s10489-024-05645-1"
+    },
+    {
+      "id": "wireless-human-activity-survey-2020",
+      "title": "Wireless Sensing for Human Activity: A Survey",
+      "file": "Papers/md/wireless-human-activity-survey-2020.md",
+      "year": 2020,
+      "methods": [
+        "Survey",
+        "WiFi CSI",
+        "RF sensing"
+      ],
+      "keywords": [
+        "wireless sensing",
+        "human activity",
+        "WiFi",
+        "CSI",
+        "device-free"
+      ],
+      "language": "en",
+      "lines": 1303,
+      "summary": "Survei prinsip, teknik, aplikasi, keterbatasan, dan arah riset sensing aktivitas manusia menggunakan sinyal nirkabel.",
+      "status": "converted",
+      "doi": "10.1109/COMST.2019.2934489",
+      "url": "https://ieeexplore.ieee.org/document/8794643",
+      "note": "PDF yang tersimpan merupakan accepted manuscript dari situs penulis."
+    },
+    {
+      "id": "rt-fall-2017",
+      "title": "RT-Fall: A Real-Time and Contactless Fall Detection System with Commodity WiFi Devices",
+      "file": "Papers/md/rt-fall-2017.md",
+      "year": 2017,
+      "methods": [
+        "WiFi CSI",
+        "Time-frequency analysis",
+        "Real-time detection"
+      ],
+      "keywords": [
+        "RT-Fall",
+        "WiFi",
+        "CSI",
+        "contactless",
+        "fall detection"
+      ],
+      "language": "en",
+      "lines": 1081,
+      "summary": "RT-Fall memanfaatkan perbedaan fase dan amplitudo CSI untuk segmentasi serta deteksi jatuh secara real-time tanpa perangkat pada tubuh.",
+      "status": "converted",
+      "doi": "10.1109/TMC.2016.2557795",
+      "url": "https://ieeexplore.ieee.org/document/7458198"
+    },
+    {
+      "id": "wifall-2017",
+      "title": "WiFall: Device-Free Fall Detection by Wireless Networks",
+      "file": "Papers/md/wifall-2017.md",
+      "year": 2017,
+      "methods": [
+        "WiFi CSI",
+        "One-class SVM",
+        "Random forest"
+      ],
+      "keywords": [
+        "WiFall",
+        "WiFi",
+        "CSI",
+        "device-free",
+        "fall detection"
+      ],
+      "language": "en",
+      "lines": 919,
+      "summary": "WiFall menggunakan CSI perangkat WiFi komoditas untuk deteksi jatuh tanpa perangkat yang dikenakan atau sensor tambahan pada target.",
+      "status": "converted",
+      "doi": "10.1109/TMC.2016.2557792",
+      "url": "https://ieeexplore.ieee.org/document/7458186"
+    },
+    {
+      "id": "falldar-2023",
+      "title": "Rethinking Fall Detection With Wi-Fi",
+      "file": "Papers/md/falldar-2023.md",
+      "year": 2023,
+      "methods": [
+        "WiFi CSI",
+        "Speed estimation",
+        "Deep neural network",
+        "Data augmentation"
+      ],
+      "keywords": [
+        "FallDar",
+        "WiFi",
+        "CSI",
+        "environment diversity",
+        "user diversity"
+      ],
+      "language": "en",
+      "lines": 1146,
+      "summary": "FallDar menangani variasi lingkungan, gerakan, dan pengguna melalui estimasi kecepatan, augmentasi data jatuh, dan fitur yang tidak bergantung pada identitas.",
+      "status": "converted",
+      "doi": "10.1109/TMC.2022.3188779",
+      "url": "https://ieeexplore.ieee.org/document/9816096"
+    },
+    {
+      "id": "falldefi-2017",
+      "title": "FallDeFi: Ubiquitous Fall Detection Using Commodity Wi-Fi Devices",
+      "file": "Papers/md/falldefi-2017.md",
+      "year": 2017,
+      "methods": [
+        "WiFi CSI",
+        "Short-time Fourier transform",
+        "Sequential forward selection"
+      ],
+      "keywords": [
+        "FallDeFi",
+        "WiFi",
+        "CSI",
+        "device-free",
+        "fall detection"
+      ],
+      "language": "en",
+      "lines": 1343,
+      "summary": "FallDeFi menggunakan analisis waktu-frekuensi CSI dan seleksi fitur untuk meningkatkan ketahanan deteksi jatuh terhadap perubahan lingkungan.",
+      "status": "converted",
+      "doi": "10.1145/3161183",
+      "url": "https://dl.acm.org/doi/10.1145/3161183"
     }
   ]
 }

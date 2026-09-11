@@ -1,0 +1,4 @@
+type,id,mac,rssi,rate,sig_mode,mcs,bandwidth,smoothing,not_sounding,aggregation,stbc,fec_coding,sgi,noise_floor,ampdu_cnt,channel,secondary_channel,local_timestamp,ant,sig_len,rx_state,len,first_word,data
+CSI_DATA,10,1a:00:00:00:00:00,-42,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,1000000,0,36,0,4,0,"[3,4,0,5]"
+CSI_DATA,11,1a:00:00:00:00:00,-41,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,1010000,0,36,0,4,0,"[4,0,0,6]"
+CSI_DATA,13,1a:00:00:00:00:00,-43,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,1030000,0,36,0,4,0,"[0,4,3,4]"

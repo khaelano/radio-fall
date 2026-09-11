@@ -1,0 +1,25 @@
+menu "CSI transmitter"
+
+config CSI_CHANNEL
+    int "Wi-Fi channel"
+    range 1 11
+    default 11
+    help
+        Fixed 2.4 GHz channel used for the ESP-NOW sensing packets.
+
+config CSI_PACKET_RATE
+    int "Sensing packet rate (packets per second)"
+    range 1 500
+    default 100
+    help
+        Nominal rate of the sequence-numbered sensing packets. The upper
+        bound keeps the period representable with the default 1 kHz RTOS tick.
+
+config CSI_SEND_MAC
+    string "Transmitter MAC address"
+    default "1a:00:00:00:00:00"
+    help
+        Locally administered MAC used by the sensing transmitter. Enter six
+        hexadecimal octets separated by colons.
+
+endmenu

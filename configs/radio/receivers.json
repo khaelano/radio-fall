@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "transmitter": {
+    "id": "tx-1",
+    "role": "transmitter",
+    "target": "esp32c5",
+    "mac": "1a:00:00:00:00:00",
+    "placement": "configured during experiment setup"
+  },
+  "receivers": [
+    {
+      "id": "rx-1",
+      "role": "receiver",
+      "target": "esp32c5",
+      "mac": "44:bd:8d:d0:b1:4c",
+      "placement": "receiver position 1"
+    },
+    {
+      "id": "rx-2",
+      "role": "receiver",
+      "target": "esp32c5",
+      "mac": "44:bd:8d:d0:b3:50",
+      "placement": "receiver position 2"
+    }
+  ]
+}

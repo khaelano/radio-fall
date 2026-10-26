@@ -1,0 +1,47 @@
+menu "CSI transmitter"
+
+choice CSI_BAND
+    prompt "Wi-Fi band"
+    default CSI_BAND_2G
+    help
+        The fallback band used until a USB-provisioned profile is present.
+
+config CSI_BAND_2G
+    bool "2.4 GHz"
+
+config CSI_BAND_5G
+    bool "5 GHz (ESP32-C5 only)"
+
+endchoice
+
+config CSI_CHANNEL
+    int "Wi-Fi channel"
+    range 1 14
+    default 6
+    help
+        Safe 2.4 GHz fallback channel used before USB provisioning. A
+        provisioned profile replaces this value at runtime.
+
+config CSI_PACKET_RATE
+    int "Sensing packet rate (packets per second)"
+    range 1 500
+    default 100
+    help
+        Nominal rate of the sequence-numbered sensing packets. The upper
+        bound keeps the period representable with the default 1 kHz RTOS tick.
+
+config CSI_SEND_MAC
+    string "Transmitter MAC address"
+    default "1a:00:00:00:00:00"
+    help
+        Locally administered MAC used by the sensing transmitter. Enter six
+        hexadecimal octets separated by colons.
+
+config CSI_USB_CONTROL
+    bool "USB profile provisioning control"
+    default y
+    help
+        Expose discovery and staged radio-profile provisioning over the
+        native USB Serial/JTAG interface.
+
+endmenu

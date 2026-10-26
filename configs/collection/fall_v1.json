@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "protocol_id": "fall-collection-v1",
+  "title": "Directional fall-transition collection protocol",
+  "defaults": {
+    "countdown_seconds": 5,
+    "action_seconds": 8,
+    "recovery_seconds": 5
+  },
+  "scenario_manifests": [
+    "scenarios/01_walk_to_fall.json",
+    "scenarios/02_sit_to_fall.json",
+    "scenarios/03_stand_to_fall.json",
+    "scenarios/04_walk_to_sit.json",
+    "scenarios/05_sit_to_walk.json",
+    "scenarios/06_sit_to_stand.json"
+  ]
+}

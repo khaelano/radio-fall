@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "family_id": "walk-to-sit",
+  "title": "Walk to sit",
+  "activity_label": "walk_to_sit",
+  "instruction_template": "Walk toward {start_direction}, then sit facing {end_direction}.",
+  "start_directions": [
+    "front",
+    "front_right",
+    "right",
+    "back_right",
+    "back",
+    "back_left",
+    "left",
+    "front_left"
+  ],
+  "end_directions": [
+    "front",
+    "front_right",
+    "right",
+    "back_right",
+    "back",
+    "back_left",
+    "left",
+    "front_left"
+  ],
+  "repetitions": 2,
+  "direction_frame": "participant_relative",
+  "safety_note": "Use a stable chair and keep the walking path clear; sit down at a controlled pace."
+}

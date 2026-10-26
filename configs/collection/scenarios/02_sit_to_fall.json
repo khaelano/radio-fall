@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "family_id": "sit-to-fall",
+  "title": "Sit to fall",
+  "activity_label": "sit_to_fall",
+  "instruction_template": "Start seated facing {start_direction}, then perform a {end_direction} fall.",
+  "start_directions": [
+    "front",
+    "front_right",
+    "right",
+    "back_right",
+    "back",
+    "back_left",
+    "left",
+    "front_left"
+  ],
+  "end_directions": [
+    "front",
+    "left",
+    "right"
+  ],
+  "repetitions": 2,
+  "direction_frame": "participant_relative",
+  "safety_note": "Use a stable chair, crash mat, and spotter; keep the fall low and controlled."
+}

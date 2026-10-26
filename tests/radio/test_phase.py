@@ -1,3 +1,4 @@
+import warnings
 from math import isclose, isnan
 
 import numpy as np
@@ -132,3 +133,40 @@ def test_phase_change_uses_oldest_visible_median_baseline():
     assert isclose(changed[-1, 0], 0.6, abs_tol=1e-9)
     assert isnan(changed[0, 1])
     assert isclose(changed[-1, 1], 0.5, abs_tol=1e-9)
+
+
+def test_phase_change_ignores_always_nan_null_subcarrier():
+    """Null/DC tones stay NaN but must not trigger an all-NaN median warning."""
+
+    timestamps = np.array([0.0, 0.1, 0.2, 0.8])
+    phases = np.array(
+        [[0.4, np.nan], [0.5, np.nan], [0.6, np.nan], [1.0, np.nan]]
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        changed = phase_change_from_baseline(
+            phases, timestamps, window_seconds=2.0
+        )
+
+    assert not [item for item in caught if "All-NaN" in str(item.message)]
+    assert isclose(changed[2, 0], 0.1, abs_tol=1e-9)
+    assert isnan(changed[0, 1])
+
+
+def test_phase_change_all_nan_baseline_window_stays_nan_without_warning():
+    """An unusable baseline window yields NaN phase change, not a warning."""
+
+    timestamps = np.array([0.0, 0.1, 1.0])
+    phases = np.array(
+        [[np.nan, np.nan], [np.nan, np.nan], [1.0, 2.0]]
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        changed = phase_change_from_baseline(
+            phases, timestamps, window_seconds=2.0
+        )
+
+    assert not [item for item in caught if "All-NaN" in str(item.message)]
+    assert np.isnan(changed).all()

@@ -258,7 +258,14 @@ def phase_change_from_baseline(
     *,
     window_seconds: float,
 ) -> np.ndarray:
-    """Subtract a robust oldest-window baseline from calibrated phase."""
+    """Subtract a robust oldest-window baseline from calibrated phase.
+
+    Subcarriers that are always invalid -- the DC/null tones and any tone that
+    stays below the amplitude floor -- are NaN by construction.  Their baseline
+    is left NaN and excluded from the median, so an all-NaN column no longer
+    raises NumPy's "All-NaN slice" warning.  If the whole baseline window is
+    NaN the output stays NaN for that window rather than inventing a baseline.
+    """
 
     if phases.ndim != 2 or timestamps.ndim != 1 or phases.shape[0] != timestamps.size:
         raise ValueError("phase matrix and timestamps must have compatible shapes")
@@ -269,5 +276,10 @@ def phase_change_from_baseline(
     baseline_rows = timestamps <= cutoff
     if not baseline_rows.any():
         baseline_rows[0] = True
-    baseline = np.nanmedian(phases[baseline_rows], axis=0)
+    window = phases[baseline_rows]
+    finite = np.isfinite(window)
+    usable = finite.any(axis=0)
+    baseline = np.full(phases.shape[1], np.nan, dtype=np.float64)
+    if usable.any():
+        baseline[usable] = np.nanmedian(window[:, usable], axis=0)
     return _wrap_phase(phases - baseline)

@@ -28,14 +28,14 @@ ESP32-C5 TX ── ESP-NOW, HE20/MCS0, 100 Hz per receiver ──> ESP32-C5 RX-1
 
 - 3× ESP32-C5 (dual-band Wi-Fi 6). ESP32-C6 works too, but 2.4 GHz only.
 - Powered USB hub, laptop.
-- Optional: MR60FDA2 radar and a camera for comparison experiments.
+- Optional: MR60FDA2 radar for comparison experiments.
 
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
 | `src/firmware/radio/` | ESP-IDF transmitter and receiver projects |
-| `src/fall_detection/` | Python package: acquisition, radio processing, collection, vision comparator |
+| `src/fall_detection/` | Python package: acquisition, radio processing, collection, evaluation |
 | `configs/` | Radio profiles, receiver inventory, collection protocol and scenarios |
 | `tests/` | Unit tests mirroring the package modules |
 | `docs/` | Procedures, notes, figures, presentations |
@@ -47,10 +47,8 @@ ESP32-C5 TX ── ESP-NOW, HE20/MCS0, 100 Hz per receiver ──> ESP32-C5 RX-1
 ## Setup
 
 ```sh
-uv sync --extra radio --extra vision
+uv sync --extra radio
 ```
-
-Radio-only work does not need the vision extras.
 
 ## Quick start
 

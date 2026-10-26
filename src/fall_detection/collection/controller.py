@@ -16,14 +16,7 @@ from ..radio.acquisition.telemetry import (
     BackhaulTelemetrySnapshot,
     telemetry_delta,
 )
-from ..vision.scenarios import (
-    ActivityObservation,
-    ScenarioCompletionConfig,
-    ScenarioCompletionRecognizer,
-    ScenarioRecognition,
-    ScenarioRecognitionStatus,
-)
-from .capture import CameraFrameLike, SessionArtifactStore, SessionMetadata, TrialCapture
+from .capture import SessionArtifactStore, SessionMetadata, TrialCapture
 from .protocol import CollectionProtocol, Trial
 
 
@@ -56,23 +49,16 @@ class HealthSnapshot:
     """Current input and storage readiness reported by adapters."""
 
     radio_live: bool = False
-    camera_live: bool = False
     storage_ready: bool = True
     clock_sync_ready: bool = True
     radio_detail: str = "waiting for radio"
-    camera_detail: str = "waiting for camera"
     storage_detail: str = "ready"
 
     @property
     def ready(self) -> bool:
         """Return whether a new trial can safely be started."""
 
-        return (
-            self.radio_live
-            and self.camera_live
-            and self.storage_ready
-            and self.clock_sync_ready
-        )
+        return self.radio_live and self.storage_ready and self.clock_sync_ready
 
 
 @dataclass(frozen=True)
@@ -90,7 +76,6 @@ class SessionSnapshot:
     message: str
     attempt_status: str | None
     action_confirmed: bool = False
-    scenario_recognition: ScenarioRecognition | None = None
 
     @property
     def progress_text(self) -> str:
@@ -102,7 +87,7 @@ class SessionSnapshot:
 
 
 class CaptureSink(Protocol):
-    """Callback seam used by radio and camera adapters."""
+    """Callback seam used by the radio adapter."""
 
     def write_radio(self, record: CsiRecord, host_receive_monotonic_ns: int) -> None:
         ...
@@ -113,9 +98,6 @@ class CaptureSink(Protocol):
         estimate: ClockSyncEstimate,
         host_receive_monotonic_ns: int,
     ) -> None:
-        ...
-
-    def write_camera_frame(self, frame: CameraFrameLike) -> None:
         ...
 
 
@@ -137,11 +119,8 @@ class SessionController:
         monotonic_ns: Callable[[], int] = time.monotonic_ns,
         session_id_factory: Callable[[], str] | None = None,
         environment: dict[str, Any] | None = None,
-        scenario_config: ScenarioCompletionConfig | None = None,
-        scenario_auto_finish: bool = True,
         telemetry_provider: Callable[[], BackhaulTelemetrySnapshot | None] | None = None,
         manual_confirmation_required: bool = False,
-        camera_enabled: bool = True,
     ) -> None:
         self.protocol = protocol
         self.output_dir = output_dir
@@ -149,11 +128,8 @@ class SessionController:
         self._monotonic_ns = monotonic_ns
         self._session_id_factory = session_id_factory or self._default_session_id
         self._environment = environment or {}
-        self._scenario_config = scenario_config or ScenarioCompletionConfig()
-        self._scenario_auto_finish = scenario_auto_finish
         self._telemetry_provider = telemetry_provider
         self._manual_confirmation_required = manual_confirmation_required
-        self._camera_enabled = camera_enabled
         self._lock = RLock()
         self._subscribers: list[Callable[[SessionSnapshot], None]] = []
         self._store: SessionArtifactStore | None = None
@@ -170,9 +146,6 @@ class SessionController:
         self._attempt_status: str | None = None
         self._action_confirmed = False
         self._action_confirmed_monotonic_ns: int | None = None
-        self._scenario_recognizer: ScenarioCompletionRecognizer | None = None
-        self._scenario_recognition: ScenarioRecognition | None = None
-        self._last_recognition_event_key: tuple[str, tuple[str, ...]] | None = None
         self._attempt_telemetry_start: BackhaulTelemetrySnapshot | None = None
 
     @staticmethod
@@ -287,7 +260,6 @@ class SessionController:
                     self._phase_deadline = current
                     self._message = "action was not confirmed; retry or skip this attempt"
                     return self._notify_locked()
-                self._finalize_scenario_locked()
                 self._change_phase_locked(SessionState.RECOVERY, current)
                 self._phase_deadline = current + self._current_scenario.recovery_seconds
             if self._state is SessionState.RECOVERY and current >= self._phase_deadline:
@@ -308,21 +280,15 @@ class SessionController:
         return self._notify_locked()
 
     def _health_ready_locked(self, health: HealthSnapshot | None = None) -> bool:
-        """Apply the camera gate only for the legacy camera comparator mode."""
+        """Return whether radio, storage, and clock are all ready."""
 
         value = health or self._health
-        return (
-            value.radio_live
-            and (value.camera_live if self._camera_enabled else True)
-            and value.storage_ready
-            and value.clock_sync_ready
-        )
+        return value.radio_live and value.storage_ready and value.clock_sync_ready
 
     @staticmethod
     def _health_detail(health: HealthSnapshot) -> str:
         for ready, detail in (
             (health.radio_live, health.radio_detail),
-            (health.camera_live, health.camera_detail),
             (health.storage_ready, health.storage_detail),
         ):
             if not ready:
@@ -352,37 +318,6 @@ class SessionController:
                     sample, estimate, host_receive_monotonic_ns
                 )
 
-    def write_camera_frame(self, frame: CameraFrameLike) -> None:
-        """Receive camera data from an adapter and write it if active."""
-
-        with self._lock:
-            if self._capture is not None:
-                self._capture.write_camera_frame(frame)
-            if self._scenario_recognizer is None:
-                return
-            if self._state not in (SessionState.COUNTDOWN, SessionState.ACTION):
-                return
-            activity = getattr(frame, "activity", None)
-            if not isinstance(activity, ActivityObservation):
-                return
-            result = self._scenario_recognizer.update(
-                activity,
-                action_active=self._state is SessionState.ACTION,
-            )
-            self._set_scenario_recognition_locked(result)
-            if (
-                self._state is SessionState.ACTION
-                and self._scenario_auto_finish
-                and result.status is ScenarioRecognitionStatus.COMPLETED
-            ):
-                now = self._clock()
-                self._change_phase_locked(
-                    SessionState.RECOVERY,
-                    now,
-                    message="scenario completed; remain still for recovery",
-                )
-                self._phase_deadline = now + self._current_scenario.recovery_seconds
-
     @property
     def _current_trial(self) -> Trial | None:
         if 0 <= self._trial_index < len(self.protocol.trials):
@@ -403,8 +338,7 @@ class SessionController:
             self._complete_locked("all protocol trials are complete")
             return
         if not self._health_ready_locked():
-            requirement = "radio, camera, storage, and clock" if self._camera_enabled else "radio, storage, and clock"
-            raise RuntimeError(f"{requirement} health must be ready")
+            raise RuntimeError("radio, storage, and clock health must be ready")
         assert self._store is not None
         now = self._clock()
         trial = self._current_trial
@@ -428,14 +362,8 @@ class SessionController:
         )
         self._attempt_telemetry_start = telemetry_start
         self._attempt_status = "recording"
-        self._scenario_recognizer = ScenarioCompletionRecognizer(
-            trial.scenario.activity_label,
-            self._scenario_config,
-        )
-        self._scenario_recognition = self._scenario_recognizer.result
         self._action_confirmed = False
         self._action_confirmed_monotonic_ns = None
-        self._last_recognition_event_key = None
         self._state = SessionState.COUNTDOWN
         self._phase_deadline = now + trial.scenario.countdown_seconds
         self._message = trial.scenario.instruction
@@ -468,16 +396,7 @@ class SessionController:
     def _enter_review_locked(self, now: float) -> None:
         self._state = SessionState.REVIEW
         self._phase_deadline = now
-        if self._scenario_recognition is not None and self._scenario_recognition.status in (
-            ScenarioRecognitionStatus.NOT_DETECTED,
-            ScenarioRecognitionStatus.UNCERTAIN,
-        ):
-            self._message = (
-                "trial complete; pose validation warning: "
-                f"{self._scenario_recognition.message}; choose accept, retry, or skip"
-            )
-        else:
-            self._message = "trial complete; choose accept, retry, or skip"
+        self._message = "trial complete; choose accept, retry, or skip"
         self._finish_capture_locked("pending_review", now)
 
     def _confirm_action_locked(self) -> None:
@@ -543,9 +462,6 @@ class SessionController:
         self._attempt_status = None
         self._action_confirmed = False
         self._action_confirmed_monotonic_ns = None
-        self._scenario_recognizer = None
-        self._scenario_recognition = None
-        self._last_recognition_event_key = None
 
     def _skip_locked(self) -> None:
         if self._state not in (SessionState.READY, SessionState.REVIEW):
@@ -568,9 +484,6 @@ class SessionController:
         self._attempt_status = None
         self._action_confirmed = False
         self._action_confirmed_monotonic_ns = None
-        self._scenario_recognizer = None
-        self._scenario_recognition = None
-        self._last_recognition_event_key = None
         if self._trial_index >= len(self.protocol.trials):
             self._complete_locked("protocol complete")
         else:
@@ -627,10 +540,6 @@ class SessionController:
                 if updates["reference_truth"] and self._current_trial is not None
                 else None
             )
-        if self._scenario_recognition is not None:
-            updates.setdefault(
-                "scenario_recognition", self._scenario_recognition.to_payload()
-            )
         if self._capture is None:
             if self._last_capture is not None and self._attempt_status == "pending_review":
                 self._last_capture.update_status(
@@ -665,46 +574,6 @@ class SessionController:
         self._attempt_telemetry_start = None
         self._attempt_status = status
 
-    def _finalize_scenario_locked(self) -> None:
-        if self._scenario_recognizer is None:
-            return
-        result = self._scenario_recognizer.finalize_timeout()
-        self._set_scenario_recognition_locked(result)
-
-    def _set_scenario_recognition_locked(
-        self, result: ScenarioRecognition
-    ) -> None:
-        previous = self._scenario_recognition
-        self._scenario_recognition = result
-        key = (result.status.value, result.observed_steps)
-        if key == self._last_recognition_event_key:
-            return
-        self._last_recognition_event_key = key
-        if self._store is not None and self._current_trial is not None:
-            self._store.event(
-                "scenario_recognition",
-                self._monotonic_ns(),
-                trial_ordinal=self._current_trial.ordinal,
-                attempt=self._attempt_number,
-                status=result.status.value,
-                observed_steps=list(result.observed_steps),
-                message=result.message,
-            )
-        if (
-            previous is not None
-            and result.status is ScenarioRecognitionStatus.COMPLETED
-            and self._store is not None
-        ):
-            self._store.event(
-                "scenario_completed",
-                self._monotonic_ns(),
-                trial_ordinal=self._current_trial.ordinal
-                if self._current_trial is not None
-                else None,
-                attempt=self._attempt_number,
-                completed_at_s=result.completed_at_s,
-            )
-
     def _notify_locked(self) -> SessionSnapshot:
         snapshot = self._snapshot_locked()
         for callback in tuple(self._subscribers):
@@ -731,5 +600,4 @@ class SessionController:
             message=self._message,
             attempt_status=self._attempt_status,
             action_confirmed=self._action_confirmed,
-            scenario_recognition=self._scenario_recognition,
         )

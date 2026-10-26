@@ -39,5 +39,5 @@ receivers/<receiver-id>/usb_clock_sync.csv
 ```
 
 The session manifest records the inventory, selected profile, fingerprint,
-firmware targets, USB bindings, and reconnection events. Camera, pose, and MR60
-data are not part of this collection path.
+firmware targets, USB bindings, and reconnection events. Only CSI, timing, and
+clock-sync data are part of this collection path.

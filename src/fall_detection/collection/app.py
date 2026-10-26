@@ -6,13 +6,10 @@ import argparse
 from collections import deque
 import os
 from pathlib import Path
-import queue
 import sys
-import threading
 import time
 from typing import Any, Sequence
 
-from .camera import CameraCaptureWorker, CameraFrame
 from .capture import SessionMetadata
 from .controller import (
     HealthSnapshot,
@@ -29,12 +26,9 @@ from ..radio.acquisition.usb_reader import UsbReceiverManager
 from ..radio.profile import RadioProfileError, load_inventory_and_profile
 from ..radio.provisioning import ProvisioningError, configure_connected_devices
 from ..radio.visualization.widget import CsiDashboardWidget
-from ..vision.scenarios import ScenarioCompletionConfig, ScenarioRecognitionStatus
 
 
 DEFAULT_PROTOCOL = Path("configs/collection/fall_v1.json")
-DEFAULT_MODEL = Path("data/models/yolo/yolo26n-pose_ncnn_model")
-DEFAULT_RULES = Path("configs/vision/rule_based_fall.toml")
 COLLECTOR_FPS_CHOICES = (16, 24)
 COLLECTOR_FPS_DEFAULT = 24
 
@@ -50,10 +44,6 @@ COLLECTOR_UI_INTERVAL_MS = frame_interval_ms(COLLECTOR_FPS_DEFAULT)
 COLLECTOR_RADIO_REFRESH_MS = COLLECTOR_UI_INTERVAL_MS
 COLLECTOR_RADIO_PREVIEW_SECONDS = 3.0
 COLLECTOR_RADIO_PREVIEW_POINTS = 90
-
-
-def _source(value: str) -> int | str:
-    return int(value) if value.isdecimal() else value
 
 
 def _format_radio_metrics(reader: Any, nominal_rate_hz: int) -> str:
@@ -100,29 +90,6 @@ def _format_radio_metrics(reader: Any, nominal_rate_hz: int) -> str:
     )
 
 
-class _RadioStartupGate:
-    """Start radio acquisition once the camera proves inference is ready."""
-
-    def __init__(self, camera: Any | None, reader: Any) -> None:
-        self.camera = camera
-        self.reader = reader
-        self.started = False
-
-    def poll(self) -> bool:
-        """Start the radio exactly once after the first camera inference."""
-
-        if not self.started and (self.camera is None or self.camera.ready):
-            self.reader.start()
-            self.started = True
-        return self.started
-
-    def stop(self) -> None:
-        """Stop the radio only if acquisition was started."""
-
-        if self.started:
-            self.reader.stop()
-
-
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Guide and record operator-confirmed USB radio collection trials."
@@ -144,27 +111,6 @@ def _parser() -> argparse.ArgumentParser:
         default=False,
         help="require operator confirmation during ACTION before recovery",
     )
-    parser.add_argument(
-        "--camera-source",
-        default="0",
-        help="camera index, V4L2 path (for example /dev/video2), or stream URL",
-    )
-    parser.add_argument(
-        "--camera-backend",
-        choices=("auto", "v4l2"),
-        default="auto",
-        help="OpenCV capture backend; use v4l2 for a USB webcam on Linux",
-    )
-    parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
-    parser.add_argument("--camera-config", type=Path, default=DEFAULT_RULES)
-    parser.add_argument(
-        "--scenario-auto-finish",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="finish ACTION early when the expected pose transition is detected",
-    )
-    parser.add_argument("--device", default="cpu")
-    parser.add_argument("--imgsz", type=int, default=320)
     parser.add_argument("--output-dir", type=Path, default=Path("data/raw/sessions"))
     parser.add_argument(
         "--fps",
@@ -227,24 +173,6 @@ class _MetadataDialog:
         )
 
 
-def _frame_to_pixmap(frame: CameraFrame, QtGui: Any, cv2: Any) -> Any:
-    image = frame.display_frame
-    if image is None:
-        image = frame.frame
-    if image is None:
-        return None
-    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    height, width, channels = rgb.shape
-    qimage = QtGui.QImage(
-        rgb.data,
-        width,
-        height,
-        channels * width,
-        QtGui.QImage.Format.Format_RGB888,
-    ).copy()
-    return QtGui.QPixmap.fromImage(qimage)
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the operator and performer collection windows."""
 
@@ -270,9 +198,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not profile_mode and args.transport == "udp" and args.port:
         _parser().error("--port cannot be used with --transport udp")
     try:
-        from PySide6 import QtCore, QtGui, QtWidgets
+        from PySide6 import QtCore, QtWidgets
     except ImportError as exc:
-        print("Install collection dependencies with: uv sync --extra radio --extra vision", file=sys.stderr)
+        print("Install collection dependencies with: uv sync --extra radio", file=sys.stderr)
         print(f"Missing GUI dependency: {exc}", file=sys.stderr)
         return 2
 
@@ -281,15 +209,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ProtocolError as exc:
         print(f"Invalid collection protocol: {exc}", file=sys.stderr)
         return 2
-    if profile_mode:
-        scenario_config = ScenarioCompletionConfig()
-    else:
-        try:
-            scenario_config = ScenarioCompletionConfig.from_toml(args.camera_config)
-        except (OSError, ValueError) as exc:
-            print(f"Invalid camera configuration: {exc}", file=sys.stderr)
-            return 2
-
     app = QtWidgets.QApplication(list(sys.argv))
     metadata = _MetadataDialog(QtWidgets).get()
     if metadata is None:
@@ -317,14 +236,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             "listen_host": args.listen_host,
             "listen_port": args.listen_port,
             "receiver_mac": args.receiver_mac,
-            "camera_enabled": not profile_mode,
-            "camera_source": args.camera_source if not profile_mode else None,
-            "camera_backend": args.camera_backend if not profile_mode else None,
-            "model": str(args.model) if not profile_mode else None,
-            "camera_config": str(args.camera_config) if not profile_mode else None,
-            "scenario_auto_finish": args.scenario_auto_finish,
-            "device": args.device,
-            "imgsz": args.imgsz,
             "nominal_rate_hz": nominal_rate_hz,
             "receiver_ids": (
                 {device.mac: device.id for device in inventory.receivers}
@@ -340,52 +251,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             "radio_profile_fingerprint": profile_fingerprint if profile_mode else None,
         },
-        scenario_config=scenario_config,
-        scenario_auto_finish=args.scenario_auto_finish and not profile_mode,
         telemetry_provider=telemetry_provider,
         manual_confirmation_required=args.manual_confirmation or profile_mode,
-        camera_enabled=not profile_mode,
     )
-    frame_queue: queue.Queue[CameraFrame] = queue.Queue(maxsize=2)
-    health_lock = threading.Lock()
-    camera_live = profile_mode
-    camera_detail = "camera comparator disabled; CSI is the primary detector" if profile_mode else "waiting for camera"
-    last_camera_frame = 0.0
-
-    def camera_health(live: bool, detail: str) -> None:
-        nonlocal camera_live, camera_detail
-        with health_lock:
-            camera_live = live
-            camera_detail = detail
-
-    def camera_frame(frame: CameraFrame) -> None:
-        nonlocal last_camera_frame
-        controller.write_camera_frame(frame)
-        last_camera_frame = time.monotonic()
-        try:
-            frame_queue.put_nowait(frame)
-        except queue.Full:
-            try:
-                frame_queue.get_nowait()
-            except queue.Empty:
-                pass
-            try:
-                frame_queue.put_nowait(frame)
-            except queue.Full:
-                pass
-
-    camera = None
-    if not profile_mode:
-        camera = CameraCaptureWorker(
-            _source(args.camera_source),
-            args.model,
-            args.camera_config,
-            camera_backend=args.camera_backend,
-            device=args.device,
-            image_size=args.imgsz,
-            on_frame=camera_frame,
-            on_health=camera_health,
-        )
 
     reader_status = deque(maxlen=20)
 
@@ -527,21 +395,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     content.addLayout(left, 1)
 
     right = QtWidgets.QVBoxLayout()
-    camera_preview = QtWidgets.QLabel(
-        "camera comparator disabled — CSI is the primary detector"
-        if profile_mode
-        else "camera preview unavailable"
-    )
-    camera_preview.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-    camera_preview.setMinimumSize(420, 260)
-    camera_preview.setStyleSheet("background: #20242a; color: #e8eef5;")
-    right.addWidget(camera_preview, 1)
-    metrics_label = QtWidgets.QLabel("CSI records: 0")
-    metrics_label.setWordWrap(True)
-    right.addWidget(metrics_label)
-    recognition_label = QtWidgets.QLabel("Scenario recognition: waiting for trial")
-    recognition_label.setWordWrap(True)
-    right.addWidget(recognition_label)
     csi_dashboard = None
     try:
         csi_dashboard = CsiDashboardWidget(
@@ -551,7 +404,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         right.addWidget(csi_dashboard.widget, 1)
     except ImportError:
-        right.addWidget(QtWidgets.QLabel("Install pyqtgraph for live CSI plots."))
+        right.addWidget(QtWidgets.QLabel("Install pyqtgraph for live CSI plots."), 1)
+    metrics_label = QtWidgets.QLabel("CSI records: 0")
+    metrics_label.setWordWrap(True)
+    right.addWidget(metrics_label)
     content.addLayout(right, 2)
     layout.addLayout(content, 1)
 
@@ -599,31 +455,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         button.clicked.connect(lambda _checked=False, c=command: dispatch(c))
 
     def update_view() -> None:
-        nonlocal last_camera_frame
         now = time.monotonic()
-        try:
-            radio_startup.poll()
-        except Exception as exc:
-            radio_status(f"USB receiver discovery failed: {exc}", False)
-        with health_lock:
-            current_camera_live = (
-                True
-                if profile_mode
-                else camera_live and now - last_camera_frame < 2.5
-            )
-            current_camera_detail = camera_detail
         radio_last = getattr(reader, "last_valid_time", None)
         radio_live = radio_last is not None and now - radio_last < 2.5
         if reader_status:
             radio_detail = reader_status[0][0]
-        elif not radio_startup.started:
+        else:
             radio_detail = (
                 "waiting for USB receiver stream"
                 if profile_mode
-                else "waiting for first camera inference"
+                else "waiting for radio"
             )
-        else:
-            radio_detail = "waiting for radio"
         clock_ready = (
             reader.clock_sync_ready
             if profile_mode
@@ -636,13 +478,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         controller.update_health(
             HealthSnapshot(
                 radio_live=radio_live,
-                camera_live=current_camera_live,
                 storage_ready=os.access(args.output_dir.parent, os.W_OK)
                 if args.output_dir.parent.exists()
                 else True,
                 clock_sync_ready=clock_ready,
                 radio_detail=radio_detail,
-                camera_detail=current_camera_detail,
                 storage_detail="output directory is not writable"
                 if not os.access(args.output_dir.parent, os.W_OK)
                 and args.output_dir.parent.exists()
@@ -653,32 +493,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         state_label.setText(snapshot.state.value.upper())
         progress_label.setText(snapshot.progress_text)
         message_label.setText(snapshot.message)
-        recognition = snapshot.scenario_recognition
-        if recognition is None:
-            recognition_label.setText("Scenario recognition: waiting for trial")
-            recognition_label.setStyleSheet("")
-        else:
-            recognition_label.setText(
-                "Scenario recognition: "
-                f"{recognition.status.value} — {recognition.message}"
-            )
-            if recognition.status in (
-                ScenarioRecognitionStatus.NOT_DETECTED,
-                ScenarioRecognitionStatus.UNCERTAIN,
-            ):
-                recognition_label.setStyleSheet("color: #b42318; font-weight: bold;")
-            elif recognition.status is ScenarioRecognitionStatus.COMPLETED:
-                recognition_label.setStyleSheet("color: #067647; font-weight: bold;")
-            else:
-                recognition_label.setStyleSheet("")
         health_label.setText(
             f"radio={'ok' if snapshot.health.radio_live else 'offline'} | "
-            + (
-                "camera=disabled | "
-                if profile_mode
-                else f"camera={'ok' if snapshot.health.camera_live else 'offline'} | "
-            )
-            + f"sync={'ok' if snapshot.health.clock_sync_ready else 'warming'}"
+            f"sync={'ok' if snapshot.health.clock_sync_ready else 'warming'}"
         )
         if snapshot.trial is not None:
             trial_list.setCurrentRow(snapshot.trial_index)
@@ -687,8 +504,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             OperatorCommand.START_TRIAL: snapshot.state is SessionState.READY
             and snapshot.health.radio_live
             and snapshot.health.storage_ready
-            and snapshot.health.clock_sync_ready
-            and (profile_mode or snapshot.health.camera_live),
+            and snapshot.health.clock_sync_ready,
             OperatorCommand.CONFIRM_ACTION: snapshot.state is SessionState.ACTION
             and not snapshot.action_confirmed,
             OperatorCommand.ABORT: snapshot.state in active_states,
@@ -726,31 +542,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             performer_instruction.setText("Wait for the operator.")
             performer_timer.setText("")
 
-        try:
-            frame = frame_queue.get_nowait()
-        except queue.Empty:
-            frame = None
-        if frame is not None:
-            try:
-                import cv2
-
-                pixmap = _frame_to_pixmap(frame, QtGui, cv2)
-                if pixmap is not None:
-                    camera_preview.setPixmap(
-                        pixmap.scaled(
-                            camera_preview.size(),
-                            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                            QtCore.Qt.TransformationMode.SmoothTransformation,
-                        )
-                    )
-            except ImportError:
-                pass
         metrics_label.setText(_format_radio_metrics(reader, nominal_rate_hz))
 
     controller.start_session(metadata)
-    radio_startup = _RadioStartupGate(camera, reader)
-    if camera is not None:
-        camera.start()
+    reader.start()
     ui_interval_ms = frame_interval_ms(args.fps)
     timer = QtCore.QTimer()
     timer.setTimerType(QtCore.Qt.TimerType.PreciseTimer)
@@ -771,9 +566,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 controller.dispatch(OperatorCommand.END_SESSION)
             except RuntimeError:
                 pass
-        radio_startup.stop()
-        if camera is not None:
-            camera.stop()
+        reader.stop()
 
     app.aboutToQuit.connect(close)
     operator.show()

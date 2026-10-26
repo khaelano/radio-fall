@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import csv
 import json
 from pathlib import Path
 import re
 from threading import RLock
-from typing import Any, Optional, Protocol
+from typing import Any
 
 from ..radio.acquisition.clock_sync import ClockSyncEstimate, ClockSyncSample
 from ..radio.acquisition.protocol import CSI_HEADER, CsiRecord, format_csi_record
@@ -25,17 +24,6 @@ CLOCK_SYNC_HEADER = (
     "tx_t1_us,rx_t2_us,rx_t3_us,tx_t4_us,rx_radio_t2_us,tx_radio_t4_us,"
     "round_trip_us,receiver_minus_transmitter_us,drift_ppm,uncertainty_us"
 )
-
-
-class CameraFrameLike(Protocol):
-    """Minimum frame shape accepted by :class:`TrialCapture`."""
-
-    timestamp_ns: int
-    frame: Any
-    detector_state: str
-    proposal: Optional[dict[str, Any]]
-    pose: Optional[dict[str, Any]]
-    activity: Any
 
 
 def _slug(value: str) -> str:
@@ -60,7 +48,6 @@ class TrialCapture:
         path: Path,
         initial_metadata: dict[str, Any],
         *,
-        camera_enabled: bool = True,
         receiver_ids: dict[str, str] | None = None,
     ) -> None:
         self.path = path
@@ -73,7 +60,6 @@ class TrialCapture:
         self._metadata.setdefault("artifact_schema_version", self._schema_version)
         self._metadata["status"] = "recording"
         _write_json(self.path / "attempt.json", self._metadata)
-        self.camera_enabled = camera_enabled
         self.receiver_ids = dict(receiver_ids or {})
         self._csi = None
         self._timing = None
@@ -104,36 +90,10 @@ class TrialCapture:
                 timing_file.write(TIMING_HEADER + "\n")
                 clock_path.write_text(CLOCK_SYNC_HEADER + "\n", encoding="utf-8")
                 self._receiver_streams[receiver_id] = (csi_file, timing_file)
-        self._frames = (
-            (self.path / "camera_frames.csv").open("w", encoding="utf-8", newline="")
-            if camera_enabled
-            else None
-        )
-        self._poses = (
-            (self.path / "poses.jsonl").open("w", encoding="utf-8")
-            if camera_enabled
-            else None
-        )
         if self._csi is not None:
             self._csi.write(CSI_HEADER + "\n")
             self._timing.write(TIMING_HEADER + "\n")
             self._clock.write(CLOCK_SYNC_HEADER + "\n")
-        if self._frames is not None:
-            csv.writer(self._frames).writerow(
-                (
-                    "frame_index",
-                    "timestamp_ns",
-                    "detector_state",
-                    "proposal",
-                    "activity",
-                )
-            )
-        self._video: Any = None
-        self._video_shape: tuple[int, int] | None = None
-        self._frame_index = 0
-        if camera_enabled:
-            # A partial file is useful evidence after an interrupted attempt.
-            (self.path / "camera.mp4").touch()
 
     def write_radio(self, record: CsiRecord, host_receive_monotonic_ns: int) -> None:
         """Append one decoded radio record and its timing sidecar row."""
@@ -196,88 +156,11 @@ class TrialCapture:
                     f"{estimate.drift_ppm:.6f},{estimate.uncertainty_us:.6f}\n"
                 )
 
-    def write_camera_frame(self, frame: CameraFrameLike) -> None:
-        """Append a frame, exact host timestamp, and pose/proposal data."""
-
-        with self._lock:
-            if not self.camera_enabled or self._frames is None or self._poses is None:
-                return
-            image = frame.frame
-            if image is not None:
-                self._ensure_video_writer(image)
-                if self._video is not None:
-                    self._video.write(image)
-            proposal = frame.proposal or {}
-            activity = getattr(frame, "activity", None)
-            if activity is None:
-                activity_payload: dict[str, Any] = {}
-            elif hasattr(activity, "to_payload"):
-                activity_payload = activity.to_payload()
-            elif isinstance(activity, dict):
-                activity_payload = activity
-            else:
-                activity_payload = {"value": str(activity)}
-            csv.writer(self._frames).writerow(
-                (
-                    self._frame_index,
-                    frame.timestamp_ns,
-                    frame.detector_state,
-                    json.dumps(proposal, sort_keys=True, separators=(",", ":")),
-                    json.dumps(
-                        activity_payload,
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    ),
-                )
-            )
-            if frame.pose is not None:
-                self._poses.write(
-                    json.dumps(
-                        {"frame_index": self._frame_index, **frame.pose},
-                        sort_keys=True,
-                    )
-                    + "\n"
-                )
-            self._frame_index += 1
-
-    def _ensure_video_writer(self, image: Any) -> None:
-        if self._video is not None:
-            return
-        shape = getattr(image, "shape", None)
-        if shape is None or len(shape) < 2:
-            return
-        height, width = int(shape[0]), int(shape[1])
-        try:
-            import cv2
-        except ImportError:
-            return
-        writer = cv2.VideoWriter(
-            str(self.path / "camera.mp4"),
-            cv2.VideoWriter_fourcc(*"mp4v"),
-            30.0,
-            (width, height),
-        )
-        if not writer.isOpened():
-            writer.release()
-            return
-        self._video = writer
-        self._video_shape = (width, height)
-
-    @property
-    def frame_count(self) -> int:
-        """Return the number of camera frames written so far."""
-
-        with self._lock:
-            return self._frame_index
-
     def finish(self, status: str, **updates: Any) -> dict[str, Any]:
         """Close all streams and atomically publish final attempt metadata."""
 
         with self._lock:
-            if self._video is not None:
-                self._video.release()
-                self._video = None
-            for stream in (self._csi, self._timing, self._clock, self._frames, self._poses):
+            for stream in (self._csi, self._timing, self._clock):
                 if stream is not None:
                     stream.flush()
                     stream.close()
@@ -288,7 +171,6 @@ class TrialCapture:
                 timing_file.close()
             self._metadata.update(updates)
             self._metadata["status"] = status
-            self._metadata["camera_frame_count"] = self._frame_index
             _write_json(self.path / "attempt.json", self._metadata)
             return dict(self._metadata)
 
@@ -389,12 +271,10 @@ class SessionArtifactStore:
             attempt=attempt_number,
         )
         environment = self._session.get("environment", {})
-        camera_enabled = bool(environment.get("camera_enabled", True))
         receiver_ids = environment.get("receiver_ids", {})
         return TrialCapture(
             attempt_dir,
             metadata,
-            camera_enabled=camera_enabled,
             receiver_ids=receiver_ids if isinstance(receiver_ids, dict) else None,
         )
 

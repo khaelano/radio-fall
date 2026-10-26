@@ -2,15 +2,15 @@
 
 ## Project Overview
 
-This repository supports a bachelor's thesis on fall detection using WiFi channel state information. The radio system is the primary detector; a camera-based system serves as a comparator and proposes labels for recorded sessions.
+This repository supports a bachelor's thesis on fall detection using WiFi channel state information recorded with ESP32-C5 radios.
 
 ## Project Structure & Module Organization
 
 Current layout:
 
-- `src/fall_detection/` — Python package for shared contracts, radio processing, the vision comparator, synchronized collection, and evaluation
+- `src/fall_detection/` — Python package for shared contracts, radio processing, synchronized collection, and evaluation
 - `src/firmware/radio/` — ESP-IDF transmitter and receiver projects
-- `configs/` — versioned collection, radio, vision, and experiment settings
+- `configs/` — versioned collection, radio, and experiment settings
 - `notebooks/` — exploratory analysis and experiment notebooks, numbered sequentially (e.g., `01_data_exploration.ipynb`)
 - `tests/` — unit tests mirroring the research modules under `src/fall_detection/`
 - `data/` — raw recordings, derived datasets, annotations, and dataset splits; never commit large data files
@@ -55,7 +55,7 @@ The literature library lives in `Resources/Papers/` with a metadata catalog at `
 
 No build system exists yet. When code lands, prefer:
 
-- `uv sync --all-extras` — create or update the environment with radio, vision, and development dependencies
+- `uv sync --extra radio` — create or update the environment with radio and development dependencies
 - `uv run pytest` — run all tests from the repository root
 - `uv run jupyter nbconvert --to notebook --execute --inplace notebooks/<name>.ipynb` — verify a notebook executes end-to-end
 

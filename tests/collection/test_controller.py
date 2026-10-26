@@ -62,7 +62,6 @@ class FakeClock:
 def ready_health() -> HealthSnapshot:
     return HealthSnapshot(
         radio_live=True,
-        camera_live=True,
         storage_ready=True,
         clock_sync_ready=True,
     )
@@ -125,7 +124,6 @@ def test_lost_input_marks_attempt_invalid_and_retry_gets_new_number(tmp_path: Pa
     controller.update_health(
         HealthSnapshot(
             radio_live=False,
-            camera_live=True,
             radio_detail="radio disconnected",
         )
     )
@@ -147,7 +145,7 @@ def test_invalid_attempt_cannot_be_accepted(tmp_path: Path):
     controller = make_controller(tmp_path, clock)
     start_ready(controller)
     controller.dispatch(OperatorCommand.START_TRIAL)
-    controller.update_health(HealthSnapshot(camera_live=False))
+    controller.update_health(HealthSnapshot(radio_live=False))
 
     with pytest.raises(RuntimeError, match="cannot be accepted"):
         controller.dispatch(OperatorCommand.ACCEPT)

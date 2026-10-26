@@ -28,7 +28,7 @@ Tabel 3.1. Peralatan penelitian.
 
 | Kelompok | Komponen | Fungsi dan konfigurasi awal |
 | --- | --- | --- |
-| Perangkat keras | Satu ESP32 sebagai pemancar WiFi (Tx) | Mengirim paket *ping* UDP pada pita 2,4 GHz dengan laju sasaran 100 paket per detik. |
+| Perangkat keras | Satu ESP32 sebagai pemancar WiFi (Tx) | Mengirim frame ESP-NOW siaran (*broadcast*) dengan WiFi 6 (802.11ax) HE20, MCS0, dan *guard interval* panjang pada pita 2,4 GHz atau 5 GHz, dengan laju sasaran 100 paket per detik. |
 | Perangkat keras | Dua ESP32 sebagai Rx-1 dan Rx-2 | Merekam CSI dari paket yang diterima pada dua posisi pengamatan. Kedua papan menggunakan tipe dan versi firmware yang sama. |
 | Perangkat keras | MR60FDA2 | Memberikan keluaran deteksi pembanding dan membantu pemeriksaan waktu kejadian. Keluarannya disimpan terpisah dari label acuan. |
 | Perangkat keras | Komputer | Menyimpan data mentah, menjalankan prapemrosesan, melatih model, dan menghitung hasil evaluasi. |
@@ -41,7 +41,7 @@ Tabel 3.1. Peralatan penelitian.
 
 ### 3.5.1. Gambaran Umum Sistem
 
-Pemancar mengirim paket WiFi selama partisipan melakukan aktivitas di area peragaan. Rx-1 dan Rx-2 merekam CSI dari setiap paket yang diterima, lalu mengirimkan hasil akuisisi ke komputer melalui sambungan serial. Komputer menyimpan keluaran setiap penerima dalam berkas terpisah dengan identitas sesi yang sama. MR60FDA2 merekam keluaran deteksi dan waktu kejadian sebagai data pembanding.
+Pemancar mengirim paket WiFi selama partisipan melakukan aktivitas di area peragaan. Rx-1 dan Rx-2 merekam CSI dari setiap paket yang diterima, lalu mengirimkan hasil akuisisi ke komputer melalui sambungan serial USB. Komputer menyimpan keluaran setiap penerima dalam berkas terpisah dengan identitas sesi yang sama. MR60FDA2 merekam keluaran deteksi dan waktu kejadian sebagai data pembanding.
 
 Pengembangan model dan penggunaan model dipisahkan. Pada tahap pengembangan, data latih dan validasi digunakan untuk menetapkan prapemrosesan, fitur, serta parameter model. Pada tahap pengujian, konfigurasi tersebut dikunci dan diterapkan pada data uji tanpa penyetelan ulang. Model fase relatif dan model amplitudo mengikuti prosedur yang sama, tetapi menggunakan representasi CSI yang berbeda.
 
@@ -53,7 +53,7 @@ Gambar 3.1 menunjukkan tampilan aksonometrik penempatan perangkat. Pemancar dite
 
 Ketiga ESP32 dipasang pada ketinggian 2,7 m dari lantai dengan antena menghadap ke area aktivitas. Jarak perangkat dari sudut atau titik tengah dinding diukur dan ditandai agar pemasangan dapat diulang. MR60FDA2 dipasang pada salah satu sisi ruangan pada ketinggian 1,5 m dan diarahkan ke pusat matras. Komputer ditempatkan di luar area peragaan.
 
-Jaringan menggunakan WiFi 2,4 GHz, lebar kanal 20 MHz, dan kanal 6. Pemancar mengirim paket dengan laju sasaran 100 paket per detik. Kanal, laju paket, posisi, orientasi, dan catu daya perangkat dipertahankan selama pengambilan data utama. Kinerja penerimaan kedua ESP32 diperiksa sebelum setiap sesi melalui rekaman kondisi kosong selama 30 detik.
+Jaringan menggunakan WiFi 6 (802.11ax) dengan lebar kanal 20 MHz (HE20), skema modulasi dan pengodean MCS0, serta *guard interval* panjang. Sesi utama dijalankan pada pita 2,4 GHz kanal 6 atau pita 5 GHz kanal 36, dan pita yang dipakai dicatat pada log sesi. Nilai CSI hanya diambil dari *HE-LTF* pada frame *single-user*, sehingga konfigurasi fisik yang berlaku sama pada kedua pita. Pita, kanal, laju paket, posisi, orientasi, dan catu daya perangkat dipertahankan selama pengambilan data utama. Kinerja penerimaan kedua ESP32 diperiksa sebelum setiap sesi melalui rekaman kondisi kosong selama 30 detik.
 
 ### 3.5.3. Perancangan Pengolahan Data CSI
 

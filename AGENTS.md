@@ -2,16 +2,18 @@
 
 ## Project Overview
 
-This repository supports a bachelor's thesis on fall detection for persons using radio waves (e.g., WiFi channel state information, radar, or ultra-wideband sensing). The project is in its early stages: the repository is currently empty and not yet initialized as a Git repository. These guidelines define how contributions should be organized once development begins.
+This repository supports a bachelor's thesis on fall detection using WiFi channel state information. The radio system is the primary detector; a camera-based system serves as a comparator and proposes labels for recorded sessions.
 
 ## Project Structure & Module Organization
 
-Planned layout:
+Current layout:
 
-- `src/` — Python package containing signal preprocessing, feature extraction, and machine learning models
+- `src/fall_detection/` — Python package for shared contracts, radio processing, the vision comparator, synchronized collection, and evaluation
+- `src/firmware/radio/` — ESP-IDF transmitter and receiver projects
+- `configs/` — versioned collection, radio, vision, and experiment settings
 - `notebooks/` — exploratory analysis and experiment notebooks, numbered sequentially (e.g., `01_data_exploration.ipynb`)
-- `tests/` — unit tests mirroring the `src/` package structure
-- `data/` — raw and processed datasets; never commit large data files (add to `.gitignore`)
+- `tests/` — unit tests mirroring the research modules under `src/fall_detection/`
+- `data/` — raw recordings, derived datasets, annotations, and dataset splits; never commit large data files
 - `draft/` — thesis chapter drafts and other text intended to become part of the final thesis
 - `docs/` — supporting notes, literature documentation, procedures, and figures
 - `Resources/Papers/` — literature library: raw PDFs plus converted Markdown in `Resources/Papers/md/`
@@ -53,9 +55,8 @@ The literature library lives in `Resources/Papers/` with a metadata catalog at `
 
 No build system exists yet. When code lands, prefer:
 
-- `python -m venv .venv` — create a virtual environment
-- `uv pip install -e ".[dev]"` — install the package with development dependencies
-- `pytest` — run all tests from the repository root
+- `uv sync --all-extras` — create or update the environment with radio, vision, and development dependencies
+- `uv run pytest` — run all tests from the repository root
 - `uv run jupyter nbconvert --to notebook --execute --inplace notebooks/<name>.ipynb` — verify a notebook executes end-to-end
 
 ## Coding Style & Naming Conventions
@@ -72,7 +73,7 @@ No build system exists yet. When code lands, prefer:
 
 ## Commit & Pull Request Guidelines
 
-- No Git history exists yet; initialize the repository with `git init` and keep commits small and focused.
+- Keep commits small and focused.
 - Use Conventional Commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`.
 - Pull requests must describe the approach and results, link any related issue, and include relevant plots or metrics for model changes.
 

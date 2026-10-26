@@ -12,10 +12,14 @@ __pycache__/
 **/.venv/
 **/__pycache__/
 **/.pytest_cache/
-src/processor/*.egg-info/
+src/*.egg-info/
 
 # Local CSI captures (raw data is intentionally not versioned)
 data/raw/
+data/experiments/
+data/interim/
+data/models/
+data/processed/
 
 # Codex local build and validation artifacts
 .codex-build/
@@ -24,3 +28,6 @@ data/raw/
 # Re-include files ignored by the global gitignore (/home/khaelano/.gitignore)
 !AGENTS.md
 !docs/
+
+# ESP-IDF alternate build trees (build-c5, build-c6, ...)
+**/build-*/

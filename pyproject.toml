@@ -26,6 +26,7 @@ csi-radio-discover = "fall_detection.radio.provisioning:discover"
 csi-radio-provision = "fall_detection.radio.provisioning:provision"
 csi-experiment = "fall_detection.radio.experiments.transport:main"
 fall-collection = "fall_detection.collection.app:main"
+fall-session-inspector = "fall_detection.session_inspector.app:main"
 
 [dependency-groups]
 dev = [

@@ -44,7 +44,7 @@
 #endif
 
 #define MAX_CSI_BYTES 612
-#define CSI_QUEUE_LENGTH 32
+#define CSI_QUEUE_LENGTH 128
 #define CSI_WIRE_MAGIC "CSI1"
 #define CSI_WIRE_VERSION 3
 #define CSI_WIRE_HEADER_SIZE 87
@@ -159,10 +159,14 @@ typedef struct {
     uint32_t decode_fail;
     uint32_t fingerprint_mismatch;
     uint32_t empty_csi;
+    uint32_t duplicate_frames;
     uint32_t queued;
 } csi_diag_t;
 
 static csi_diag_t s_csi_diag;
+static uint32_t s_last_sensing_sequence;
+static uint64_t s_last_sensing_us;
+static bool s_last_sensing_valid;
 static uint32_t s_synthetic_sequence;
 
 typedef struct {
@@ -871,6 +875,18 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
     }
 
     if (decoded) {
+        /* The radio reports each PPDU through several CSI callbacks, spread
+         * over more than a millisecond.  Only the first observation of a
+         * sensing sequence is enqueued: enqueueing the rest doubles or triples
+         * the queue pressure and makes the sender drop records it cannot
+         * drain. */
+        if (s_last_sensing_valid &&
+            sensing.sequence == s_last_sensing_sequence) {
+            stats_add(&s_csi_diag.duplicate_frames, 1);
+            return;
+        }
+        s_last_sensing_sequence = sensing.sequence;
+        s_last_sensing_valid = true;
         record.sequence = sensing.sequence;
         record.tx_timestamp_us = sensing.tx_t1_us;
         record.clock_timestamps_valid = true;

@@ -198,7 +198,10 @@ class BinaryCsiPacketReader:
             # holds one row per sensing frame.  Rows without a transmit
             # timestamp (legacy/UDP transports) are never deduplicated.
             if record.tx_timestamp_us:
-                key = (record.sequence, record.tx_timestamp_us)
+                # Include the receiver so two receivers observing the same
+                # transmitted frame can never deduplicate each other, even if
+                # this state were ever shared between readers.
+                key = (record.receiver_mac, record.sequence, record.tx_timestamp_us)
                 if key in self._recent_key_set:
                     self.duplicate_records += 1
                     continue

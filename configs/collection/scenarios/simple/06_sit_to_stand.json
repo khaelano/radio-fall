@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "family_id": "sit-to-stand",
+  "title": "Sit to stand",
+  "activity_label": "sit_to_stand",
+  "instruction_template": "Start seated facing {start_direction}, then stand naturally without changing the requested orientation.",
+  "start_directions": [
+    "front",
+    "left",
+    "right",
+    "back"
+  ],
+  "repetitions": 2,
+  "direction_frame": "participant_relative",
+  "safety_note": "Use a stable chair and keep a spotter nearby; stand only when balanced."
+}

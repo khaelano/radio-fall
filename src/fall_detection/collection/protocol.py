@@ -7,7 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 
 class ProtocolError(ValueError):
@@ -394,6 +394,83 @@ def load_protocol(path: Path) -> CollectionProtocol:
 
     source = _read_json(path, "protocol")
     return _load_source(source, base_dir=path.parent)
+
+
+def _scenario_source(scenario: Scenario) -> dict[str, Any]:
+    """Render one scenario back into the protocol JSON schema."""
+
+    return {
+        "id": scenario.id,
+        "activity_label": scenario.activity_label,
+        "title": scenario.title,
+        "instruction": scenario.instruction,
+        "repetitions": scenario.repetitions,
+        "countdown_seconds": scenario.countdown_seconds,
+        "action_seconds": scenario.action_seconds,
+        "recovery_seconds": scenario.recovery_seconds,
+        "attributes": dict(scenario.attributes),
+    }
+
+
+def select_blocks(
+    protocol: CollectionProtocol,
+    block_ids: Iterable[str],
+) -> CollectionProtocol:
+    """Restrict a protocol to the selected scenario blocks.
+
+    The operator picks which activities a session covers before it starts, so a
+    576-trial protocol does not have to run in one sitting.  Trials are renumbered
+    from one and keep their original block order, and the resolved source is
+    rewritten so ``protocol.json`` describes exactly the queue that ran.  A
+    selection covering every block returns ``protocol`` unchanged, which keeps
+    the protocol hash stable for full sessions.
+    """
+
+    wanted = tuple(dict.fromkeys(block_ids))
+    if not wanted:
+        raise ProtocolError("select at least one scenario block")
+    available = [block_id for block_id, _title, _scenarios in protocol.blocks]
+    unknown = [block_id for block_id in wanted if block_id not in available]
+    if unknown:
+        raise ProtocolError("unknown scenario block(s): " + ", ".join(sorted(unknown)))
+    if set(wanted) == set(available):
+        return protocol
+
+    selected = tuple(
+        (block_id, title, scenarios)
+        for block_id, title, scenarios in protocol.blocks
+        if block_id in set(wanted)
+    )
+    trials: list[Trial] = []
+    ordinal = 1
+    for _block_id, _title, scenarios in selected:
+        for scenario in scenarios:
+            for repetition in range(1, scenario.repetitions + 1):
+                trials.append(Trial(ordinal, repetition, scenario))
+                ordinal += 1
+
+    source = dict(protocol.source)
+    source["blocks"] = [
+        {
+            "id": block_id,
+            "title": title,
+            "scenarios": [_scenario_source(scenario) for scenario in scenarios],
+        }
+        for block_id, title, scenarios in selected
+    ]
+    canonical = json.dumps(
+        source, sort_keys=True, separators=(",", ":")
+    ).encode()
+    return CollectionProtocol(
+        schema_version=protocol.schema_version,
+        protocol_id=protocol.protocol_id,
+        title=protocol.title,
+        defaults=protocol.defaults,
+        blocks=selected,
+        trials=tuple(trials),
+        source=source,
+        source_hash=hashlib.sha256(canonical).hexdigest(),
+    )
 
 
 def protocol_from_mapping(source: Mapping[str, Any]) -> CollectionProtocol:

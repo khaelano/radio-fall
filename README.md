@@ -68,11 +68,38 @@ uv run fall-collection \
   --radio-profile configs/radio/profiles/indonesia_2g_ch6.json \
   --protocol configs/collection/fall_v1.json \
   --output-dir data/raw/sessions
+
+# Inspect and curate completed sessions without connecting the radios
+uv run fall-session-inspector --sessions-dir data/raw/sessions
 ```
 
 Both applications reconcile the connected boards at startup: if a board is
 still on another band or channel, its profile is applied live (no reflash, no
 reboot) before binding.
+
+The collector uses the same dashboard as `csi-viewer`, wrapped in a collection
+sidebar. The start dialog asks for session metadata and which scenario blocks
+this session covers; the full protocol expands to 576 trials, so a session
+usually selects only the blocks it can finish. The operator then sees the live
+CSI plots, the scenario queue with per-trial progress, the current scenario and
+instruction, the phase countdown, and the collection controls in one window.
+Double-clicking any queued trial — or pressing **Details** on the current one —
+opens a read-only card with its instruction, phase timings, start and end
+direction, safety note, and scenario id.
+A second display shows the full-screen performer guidance.
+
+The separate session inspector scans recorded manifests, then loads CSI and
+timing files only when an attempt is selected. It provides searchable session
+and trial views, interactive signal plots, exact CSV tables, and reviewed
+labels, inclusion, quality, and notes. Review edits are saved to
+`session_review.json`; acquisition manifests and raw CSV files remain
+unchanged. The inspector can also create a portable curated copy that retains
+and flags excluded attempts.
+
+Two protocols are available. `fall_v1.json` samples all eight directions
+(cardinals plus diagonals) for 576 trials; `fall_simple.json` samples only
+front, left, right, and back for 160 trials. Pass either one with
+`--protocol`; see [`configs/collection/README.md`](configs/collection/README.md).
 
 ## Band and channel
 
@@ -113,7 +140,7 @@ See [the firmware notes](src/firmware/radio/README.md) for details.
 ## Tests
 
 ```sh
-uv run pytest -q      # 155 tests
+uv run pytest -q      # run the complete test suite
 ```
 
 ## Known limitations

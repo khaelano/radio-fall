@@ -149,3 +149,32 @@ def test_directional_protocol_has_expected_matrix_size():
     assert [len(block[2]) for block in parsed.blocks] == [64, 24, 64, 64, 64, 8]
     assert len(parsed.trials) == 576
     assert parsed.blocks[-1][2][0].attributes["end_direction"] is None
+
+
+def test_simplified_protocol_uses_four_cardinal_directions():
+    parsed = load_protocol(Path("configs/collection/fall_simple.json"))
+
+    assert [len(block[2]) for block in parsed.blocks] == [16, 12, 16, 16, 16, 4]
+    assert len(parsed.trials) == 160
+    cardinals = {"front", "left", "right", "back"}
+    for _block_id, _title, scenarios in parsed.blocks:
+        for scenario in scenarios:
+            assert scenario.attributes["start_direction"] in cardinals
+            end = scenario.attributes["end_direction"]
+            assert end is None or end in cardinals
+    # Seated backward falls stay out of the simplified protocol.
+    sit_to_fall = parsed.blocks[1][2]
+    assert {scenario.attributes["end_direction"] for scenario in sit_to_fall} == {
+        "front",
+        "left",
+        "right",
+    }
+
+
+def test_simplified_protocol_reuses_family_ids_so_conditions_stay_comparable():
+    full = load_protocol(Path("configs/collection/fall_v1.json"))
+    simple = load_protocol(Path("configs/collection/fall_simple.json"))
+
+    assert [block[0] for block in simple.blocks] == [block[0] for block in full.blocks]
+    assert simple.protocol_id != full.protocol_id
+    assert simple.source_hash != full.source_hash

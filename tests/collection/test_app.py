@@ -3,13 +3,14 @@ from __future__ import annotations
 from fall_detection.collection.app import (
     COLLECTOR_FPS_CHOICES,
     COLLECTOR_FPS_DEFAULT,
-    COLLECTOR_RADIO_PREVIEW_POINTS,
-    COLLECTOR_RADIO_PREVIEW_SECONDS,
-    COLLECTOR_RADIO_REFRESH_MS,
+    COLLECTOR_UI_INTERVAL_MS,
+    COLLECTOR_VIEW_SECONDS,
     _format_radio_metrics,
     _parser,
     frame_interval_ms,
 )
+from fall_detection.radio.visualization.app import GUI_FPS_CHOICES, GUI_INTERVAL_MS
+from fall_detection.radio.visualization.dashboard import DEFAULT_VIEW_SECONDS
 
 
 def test_collection_parser_defaults_to_espnow_protocol():
@@ -60,8 +61,9 @@ def test_collection_metrics_show_unavailable_telemetry_explicitly():
     assert "unavailable" in text
 
 
-def test_collector_radio_preview_matches_ui_frame_pacing():
-    assert COLLECTOR_RADIO_REFRESH_MS == frame_interval_ms(COLLECTOR_FPS_DEFAULT)
-    assert 1000 / COLLECTOR_RADIO_REFRESH_MS >= COLLECTOR_FPS_CHOICES[0] - 1
-    assert 2 <= COLLECTOR_RADIO_PREVIEW_SECONDS <= 3
-    assert COLLECTOR_RADIO_PREVIEW_POINTS < 100 * COLLECTOR_RADIO_PREVIEW_SECONDS
+def test_collector_shares_the_viewer_frame_pacing_and_window():
+    assert COLLECTOR_FPS_CHOICES == GUI_FPS_CHOICES
+    assert frame_interval_ms(COLLECTOR_FPS_DEFAULT) == GUI_INTERVAL_MS
+    assert COLLECTOR_UI_INTERVAL_MS == frame_interval_ms(COLLECTOR_FPS_DEFAULT)
+    assert COLLECTOR_VIEW_SECONDS == DEFAULT_VIEW_SECONDS
+    assert 2 <= COLLECTOR_VIEW_SECONDS <= 5

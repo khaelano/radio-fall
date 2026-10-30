@@ -5,30 +5,30 @@ Default mode is a dry run: it prints what would be deleted and how much space
 that frees. Pass --apply to actually delete.
 
 Categories:
-  empty-sessions   session directories under data/raw/sessions with no CSI rows
-  legacy-raw       flat data/raw/*.csv captures from the pre-session workflow
-  stale-models     data/models/yolo (the camera comparator was removed)
-  viewer-captures  data/raw/receivers (ad-hoc viewer captures, not sessions)
+  empty-session    session directories under data/raw/sessions with no CSI rows
+  legacy-session   sessions that are not artifact schema 2 (obsolete layout)
+  viewer-capture   data/raw/receivers (ad-hoc captures, opt-in only)
 
 Examples:
-  python tools/prune_data.py                      # show everything removable
-  python tools/prune_data.py --legacy-raw --apply # delete only legacy CSVs
-  python tools/prune_data.py --viewer-captures --apply --keep-days 0
+  python tools/prune_data.py                        # show safe defaults
+  python tools/prune_data.py --verbose              # list every path
+  python tools/prune_data.py --legacy-sessions --apply
+  python tools/prune_data.py --viewer-captures --keep-days 0 --apply
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sys
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-RAW = ROOT / "data" / "raw"
-SESSIONS = RAW / "sessions"
-VIEWER = RAW / "receivers"
-MODELS = ROOT / "data" / "models" / "yolo"
+SESSIONS = ROOT / "data" / "raw" / "sessions"
+VIEWER = ROOT / "data" / "raw" / "receivers"
+ARTIFACT_SCHEMA_VERSION = 2
 
 
 def count_csi_rows(session: Path) -> int:
@@ -42,6 +42,16 @@ def count_csi_rows(session: Path) -> int:
         except OSError:
             continue
     return rows
+
+
+def artifact_schema(session: Path) -> object:
+    """Return the recorded artifact schema, or None when it cannot be read."""
+
+    try:
+        value = json.loads((session / "session.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value.get("artifact_schema_version") if isinstance(value, dict) else None
 
 
 def size_of(path: Path) -> int:
@@ -80,22 +90,34 @@ def collect(args: argparse.Namespace) -> list[tuple[str, Path, int, str]]:
     """Return (category, path, bytes, detail) entries to remove."""
 
     found: list[tuple[str, Path, int, str]] = []
+    empty: set[Path] = set()
 
     if args.empty_sessions and SESSIONS.is_dir():
         for session in sorted(SESSIONS.iterdir()):
-            if not session.is_dir():
+            if not session.is_dir() or not older_than(session, args.keep_days):
                 continue
-            rows = count_csi_rows(session)
-            if rows == 0:
+            if count_csi_rows(session) == 0:
+                empty.add(session)
                 found.append(("empty-session", session, size_of(session), "0 CSI rows"))
 
-    if args.legacy_raw and RAW.is_dir():
-        for path in sorted([*RAW.glob("csi_*.csv"), *RAW.glob("clock_sync_*.csv")]):
-            if path.is_file() and older_than(path, args.keep_days):
-                found.append(("legacy-raw", path, size_of(path), "pre-session capture"))
-
-    if args.stale_models and MODELS.is_dir():
-        found.append(("stale-model", MODELS, size_of(MODELS), "camera comparator removed"))
+    if args.legacy_sessions and SESSIONS.is_dir():
+        for session in sorted(SESSIONS.iterdir()):
+            if (
+                not session.is_dir()
+                or session in empty
+                or not older_than(session, args.keep_days)
+            ):
+                continue
+            schema = artifact_schema(session)
+            if schema != ARTIFACT_SCHEMA_VERSION:
+                found.append(
+                    (
+                        "legacy-session",
+                        session,
+                        size_of(session),
+                        f"artifact schema {schema!r}",
+                    )
+                )
 
     if args.viewer_captures and VIEWER.is_dir():
         for path in sorted(VIEWER.iterdir()):
@@ -108,14 +130,13 @@ def collect(args: argparse.Namespace) -> list[tuple[str, Path, int, str]]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--empty-sessions", action="store_true", default=None)
-    parser.add_argument("--legacy-raw", action="store_true", default=None)
-    parser.add_argument("--stale-models", action="store_true", default=None)
+    parser.add_argument("--legacy-sessions", action="store_true", default=None)
     parser.add_argument("--viewer-captures", action="store_true", default=None)
     parser.add_argument(
         "--keep-days",
         type=float,
         default=7.0,
-        help="skip files modified more recently than this (default 7; 0 disables)",
+        help="skip paths modified more recently than this (default 7; 0 disables)",
     )
     parser.add_argument("--apply", action="store_true", help="delete instead of reporting")
     parser.add_argument(
@@ -126,11 +147,10 @@ def main(argv: list[str] | None = None) -> int:
     # With no explicit category flag, select the safe defaults.
     if not any(
         value is not None
-        for value in (args.empty_sessions, args.legacy_raw, args.stale_models, args.viewer_captures)
+        for value in (args.empty_sessions, args.legacy_sessions, args.viewer_captures)
     ):
         args.empty_sessions = True
-        args.legacy_raw = True
-        args.stale_models = True
+        args.legacy_sessions = True
 
     entries = collect(args)
     if not entries:

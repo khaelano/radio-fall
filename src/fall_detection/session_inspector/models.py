@@ -18,6 +18,7 @@ from ..collection.protocol import (
     Trial,
     protocol_from_mapping,
 )
+from ..contracts import ARTIFACT_SCHEMA_VERSION
 
 
 class SessionReadError(ValueError):
@@ -193,19 +194,9 @@ def _attempt_files(path: Path) -> tuple[AttemptFiles, ...]:
                     receiver_id=receiver.name,
                     csi=_file_if_present(receiver / "csi.csv"),
                     radio_timing=_file_if_present(receiver / "radio_timing.csv"),
-                    clock_sync=_file_if_present(receiver / "usb_clock_sync.csv")
-                    or _file_if_present(receiver / "clock_sync.csv"),
+                    clock_sync=_file_if_present(receiver / "usb_clock_sync.csv"),
                 )
             )
-    legacy = AttemptFiles(
-        receiver_id="legacy",
-        csi=_file_if_present(path / "csi.csv"),
-        radio_timing=_file_if_present(path / "radio_timing.csv"),
-        clock_sync=_file_if_present(path / "clock_sync.csv")
-        or _file_if_present(path / "usb_clock_sync.csv"),
-    )
-    if legacy.available:
-        result.append(legacy)
     return tuple(result)
 
 
@@ -230,11 +221,13 @@ def _load_attempt(session_root: Path, path: Path) -> RecordedAttempt:
         ordinal = int(parent_prefix) if parent_prefix.isdigit() else 0
     key = path.relative_to(session_root).as_posix()
     status = str(metadata.get("status") or "unknown")
-    activity_label = str(
-        metadata.get("activity_label")
-        or metadata.get("planned_reference_label")
-        or ""
-    )
+    activity_label = str(metadata.get("activity_label") or "")
+    schema_version = metadata.get("artifact_schema_version")
+    if schema_version not in (None, ARTIFACT_SCHEMA_VERSION):
+        warnings.append(
+            f"{manifest_path.relative_to(session_root)}: unsupported artifact "
+            f"schema {schema_version!r}"
+        )
     return RecordedAttempt(
         path=path,
         key=key,
@@ -290,6 +283,12 @@ def load_session(path: Path) -> SessionBundle:
     if not manifest_path.is_file():
         raise SessionReadError(f"missing session manifest: {manifest_path}")
     manifest = _read_object(manifest_path, "session manifest")
+    schema_version = manifest.get("artifact_schema_version")
+    if schema_version != ARTIFACT_SCHEMA_VERSION:
+        raise SessionReadError(
+            f"{manifest_path}: unsupported artifact schema {schema_version!r}; "
+            f"this build reads schema {ARTIFACT_SCHEMA_VERSION} only"
+        )
 
     warnings: list[str] = []
     protocol_source: dict[str, Any] = {}

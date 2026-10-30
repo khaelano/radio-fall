@@ -35,6 +35,7 @@ from fall_detection.radio.visualization.state import LiveState
 PROTOCOL_PATH = (
     Path(__file__).resolve().parents[2] / "configs" / "collection" / "fall_v1.json"
 )
+RECEIVER_ENV = {"receiver_ids": {"00:11:22:33:44:55": "rx-1"}}
 
 
 @pytest.fixture(scope="module")
@@ -45,7 +46,7 @@ def qt_app():
 
 def _session(tmp_path, block_ids):
     protocol = select_blocks(load_protocol(PROTOCOL_PATH), block_ids)
-    controller = SessionController(protocol, tmp_path)
+    controller = SessionController(protocol, tmp_path, environment=RECEIVER_ENV)
     controller.start_session(SessionMetadata(participant_id="p01"))
     snapshot = controller.update_health(HealthSnapshot(radio_live=True))
     return protocol, controller, snapshot
@@ -158,7 +159,7 @@ def test_operator_window_renders_the_complete_state(qt_app, tmp_path):
             ],
         }
     )
-    controller = SessionController(protocol, tmp_path)
+    controller = SessionController(protocol, tmp_path, environment=RECEIVER_ENV)
     controller.start_session(SessionMetadata(participant_id="p01"))
     snapshot = controller.update_health(HealthSnapshot(radio_live=True))
     window = _window(qt_app, protocol)
@@ -286,7 +287,7 @@ def test_scenario_detail_marks_every_trial_resolved_after_completion(qt_app, tmp
             ],
         }
     )
-    controller = SessionController(protocol, tmp_path)
+    controller = SessionController(protocol, tmp_path, environment=RECEIVER_ENV)
     controller.start_session(SessionMetadata(participant_id="p01"))
     snapshot = controller.update_health(HealthSnapshot(radio_live=True))
     window = _window(qt_app, protocol)

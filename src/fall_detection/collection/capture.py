@@ -8,8 +8,9 @@ import json
 from pathlib import Path
 import re
 from threading import RLock
-from typing import Any
+from typing import Any, TextIO
 
+from ..contracts import ARTIFACT_SCHEMA_VERSION
 from ..radio.acquisition.clock_sync import ClockSyncEstimate, ClockSyncSample
 from ..radio.acquisition.protocol import CSI_HEADER, CsiRecord, format_csi_record
 from .protocol import CollectionProtocol, Trial
@@ -40,87 +41,79 @@ def _write_json(path: Path, value: Any) -> None:
     temporary.replace(path)
 
 
+def _receiver_bindings(environment: dict[str, Any] | None) -> dict[str, str]:
+    """Return the MAC-to-receiver binding required by artifact schema 2."""
+
+    raw = (environment or {}).get("receiver_ids")
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError(
+            "session environment must provide a non-empty receiver_ids map"
+        )
+    bindings = {str(mac).lower(): str(receiver_id) for mac, receiver_id in raw.items()}
+    if not all(mac and receiver_id for mac, receiver_id in bindings.items()):
+        raise ValueError("receiver_ids must map MAC strings to receiver id strings")
+    return bindings
+
+
 class TrialCapture:
-    """Thread-safe fixed-name writers for one trial attempt."""
+    """Thread-safe, receiver-split writers for one trial attempt."""
 
     def __init__(
         self,
         path: Path,
         initial_metadata: dict[str, Any],
         *,
-        receiver_ids: dict[str, str] | None = None,
+        receiver_ids: dict[str, str],
     ) -> None:
+        if not receiver_ids:
+            raise ValueError("TrialCapture requires at least one receiver binding")
         self.path = path
         self.path.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
         self._metadata = dict(initial_metadata)
-        # Schema 2 is the receiver-split layout.  Keep the original root
-        # streams only for legacy callers that do not provide an inventory.
-        self._schema_version = 2 if receiver_ids else 1
-        self._metadata.setdefault("artifact_schema_version", self._schema_version)
+        self._metadata["artifact_schema_version"] = ARTIFACT_SCHEMA_VERSION
         self._metadata["status"] = "recording"
         _write_json(self.path / "attempt.json", self._metadata)
-        self.receiver_ids = dict(receiver_ids or {})
-        self._csi = None
-        self._timing = None
-        self._clock = None
-        if not self.receiver_ids:
-            self._csi = (self.path / "csi.csv").open(
-                "w", encoding="utf-8", newline=""
-            )
-            self._timing = (self.path / "radio_timing.csv").open(
-                "w", encoding="utf-8", newline=""
-            )
-            self._clock = (self.path / "clock_sync.csv").open(
-                "w", encoding="utf-8", newline=""
-            )
+        self.receiver_ids = {
+            mac.lower(): receiver_id for mac, receiver_id in receiver_ids.items()
+        }
         self._receiver_streams: dict[str, tuple[TextIO, TextIO]] = {}
-        if self.receiver_ids:
-            for receiver_id in sorted(set(self.receiver_ids.values())):
-                receiver_path = self.path / "receivers" / _slug(receiver_id)
-                receiver_path.mkdir(parents=True, exist_ok=True)
-                csi_file = (receiver_path / "csi.csv").open(
-                    "w", encoding="utf-8", newline=""
-                )
-                timing_file = (receiver_path / "radio_timing.csv").open(
-                    "w", encoding="utf-8", newline=""
-                )
-                clock_path = receiver_path / "usb_clock_sync.csv"
-                csi_file.write(CSI_HEADER + "\n")
-                timing_file.write(TIMING_HEADER + "\n")
-                clock_path.write_text(CLOCK_SYNC_HEADER + "\n", encoding="utf-8")
-                self._receiver_streams[receiver_id] = (csi_file, timing_file)
-        if self._csi is not None:
-            self._csi.write(CSI_HEADER + "\n")
-            self._timing.write(TIMING_HEADER + "\n")
-            self._clock.write(CLOCK_SYNC_HEADER + "\n")
+        for receiver_id in sorted(set(self.receiver_ids.values())):
+            receiver_path = self.path / "receivers" / _slug(receiver_id)
+            receiver_path.mkdir(parents=True, exist_ok=True)
+            csi_file = (receiver_path / "csi.csv").open(
+                "w", encoding="utf-8", newline=""
+            )
+            timing_file = (receiver_path / "radio_timing.csv").open(
+                "w", encoding="utf-8", newline=""
+            )
+            csi_file.write(CSI_HEADER + "\n")
+            timing_file.write(TIMING_HEADER + "\n")
+            (receiver_path / "usb_clock_sync.csv").write_text(
+                CLOCK_SYNC_HEADER + "\n", encoding="utf-8"
+            )
+            self._receiver_streams[receiver_id] = (csi_file, timing_file)
 
     def write_radio(self, record: CsiRecord, host_receive_monotonic_ns: int) -> None:
         """Append one decoded radio record and its timing sidecar row."""
 
         with self._lock:
+            receiver_id = self.receiver_ids.get(record.receiver_mac.lower())
+            if receiver_id is None:
+                return
             tx_timestamp = "" if record.tx_timestamp_us is None else record.tx_timestamp_us
             rx_callback = (
                 ""
                 if record.rx_callback_timestamp_us is None
                 else record.rx_callback_timestamp_us
             )
-            receiver_id = self.receiver_ids.get(record.receiver_mac.lower())
-            if receiver_id is not None:
-                csi_file, timing_file = self._receiver_streams[receiver_id]
-                csi_file.write(format_csi_record(record).rstrip("\r\n") + "\n")
-                timing_file.write(
-                    f"{record.sequence},{record.receiver_mac},{record.transport_sequence},"
-                    f"{tx_timestamp},{record.timestamp_us},{rx_callback},"
-                    f"{host_receive_monotonic_ns}\n"
-                )
-            elif self._csi is not None:
-                self._csi.write(format_csi_record(record).rstrip("\r\n") + "\n")
-                self._timing.write(
-                    f"{record.sequence},{record.receiver_mac},{record.transport_sequence},"
-                    f"{tx_timestamp},{record.timestamp_us},{rx_callback},"
-                    f"{host_receive_monotonic_ns}\n"
-                )
+            csi_file, timing_file = self._receiver_streams[receiver_id]
+            csi_file.write(format_csi_record(record).rstrip("\r\n") + "\n")
+            timing_file.write(
+                f"{record.sequence},{record.receiver_mac},{record.transport_sequence},"
+                f"{tx_timestamp},{record.timestamp_us},{rx_callback},"
+                f"{host_receive_monotonic_ns}\n"
+            )
 
     def write_clock_sync(
         self,
@@ -132,22 +125,12 @@ class TrialCapture:
 
         with self._lock:
             receiver_id = self.receiver_ids.get(sample.receiver_mac.lower())
-            if receiver_id is not None:
-                receiver_path = self.path / "receivers" / _slug(receiver_id)
-                clock_path = receiver_path / "usb_clock_sync.csv"
-                if not clock_path.exists():
-                    clock_path.write_text(CLOCK_SYNC_HEADER + "\n", encoding="utf-8")
-                with clock_path.open("a", encoding="utf-8") as stream:
-                    stream.write(
-                        f"{host_receive_monotonic_ns},{sample.receiver_mac},{sample.sync_id},"
-                        f"{sample.sensing_sequence},{sample.receiver_boot_id},"
-                        f"{sample.tx_t1_us},{sample.rx_t2_us},{sample.rx_t3_us},"
-                        f"{sample.tx_t4_us},{sample.rx_radio_t2_us},{sample.tx_radio_t4_us},"
-                        f"{sample.round_trip_us},{sample.receiver_minus_transmitter_us:.6f},"
-                        f"{estimate.drift_ppm:.6f},{estimate.uncertainty_us:.6f}\n"
-                    )
-            elif self._clock is not None:
-                self._clock.write(
+            if receiver_id is None:
+                return
+            receiver_path = self.path / "receivers" / _slug(receiver_id)
+            clock_path = receiver_path / "usb_clock_sync.csv"
+            with clock_path.open("a", encoding="utf-8") as stream:
+                stream.write(
                     f"{host_receive_monotonic_ns},{sample.receiver_mac},{sample.sync_id},"
                     f"{sample.sensing_sequence},{sample.receiver_boot_id},"
                     f"{sample.tx_t1_us},{sample.rx_t2_us},{sample.rx_t3_us},"
@@ -160,10 +143,6 @@ class TrialCapture:
         """Close all streams and atomically publish final attempt metadata."""
 
         with self._lock:
-            for stream in (self._csi, self._timing, self._clock):
-                if stream is not None:
-                    stream.flush()
-                    stream.close()
             for csi_file, timing_file in self._receiver_streams.values():
                 csi_file.flush()
                 timing_file.flush()
@@ -205,6 +184,7 @@ class SessionArtifactStore:
         session_id: str,
         environment: dict[str, Any] | None = None,
     ) -> None:
+        self._receiver_ids = _receiver_bindings(environment)
         self.root = output_dir / _slug(session_id)
         self.root.mkdir(parents=True, exist_ok=False)
         self.protocol = protocol
@@ -213,6 +193,7 @@ class SessionArtifactStore:
         self._event_file = (self.root / "events.jsonl").open("w", encoding="utf-8")
         self._closed = False
         self._session = {
+            "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
             "session_id": session_id,
             "participant_id": metadata.participant_id,
             "operator": metadata.operator,
@@ -224,11 +205,6 @@ class SessionArtifactStore:
             "status": "open",
             "environment": environment or {},
         }
-        self._session["artifact_schema_version"] = (
-            2 if isinstance((environment or {}).get("receiver_ids"), dict)
-            and bool((environment or {}).get("receiver_ids"))
-            else 1
-        )
         _write_json(self.root / "protocol.json", protocol.source)
         _write_json(self.root / "session.json", self._session)
 
@@ -270,12 +246,10 @@ class SessionArtifactStore:
             scenario_id=trial.scenario.id,
             attempt=attempt_number,
         )
-        environment = self._session.get("environment", {})
-        receiver_ids = environment.get("receiver_ids", {})
         return TrialCapture(
             attempt_dir,
             metadata,
-            receiver_ids=receiver_ids if isinstance(receiver_ids, dict) else None,
+            receiver_ids=self._receiver_ids,
         )
 
     def finish(self, status: str, monotonic_ns: int, **updates: Any) -> None:

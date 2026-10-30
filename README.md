@@ -114,15 +114,24 @@ viewer or collector. The Indonesia country table is enforced: 2.4 GHz channels
 
 ## Recording format
 
-Each session writes one directory per receiver under
-`data/raw/sessions/<timestamp>/`:
+Each session writes one directory under `data/raw/sessions/<session-id>/`:
 
-- `csi_<timestamp>.csv` — one row per sensing frame: source MAC, RSSI, channel,
-  radio and host timestamps, then the CSI values.
-- `radio_timing_<timestamp>.csv` — sequence and timing columns.
+- `session.json` — session identity, protocol hash, radio environment, status.
+- `protocol.json` — pinned protocol snapshot used for the trial queue.
+- `events.jsonl` — append-only phase and operator events.
+- `trials/<trial>/attempt_<n>/attempt.json` — attempt disposition and telemetry.
+- `trials/<trial>/attempt_<n>/receivers/<rx>/csi.csv` — one row per sensing
+  frame for that receiver.
+- `trials/<trial>/attempt_<n>/receivers/<rx>/radio_timing.csv` — timing row for
+  each CSI row.
+- `trials/<trial>/attempt_<n>/receivers/<rx>/usb_clock_sync.csv` — host/receiver
+  clock exchanges used to place receiver timestamps on the host timeline.
 
-Captured frames from other networks are included, so filter on the transmitter
-MAC if you need only the sensing link.
+The same transmitted frame appears once under every receiver that heard it; do
+not merge those rows. Captured frames from other networks can be present, so
+filter on the transmitter MAC (and on `sig_mode=4` for the HE20 sensing link)
+if you need only the sensing link. See [`docs/dataset-format.md`](docs/dataset-format.md)
+for every field and the exact CSV schemas.
 
 ## Firmware
 

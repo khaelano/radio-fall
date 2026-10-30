@@ -16,6 +16,7 @@ src/*.egg-info/
 
 # Local CSI captures (raw data is intentionally not versioned)
 data/raw/
+data/archive/
 data/experiments/
 data/interim/
 data/models/

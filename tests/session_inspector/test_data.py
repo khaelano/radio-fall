@@ -30,8 +30,8 @@ from fall_detection.session_inspector.models import load_session
 
 
 def test_attempt_data_preserves_exact_rows_and_reports_bad_csi(session_factory):
-    root = session_factory(attempts=((1, 1, "accepted", 1),))
-    csi_path = next(root.glob("trials/*/attempt_*/csi.csv"))
+    root = session_factory(attempts=((1, 1, "accepted"),))
+    csi_path = next(root.glob("trials/*/attempt_*/receivers/rx-1/csi.csv"))
     record = CsiRecord(
         sequence=10,
         mac="00:11:22:33:44:55",
@@ -46,7 +46,7 @@ def test_attempt_data_preserves_exact_rows_and_reports_bad_csi(session_factory):
     )
     session = load_session(root)
 
-    data = load_attempt_data(session.attempts[0], "legacy")
+    data = load_attempt_data(session.attempts[0], "rx-1")
 
     assert data.csi.row_count == 2
     assert len(data.records) == 1
@@ -64,7 +64,7 @@ def test_attempt_data_preserves_exact_rows_and_reports_bad_csi(session_factory):
     assert prepared.snapshot.timestamps == (0.0,)
     assert prepared.prepared_frame is not None
 
-    compact = load_attempt_data_for_ui(session.attempts[0], "legacy")
+    compact = load_attempt_data_for_ui(session.attempts[0], "rx-1")
     assert compact.records == ()
     assert compact.record_count == 1
     restored = csi_record_for_table_row(compact, 0)

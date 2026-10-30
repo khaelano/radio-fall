@@ -29,7 +29,7 @@ assignment. A receiver is healthy only when it reports the expected target,
 active profile fingerprint, current USB stream, and clock state. Loss of any
 required receiver invalidates an active attempt.
 
-New attempts use artifact schema 2:
+Attempts use artifact schema 2 exclusively:
 
 ```text
 attempt.json
@@ -40,4 +40,6 @@ receivers/<receiver-id>/usb_clock_sync.csv
 
 The session manifest records the inventory, selected profile, fingerprint,
 firmware targets, USB bindings, and reconnection events. Only CSI, timing, and
-clock-sync data are part of this collection path.
+clock-sync data are part of this collection path. See
+[`docs/dataset-format.md`](../../../docs/dataset-format.md) for the full field
+reference and reading examples.

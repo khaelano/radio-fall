@@ -45,7 +45,7 @@ def test_parser_accepts_sessions_directory_and_individual_path():
 def test_window_lists_attempts_edits_metadata_and_accepts_current_load(
     session_factory, application
 ):
-    root = session_factory(attempts=((1, 1, "accepted", 2),))
+    root = session_factory(attempts=((1, 1, "accepted"),))
     window = SessionInspectorWindow(root)
 
     assert window.session is not None
@@ -72,7 +72,7 @@ def test_window_lists_attempts_edits_metadata_and_accepts_current_load(
 
 
 def test_active_session_disables_review_controls(session_factory, application):
-    root = session_factory(status="open", attempts=((1, 1, "recording", 2),))
+    root = session_factory(status="open", attempts=((1, 1, "recording"),))
     window = SessionInspectorWindow(root)
 
     assert window.session.active
@@ -141,7 +141,7 @@ def test_signal_panel_reuses_plot_items(application):
 
 
 def test_values_panel_parses_compact_csi_row_on_demand(session_factory, application):
-    root = session_factory(attempts=((1, 1, "accepted", 2),))
+    root = session_factory(attempts=((1, 1, "accepted"),))
     csi_path = next(root.glob("trials/*/attempt_*/receivers/rx-1/csi.csv"))
     record = CsiRecord(
         sequence=10,
@@ -170,7 +170,7 @@ def test_values_panel_parses_compact_csi_row_on_demand(session_factory, applicat
 def test_attempt_load_is_debounced_and_cache_hits_skip_worker(
     session_factory, application, monkeypatch
 ):
-    root = session_factory(attempts=((1, 1, "accepted", 2), (1, 2, "accepted", 2)))
+    root = session_factory(attempts=((1, 1, "accepted"), (1, 2, "accepted")))
     window = SessionInspectorWindow(root)
     window._load_timer.stop()
     starts = []
@@ -201,7 +201,7 @@ def test_attempt_load_is_debounced_and_cache_hits_skip_worker(
 
 
 def test_cancelling_load_invalidates_queued_results(session_factory, application):
-    root = session_factory(attempts=((1, 1, "accepted", 2),))
+    root = session_factory(attempts=((1, 1, "accepted"),))
     window = SessionInspectorWindow(root)
     window._load_timer.stop()
     attempt = window.session.attempts[0]

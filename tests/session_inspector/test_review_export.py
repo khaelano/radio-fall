@@ -27,7 +27,7 @@ def digest(path: Path) -> str:
 def test_review_save_is_atomic_versioned_and_does_not_rewrite_acquisition(
     session_factory
 ):
-    root = session_factory(attempts=((1, 1, "accepted", 2),))
+    root = session_factory(attempts=((1, 1, "accepted"),))
     session = load_session(root)
     session_before = (root / "session.json").read_bytes()
     attempt_path = next(root.glob("trials/*/attempt_*/attempt.json"))
@@ -89,7 +89,7 @@ def test_active_session_cannot_be_reviewed(session_factory):
 def test_curated_export_applies_review_and_keeps_raw_files_identical(
     session_factory, tmp_path: Path
 ):
-    root = session_factory(attempts=((1, 1, "accepted", 2),))
+    root = session_factory(attempts=((1, 1, "accepted"),))
     session = load_session(root)
     raw_source = next(root.glob("trials/*/attempt_*/receivers/rx-1/csi.csv"))
     review = ReviewDocument.empty(session)
@@ -125,7 +125,7 @@ def test_curated_export_applies_review_and_keeps_raw_files_identical(
 
 
 def test_cancelled_export_removes_partial_directory(session_factory, tmp_path: Path):
-    session = load_session(session_factory(attempts=((1, 1, "accepted", 2),)))
+    session = load_session(session_factory(attempts=((1, 1, "accepted"),)))
     review = ReviewDocument.empty(session)
     destination = tmp_path / "cancelled"
 

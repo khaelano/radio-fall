@@ -17,7 +17,7 @@ def session_factory(tmp_path: Path):
         name: str = "session-1",
         *,
         status: str = "complete",
-        attempts: tuple[tuple[int, int, str, int], ...] = (),
+        attempts: tuple[tuple[int, int, str], ...] = (),
     ) -> Path:
         root = tmp_path / name
         root.mkdir()
@@ -64,12 +64,12 @@ def session_factory(tmp_path: Path):
                 "environment": {"receiver_ids": {"aa": "rx-1"}},
             },
         )
-        for ordinal, attempt_number, attempt_status, schema in attempts:
+        for ordinal, attempt_number, attempt_status in attempts:
             attempt = root / "trials" / f"{ordinal:03d}_walk" / f"attempt_{attempt_number:02d}"
             write_json(
                 attempt / "attempt.json",
                 {
-                    "artifact_schema_version": schema,
+                    "artifact_schema_version": 2,
                     "session_id": name,
                     "trial_ordinal": ordinal,
                     "repetition": ordinal,
@@ -78,12 +78,11 @@ def session_factory(tmp_path: Path):
                     "status": attempt_status,
                 },
             )
-            data_root = attempt / "receivers" / "rx-1" if schema == 2 else attempt
+            data_root = attempt / "receivers" / "rx-1"
             data_root.mkdir(parents=True, exist_ok=True)
             (data_root / "csi.csv").write_text("header\n", encoding="utf-8")
             (data_root / "radio_timing.csv").write_text("sequence\n", encoding="utf-8")
-            clock_name = "usb_clock_sync.csv" if schema == 2 else "clock_sync.csv"
-            (data_root / clock_name).write_text("sync_id\n", encoding="utf-8")
+            (data_root / "usb_clock_sync.csv").write_text("sync_id\n", encoding="utf-8")
         return root
 
     return create

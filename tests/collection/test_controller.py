@@ -74,6 +74,7 @@ def make_controller(tmp_path: Path, clock: FakeClock) -> SessionController:
         clock=clock,
         monotonic_ns=lambda: int(clock.value * 1_000_000_000),
         session_id_factory=lambda: "session",
+        environment={"receiver_ids": {"00:11:22:33:44:55": "rx-1"}},
     )
 
 
@@ -100,10 +101,14 @@ def test_controller_runs_timed_trial_and_writes_bundle(tmp_path: Path):
 
     controller.dispatch(OperatorCommand.ACCEPT)
     assert controller.state is SessionState.COMPLETE
-    assert (tmp_path / "session" / "trials" / "001_one" / "attempt_01" / "attempt.json").exists()
-    assert '"status": "accepted"' in (
-        tmp_path / "session" / "trials" / "001_one" / "attempt_01" / "attempt.json"
-    ).read_text()
+    attempt_dir = tmp_path / "session" / "trials" / "001_one" / "attempt_01"
+    assert (attempt_dir / "attempt.json").exists()
+    assert (attempt_dir / "receivers" / "rx-1" / "csi.csv").exists()
+    session_manifest = json.loads((tmp_path / "session" / "session.json").read_text())
+    attempt_manifest = json.loads((attempt_dir / "attempt.json").read_text())
+    assert session_manifest["artifact_schema_version"] == 2
+    assert attempt_manifest["artifact_schema_version"] == 2
+    assert attempt_manifest["status"] == "accepted"
 
 
 def test_controller_requires_all_inputs_before_start(tmp_path: Path):
@@ -195,6 +200,7 @@ def test_attempt_persists_boot_aware_radio_telemetry_delta(tmp_path: Path):
         monotonic_ns=lambda: int(clock.value * 1_000_000_000),
         session_id_factory=lambda: "session",
         telemetry_provider=lambda: next(snapshots),
+        environment={"receiver_ids": {"00:11:22:33:44:55": "rx-1"}},
     )
     start_ready(controller)
     controller.dispatch(OperatorCommand.START_TRIAL)

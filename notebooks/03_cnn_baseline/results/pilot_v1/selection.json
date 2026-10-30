@@ -1,0 +1,74 @@
+{
+  "selected_representation": "calibrated_phase",
+  "threshold": 0.5,
+  "rule": "Highest ensemble validation balanced accuracy, then validation ROC AUC, then prespecified config order. Epochs minimize weighted validation BCE.",
+  "seeds": [
+    17,
+    29,
+    43
+  ],
+  "config": {
+    "session_path": "../../data/raw/sessions/20261026T174653764289Z",
+    "receivers": [
+      "rx-1",
+      "rx-2"
+    ],
+    "window_seconds": 4.0,
+    "bin_hz": 25,
+    "lag_seconds": 0.1,
+    "smoothing_bins": 3,
+    "minimum_coverage": 0.7,
+    "split_seed": 20261028,
+    "training_seeds": [
+      17,
+      29,
+      43
+    ],
+    "max_epochs": 40,
+    "patience": 8,
+    "batch_size": 16,
+    "learning_rate": 0.001,
+    "weight_decay": 0.01,
+    "threads": 4,
+    "workers": 3,
+    "representations": [
+      "amplitude",
+      "raw_phase",
+      "calibrated_phase",
+      "phase_change",
+      "phase_change_smoothed"
+    ]
+  },
+  "manifest_sha256": "8b684e4a007b7118450668ff87213540430267f7965bddd0c5901a82eb235e14",
+  "modeling_sha256": "8328d9d6b803f7dec4debd0b6463af57c21cf3e09a0e43cfaaba817390c689ff",
+  "checkpoint_sha256": {
+    "amplitude_normalization.npz": "9ceaffc8237bc3f62ce61638477090307ab9a51688ca2f96a6efeedd4b4053b5",
+    "amplitude_seed17.pt": "75d521d1f16d54143e156c4caf60234b97ee02926440f9630704c5e96cf9eeb8",
+    "amplitude_seed29.pt": "0f9c0d44d57425973811a72956b5e2cd74af2cbaca14e8b5a00903d3b0298ab5",
+    "amplitude_seed43.pt": "a6d2f309f50ffc0c6ce051d6ca3ee137fb5963f9a069242bd994156bab26fc22",
+    "calibrated_phase_normalization.npz": "c78addad6fc3ddab710d7c9b6a3ee673b5fb7a109994ea59ee9cc0dd4a6f77a9",
+    "calibrated_phase_seed17.pt": "92752d0a0e54bdb17291fa9859c1907b8c7dd2fd6e988276872aefafc93b030c",
+    "calibrated_phase_seed29.pt": "bf5cfa166656f9c11421e5b4b6ca1a65dc1895be711e78debc5744442d5e52cc",
+    "calibrated_phase_seed43.pt": "541a4f032ab0a15528df0e1c0270c1c68af2a4d203c2ec80867d60482c2ae4a8",
+    "phase_change_normalization.npz": "a36a91fd23723fa19346c8264441cca8ea44eafe427f1bf368816ad41614288c",
+    "phase_change_seed17.pt": "51f8a4c3e641a37aa5b10845e0de0af53e565f2a1cf6aacad5a0fa77c332dce9",
+    "phase_change_seed29.pt": "0d4cda1d20870935aad41e05cf5526a6a4e70b92923b05153862b629b784c7f0",
+    "phase_change_seed43.pt": "4cb3d03d536ad2d30c27e566279ea4c0b59c2b125af948bb169061664547c69d",
+    "phase_change_smoothed_normalization.npz": "b85c5f894a2152460dd5a21fddd7a95178861fc6deb174792d9fc1d50785b679",
+    "phase_change_smoothed_seed17.pt": "dac84b3e48c9d2365b13055e7d4308fc6227c1449abbac680f467ffe392a2ce6",
+    "phase_change_smoothed_seed29.pt": "1316c2ccf084862c82d3beeeaacd7e30ad71da8a215b3f3703fca5be5ca730fe",
+    "phase_change_smoothed_seed43.pt": "ad88a70f3e358173a0335dbfa24c36b4bbbc8de58a363284054b02bb3b792665",
+    "raw_phase_normalization.npz": "31259c856ed137fb8696952ffb01c98c84f0f672a5d148a5ca611bbd6e7b8af0",
+    "raw_phase_seed17.pt": "14da3cced95b07c4e4972c628dbcca012078f9bfe78f271813953028548e1f99",
+    "raw_phase_seed29.pt": "a50bc91c2f5d01bc0173457674d7f798b6fab8d79cce68a380ca82978eeb9a9b",
+    "raw_phase_seed43.pt": "f7748c7157484ab93527b30e8b86a2d708564a11711e3cb0e24317f667272dcf"
+  },
+  "training_seconds": 58.76780829699419,
+  "versions": {
+    "numpy": "2.5.4",
+    "pandas": "2.3.3",
+    "scikit-learn": "1.9.1",
+    "torch": "2.14.1+cpu",
+    "matplotlib": "3.11.2"
+  }
+}

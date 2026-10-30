@@ -1,0 +1,7 @@
+label,test,train,validation
+walk_to_fall,6,20,6
+sit_to_fall,4,10,4
+stand_to_fall,6,20,6
+walk_to_sit,6,20,6
+sit_to_walk,6,20,6
+sit_to_stand,2,4,2

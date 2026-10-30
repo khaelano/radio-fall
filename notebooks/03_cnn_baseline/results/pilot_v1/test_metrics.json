@@ -1,0 +1,90 @@
+{
+  "selected_representation": "calibrated_phase",
+  "threshold": 0.5,
+  "test_attempts": 30,
+  "test_scenarios": 15,
+  "metrics": {
+    "cnn": {
+      "n": 30,
+      "accuracy": 0.9333333333333333,
+      "balanced_accuracy": 0.9285714285714286,
+      "fall_precision": 0.8888888888888888,
+      "fall_recall": 1.0,
+      "specificity": 0.8571428571428571,
+      "fall_f1": 0.9411764705882353,
+      "roc_auc": 0.9910714285714286,
+      "average_precision": 0.9924172794117647,
+      "tn": 12,
+      "fp": 2,
+      "fn": 0,
+      "tp": 16
+    },
+    "summary_logistic": {
+      "n": 30,
+      "accuracy": 0.8666666666666667,
+      "balanced_accuracy": 0.8616071428571428,
+      "fall_precision": 0.8333333333333334,
+      "fall_recall": 0.9375,
+      "specificity": 0.7857142857142857,
+      "fall_f1": 0.8823529411764706,
+      "roc_auc": 0.9732142857142857,
+      "average_precision": 0.9801470588235295,
+      "tn": 11,
+      "fp": 3,
+      "fn": 1,
+      "tp": 15
+    },
+    "quality_only": {
+      "n": 30,
+      "accuracy": 0.6333333333333333,
+      "balanced_accuracy": 0.6473214285714286,
+      "fall_precision": 0.7777777777777778,
+      "fall_recall": 0.4375,
+      "specificity": 0.8571428571428571,
+      "fall_f1": 0.56,
+      "roc_auc": 0.84375,
+      "average_precision": 0.8296604437229438,
+      "tn": 12,
+      "fp": 2,
+      "fn": 9,
+      "tp": 7
+    },
+    "majority": {
+      "n": 30,
+      "accuracy": 0.5333333333333333,
+      "balanced_accuracy": 0.5,
+      "fall_precision": 0.5333333333333333,
+      "fall_recall": 1.0,
+      "specificity": 0.0,
+      "fall_f1": 0.6956521739130435,
+      "roc_auc": 0.5,
+      "average_precision": 0.5333333333333333,
+      "tn": 0,
+      "fp": 14,
+      "fn": 0,
+      "tp": 16
+    }
+  },
+  "cnn_scenario_bootstrap_95_percent_intervals": {
+    "balanced_accuracy": [
+      0.7857142857142857,
+      1.0
+    ],
+    "fall_recall": [
+      1.0,
+      1.0
+    ],
+    "specificity": [
+      0.5714285714285714,
+      1.0
+    ],
+    "roc_auc": [
+      0.9464285714285714,
+      1.0
+    ]
+  },
+  "bootstrap_seed": 812,
+  "bootstrap_repetitions": 2000,
+  "selection_sha256": "4efb56ee149498f58a93a639f703b17b15d346f0a9c3472db533e5bff67e8da3",
+  "scope": "Pilot within one session/participant; fixed cue-aligned attempt classification, not continuous detection."
+}

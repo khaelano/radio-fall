@@ -13,9 +13,10 @@ Current layout:
 - `configs/` — versioned collection, radio, and experiment settings
 - `notebooks/` — exploratory analysis and experiment notebooks, numbered sequentially (e.g., `01_data_exploration.ipynb`)
 - `tests/` — unit tests mirroring the research modules under `src/fall_detection/`
-- `data/` — raw recordings, derived datasets, annotations, and dataset splits; never commit large data files
+- `data/` — raw recordings, derived datasets, annotations, and dataset splits; session bundles are documented in `docs/dataset-format.md`; never commit large data files
 - `draft/` — thesis chapter drafts and other text intended to become part of the final thesis
 - `docs/` — supporting notes, literature documentation, procedures, and figures
+- `docs/project-knowledge.md` — compact record of current implementation facts, decisions, limitations, and open questions
 - `Resources/Papers/` — literature library: raw PDFs plus converted Markdown in `Resources/Papers/md/`
 - `tools/` — paper processing and retrieval scripts (`pdf2md.py`, `rag.py`) and the catalog `index.json`
 - `skills/` — paper-related agent skills (`pdf-to-markdown`, `paper-rag`)
@@ -80,6 +81,11 @@ No build system exists yet. When code lands, prefer:
 ## Agent-Specific Instructions
 
 - Do not invent experiment results; clearly mark uncertainty and unfinished work.
+- Read `docs/project-knowledge.md` before making architectural, preprocessing,
+  data-handling, or experimental-design decisions. When a change makes an
+  entry inaccurate or resolves an open question, update the knowledge base in
+  the same change. Keep it compact, link to canonical code or documentation,
+  and distinguish implemented facts from proposals and unverified findings.
 - Preserve raw data; only create derived, processed artifacts.
 - Write all thesis drafts in `draft/`, including chapter text, section drafts,
   literature syntheses, and revisions intended for the final thesis. Use

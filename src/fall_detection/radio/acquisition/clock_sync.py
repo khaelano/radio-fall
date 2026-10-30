@@ -1,4 +1,9 @@
-"""Receiver-to-transmitter clock synchronization samples and estimation."""
+"""Reference-clock synchronization samples and estimation.
+
+The reference is the host for USB collection and the transmitter for the
+legacy ESP-NOW gateway exchange. The historical field names keep the
+``transmitter`` wording for compatibility.
+"""
 
 from __future__ import annotations
 
@@ -22,9 +27,10 @@ class ClockSyncError(ValueError):
 class ClockSyncSample:
     """One completed four-timestamp exchange.
 
-    ``t1`` and ``t4`` use the transmitter's ``esp_timer`` clock. ``t2`` and
-    ``t3`` use the receiver's ``esp_timer`` clock. The radio timestamps are
-    retained separately because they are 32-bit Wi-Fi receive timestamps.
+    ``t1`` and ``t4`` use the reference clock (``esp_timer`` for the ESP-NOW
+    gateway, host monotonic microseconds for USB collection). ``t2`` and ``t3``
+    use the receiver's ``esp_timer`` clock. The radio timestamps are retained
+    separately because they are 32-bit Wi-Fi receive timestamps.
     """
 
     sync_id: int
@@ -48,7 +54,11 @@ class ClockSyncSample:
 
     @property
     def receiver_minus_transmitter_us(self) -> float:
-        """Return the symmetric-delay NTP offset estimate."""
+        """Return the symmetric-delay NTP offset estimate.
+
+        The name is historical; the value is receiver minus the reference
+        clock (host for USB, transmitter for the gateway path).
+        """
 
         return (
             (self.rx_t2_us - self.tx_t1_us)
@@ -57,14 +67,14 @@ class ClockSyncSample:
 
     @property
     def transmitter_midpoint_us(self) -> float:
-        """Return the exchange midpoint in the transmitter clock domain."""
+        """Return the exchange midpoint in the reference clock domain."""
 
         return (self.tx_t1_us + self.tx_t4_us) / 2.0
 
 
 @dataclass(frozen=True)
 class ClockSyncEstimate:
-    """Affine receiver-to-transmitter clock relationship."""
+    """Affine receiver-to-reference clock relationship."""
 
     receiver_boot_id: int
     reference_transmitter_us: float
@@ -75,7 +85,11 @@ class ClockSyncEstimate:
     minimum_round_trip_us: int
 
     def receiver_to_transmitter(self, receiver_time_us: int | float) -> float:
-        """Map a receiver ``esp_timer`` timestamp into transmitter time."""
+        """Map receiver time into the reference clock domain.
+
+        The method name is historical; the reference is the host for USB
+        collection and the transmitter for the legacy gateway path.
+        """
 
         slope = self.drift_ppm / 1_000_000.0
         return (

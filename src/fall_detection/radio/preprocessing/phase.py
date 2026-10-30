@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from math import isfinite, nan
 from typing import Sequence
 
@@ -20,8 +21,8 @@ HT20_VALID_SUBCARRIERS: frozenset[int] = frozenset(
 # ascending signed-subcarrier order. Older tooling can emit a compact vector
 # containing only -122..122, serialized with the non-negative half first.
 HE20_SLOT_INDICES: tuple[int, ...] = tuple(range(-128, 128))
-HE20_COMPACT_SLOT_INDICES: tuple[int, ...] = (
-    tuple(range(0, 123)) + tuple(range(-122, 0))
+HE20_COMPACT_SLOT_INDICES: tuple[int, ...] = tuple(range(0, 123)) + tuple(
+    range(-122, 0)
 )
 HE20_VALID_SUBCARRIERS: frozenset[int] = frozenset(
     index for index in range(-122, 123) if index not in (-1, 0, 1)
@@ -143,6 +144,41 @@ def _block_layouts(
     return ()
 
 
+@lru_cache(maxsize=64)
+def phase_slot_mask(
+    *,
+    sig_mode: int,
+    bandwidth: int,
+    stbc: int,
+    pair_count: int,
+    first_word_invalid: bool = False,
+) -> tuple[bool, ...]:
+    """Return eligible LTF slots before masking weak or non-finite samples.
+
+    The immutable mask uses the same layouts as ``decode_ltf_blocks`` and
+    excludes null, guard, and invalid first-word slots. Unsupported layouts
+    return an empty tuple. Cached masks can be broadcast over packet batches
+    without calculating phase or fitting a calibration line.
+
+    Args:
+        sig_mode: ESP-IDF baseband format code.
+        bandwidth: ESP-IDF bandwidth code (zero for 20 MHz).
+        stbc: Space-time block coding flag.
+        pair_count: Number of complex values in the payload.
+        first_word_invalid: Whether the first two complex slots are invalid.
+
+    Returns:
+        One eligibility flag per serialized complex slot, or an empty tuple.
+    """
+    layouts = _block_layouts(
+        sig_mode=sig_mode, bandwidth=bandwidth, stbc=stbc, pair_count=pair_count
+    )
+    mask = [index in valid for _, indices, valid in layouts for index in indices]
+    if first_word_invalid:
+        mask[: min(2, len(mask))] = [False] * min(2, len(mask))
+    return tuple(mask)
+
+
 def decode_ltf_blocks(
     csi: Sequence[complex],
     *,
@@ -227,9 +263,7 @@ def calibrate_phase(
         & np.isfinite(values.imag)
         & np.isfinite(amplitudes)
         & (amplitudes >= amplitude_floor)
-        & np.asarray(
-            [index in valid_subcarriers for index in indices], dtype=bool
-        )
+        & np.asarray([index in valid_subcarriers for index in indices], dtype=bool)
     )
     result = np.full(values.shape, np.nan, dtype=np.float64)
     if int(valid.sum()) < 3:
@@ -244,9 +278,7 @@ def calibrate_phase(
     design = np.column_stack((valid_indices, np.ones(valid_indices.shape)))
     weighted_design = design * np.sqrt(weights)[:, None]
     weighted_phases = valid_phases * np.sqrt(weights)
-    slope, offset = np.linalg.lstsq(
-        weighted_design, weighted_phases, rcond=None
-    )[0]
+    slope, offset = np.linalg.lstsq(weighted_design, weighted_phases, rcond=None)[0]
     residual = _wrap_phase(valid_phases - (slope * valid_indices + offset))
     result[valid_order] = residual
     return tuple(float(value) for value in result)

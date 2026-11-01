@@ -1,19 +1,15 @@
-"""Controlled ESP-NOW backhaul captures and five-cycle summaries."""
+"""Read-only summaries of historical ESP-NOW backhaul captures."""
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import random
 import statistics
-import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Iterable
 
-from ..acquisition.buffer import RollingCsiBuffer
-from ..acquisition.espnow_serial_reader import EspNowSerialCsiReader
 from ..acquisition.telemetry import BackhaulTelemetrySnapshot
 
 
@@ -35,10 +31,6 @@ BACKHAUL_PROFILES = {
     "link-100-mcs0-20": BackhaulProfile("link-100-mcs0-20", 100, 0, 20),
     "final-50-mcs0-20": BackhaulProfile("final-50-mcs0-20", 50, 0, 20),
 }
-BACKHAUL_PROFILE_CHOICES = tuple(BACKHAUL_PROFILES)
-BACKHAUL_DEFAULT_WARMUP_SECONDS = 30.0
-BACKHAUL_DEFAULT_DURATION_SECONDS = 600.0
-BACKHAUL_DEFAULT_STARTUP_TIMEOUT_SECONDS = 30.0
 
 
 def _loss(missing: int | None, delivered: int | None) -> float | None:
@@ -93,9 +85,7 @@ def _stage_metrics(values: dict[str, Any]) -> dict[str, Any]:
         "host_transport_loss": _loss(
             values.get("transport_missing"), values.get("records")
         ),
-        "host_batch_loss": _loss(
-            values.get("batch_missing"), values.get("batches")
-        ),
+        "host_batch_loss": _loss(values.get("batch_missing"), values.get("batches")),
         "delivered_records_per_second": values.get("effective_records_per_second"),
         "records_sent": records_sent,
     }
@@ -103,22 +93,6 @@ def _stage_metrics(values: dict[str, Any]) -> dict[str, Any]:
 
 def _snapshot_payload(snapshot: BackhaulTelemetrySnapshot | None) -> Any:
     return snapshot.to_dict() if snapshot is not None else None
-
-
-def _wait_for_telemetry(
-    reader: EspNowSerialCsiReader, timeout: float
-) -> BackhaulTelemetrySnapshot:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        snapshot = reader.telemetry_snapshot()
-        if (
-            snapshot.receiver_stats is not None
-            and snapshot.transmitter_stats is not None
-            and snapshot.gateway_stats is not None
-        ):
-            return snapshot
-        time.sleep(0.1)
-    raise RuntimeError("timed out waiting for complete ESP-NOW telemetry")
 
 
 def build_backhaul_summary(
@@ -140,7 +114,10 @@ def build_backhaul_summary(
     expected_attempts = profile.nominal_rate_hz * duration_seconds
     if attempts is not None and expected_attempts > 0:
         observed_rate = attempts / duration_seconds
-        if abs(observed_rate - profile.nominal_rate_hz) > profile.nominal_rate_hz * 0.10:
+        if (
+            abs(observed_rate - profile.nominal_rate_hz)
+            > profile.nominal_rate_hz * 0.10
+        ):
             issues.append(
                 "transmitter attempt rate does not match the declared nominal profile"
             )
@@ -166,16 +143,16 @@ def build_backhaul_summary(
     return payload
 
 
-def _bootstrap_interval(values: Iterable[float], *, samples: int = 5000) -> list[float] | None:
+def _bootstrap_interval(
+    values: Iterable[float], *, samples: int = 5000
+) -> list[float] | None:
     observations = list(values)
     if not observations:
         return None
     rng = random.Random(20261014)
     means = []
     for _ in range(samples):
-        means.append(
-            statistics.fmean(rng.choice(observations) for _ in observations)
-        )
+        means.append(statistics.fmean(rng.choice(observations) for _ in observations))
     means.sort()
     return [means[int(samples * 0.025)], means[int(samples * 0.975)]]
 
@@ -190,15 +167,13 @@ def summarize_backhaul(runs: Iterable[dict[str, Any]]) -> dict[str, Any]:
     complete_cycles = []
     for cycle in range(1, 6):
         cycle_runs = [
-            run
-            for run in run_list
-            if run.get("cycle") == cycle and run.get("complete")
+            run for run in run_list if run.get("cycle") == cycle and run.get("complete")
         ]
         if {run["profile"]["name"] for run in cycle_runs} == set(BACKHAUL_PROFILES):
             complete_cycles.append(cycle)
 
     profiles: dict[str, Any] = {}
-    for name in BACKHAUL_PROFILE_CHOICES:
+    for name in BACKHAUL_PROFILES:
         profile_runs = by_profile.get(name, [])
         rates = [
             run["stages"]["delivered_records_per_second"]
@@ -238,8 +213,7 @@ def summarize_backhaul(runs: Iterable[dict[str, Any]]) -> dict[str, Any]:
                 (
                     run
                     for run in run_list
-                    if run["cycle"] == cycle
-                    and run["profile"]["name"] == candidate
+                    if run["cycle"] == cycle and run["profile"]["name"] == candidate
                 ),
                 None,
             )
@@ -264,88 +238,6 @@ def summarize_backhaul(runs: Iterable[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _resolve_profile(args: argparse.Namespace) -> BackhaulProfile:
-    profile = BACKHAUL_PROFILES[args.profile]
-    supplied = {
-        "nominal_rate_hz": args.nominal_rate_hz,
-        "return_mcs": args.return_mcs,
-        "return_power_dbm": args.return_power_dbm,
-        "batch_records": args.batch_records,
-        "batch_wait_ms": args.batch_wait_ms,
-        "send_timeout_ms": args.send_timeout_ms,
-    }
-    for name, value in supplied.items():
-        if value is not None and value != getattr(profile, name):
-            raise ValueError(
-                f"{name}={value} conflicts with profile {profile.name} "
-                f"({getattr(profile, name)})"
-            )
-    return profile
-
-
-def capture_backhaul(args: argparse.Namespace) -> int:
-    """Capture one ten-minute backhaul profile."""
-
-    try:
-        profile = _resolve_profile(args)
-    except ValueError as exc:
-        raise SystemExit(str(exc)) from exc
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    run_dir = args.output_dir / f"{timestamp}_cycle-{args.cycle}_{profile.name}"
-    run_dir.mkdir(parents=True, exist_ok=False)
-    reader = EspNowSerialCsiReader(
-        args.gateway_port,
-        args.baud,
-        RollingCsiBuffer(nominal_rate=profile.nominal_rate_hz, seconds=10),
-        run_dir,
-        receiver_mac=args.receiver_mac,
-    )
-    reader.start()
-    summary_path = run_dir / "summary.json"
-    try:
-        _wait_for_telemetry(reader, args.startup_timeout)
-        time.sleep(args.warmup)
-        start = reader.telemetry_snapshot()
-        time.sleep(args.duration)
-        end = reader.telemetry_snapshot()
-        summary = build_backhaul_summary(
-            profile=profile,
-            cycle=args.cycle,
-            warmup_seconds=args.warmup,
-            duration_seconds=args.duration,
-            geometry_notes=args.geometry_notes,
-            start=start,
-            end=end,
-        )
-        summary_path.write_text(
-            json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
-        print(summary_path)
-        return 0 if summary["complete"] else 1
-    except (KeyboardInterrupt, RuntimeError) as exc:
-        summary_path.write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "experiment": "espnow-backhaul",
-                    "profile": asdict(profile),
-                    "cycle": args.cycle,
-                    "complete": False,
-                    "issues": [str(exc)],
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        print(f"incomplete capture: {exc}")
-        print(summary_path)
-        return 1
-    finally:
-        reader.stop()
-
-
 def summarize_backhaul_files(args: argparse.Namespace) -> int:
     runs = [json.loads(path.read_text(encoding="utf-8")) for path in args.summaries]
     report = summarize_backhaul(runs)
@@ -361,30 +253,6 @@ def summarize_backhaul_files(args: argparse.Namespace) -> int:
 def add_backhaul_commands(commands: Any) -> None:
     """Register backhaul subcommands on the main experiment parser."""
 
-    run = commands.add_parser("backhaul-run", help="capture one ESP-NOW backhaul profile")
-    run.add_argument("--profile", choices=BACKHAUL_PROFILE_CHOICES, required=True)
-    run.add_argument("--cycle", type=int, default=1)
-    run.add_argument("--warmup", type=float, default=BACKHAUL_DEFAULT_WARMUP_SECONDS)
-    run.add_argument("--duration", type=float, default=BACKHAUL_DEFAULT_DURATION_SECONDS)
-    run.add_argument(
-        "--startup-timeout", type=float, default=BACKHAUL_DEFAULT_STARTUP_TIMEOUT_SECONDS
-    )
-    run.add_argument("--gateway-port", required=True)
-    run.add_argument("--baud", type=int, default=921600)
-    run.add_argument("--receiver-mac")
-    run.add_argument("--geometry-notes", default="")
-    run.add_argument("--output-dir", type=Path, default=Path("data/experiments/backhaul"))
-    for name, kwargs in (
-        ("nominal-rate-hz", {"type": int}),
-        ("return-mcs", {"type": int}),
-        ("return-power-dbm", {"type": int}),
-        ("batch-records", {"type": int}),
-        ("batch-wait-ms", {"type": int}),
-        ("send-timeout-ms", {"type": int}),
-    ):
-        run.add_argument(f"--{name}", default=None, **kwargs)
-    run.set_defaults(handler=capture_backhaul)
-
     summarize = commands.add_parser(
         "backhaul-summarize", help="summarize five paired ESP-NOW backhaul cycles"
     )
@@ -396,7 +264,9 @@ def add_backhaul_commands(commands: Any) -> None:
 def _parser() -> argparse.ArgumentParser:
     """Return a parser containing only the backhaul commands for unit tests."""
 
-    parser = argparse.ArgumentParser(description="Capture ESP-NOW backhaul experiments.")
+    parser = argparse.ArgumentParser(
+        description="Summarize historical ESP-NOW backhaul experiments."
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     add_backhaul_commands(commands)
     return parser

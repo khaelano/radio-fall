@@ -13,7 +13,7 @@ from fall_detection.radio.visualization.app import GUI_FPS_CHOICES, GUI_INTERVAL
 from fall_detection.radio.visualization.dashboard import DEFAULT_VIEW_SECONDS
 
 
-def test_collection_parser_defaults_to_espnow_protocol():
+def test_collection_parser_defaults_to_ble_protocol():
     args = _parser().parse_args(
         [
             "--port",
@@ -23,7 +23,7 @@ def test_collection_parser_defaults_to_espnow_protocol():
         ]
     )
 
-    assert args.transport == "espnow"
+    assert args.transport == "ble"
     assert args.output_dir.name == "test-sessions"
     assert args.nominal_rate_hz == 50
 
@@ -36,7 +36,9 @@ def test_collection_metrics_show_unavailable_telemetry_explicitly():
         buffer = Buffer()
 
         def telemetry_snapshot(self):
-            from fall_detection.radio.acquisition.telemetry import BackhaulTelemetrySnapshot
+            from fall_detection.radio.acquisition.telemetry import (
+                BackhaulTelemetrySnapshot,
+            )
 
             return BackhaulTelemetrySnapshot(
                 captured_monotonic_ns=1,

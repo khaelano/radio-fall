@@ -169,8 +169,8 @@ class RadioProfile:
             raise RadioProfileError("channel, bandwidth_mhz, and nominal_rate_hz must be integers") from exc
         if bandwidth != 20:
             raise RadioProfileError("only 20 MHz bandwidth is supported")
-        if rate != 100:
-            raise RadioProfileError("nominal_rate_hz must be 100")
+        if isinstance(value.get("nominal_rate_hz"), bool) or rate != value.get("nominal_rate_hz") or not 50 <= rate <= 100:
+            raise RadioProfileError("nominal_rate_hz must be an integer between 50 and 100")
         if band == "2.4ghz" and channel not in INDONESIA_2GHZ_CHANNELS:
             raise RadioProfileError("2.4ghz channel is not permitted in Indonesia")
         if band == "5ghz":

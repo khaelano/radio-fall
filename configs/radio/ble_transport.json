@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "scheduler": "round_robin",
+  "seed": 17,
+  "queue_capacity": 32,
+  "maximum_age_ms": 250,
+  "outstanding_batches": 4,
+  "ack_timeout_ms": 50,
+  "maximum_retries": 1,
+  "records_per_grant": 4,
+  "start_guard_us": 1000,
+  "end_guard_us": 1000,
+  "bin_hz": 50,
+  "delivery_grace_ms": 100,
+  "drain_ms": 300
+}

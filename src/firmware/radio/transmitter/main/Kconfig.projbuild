@@ -22,13 +22,45 @@ config CSI_CHANNEL
         Safe 2.4 GHz fallback channel used before USB provisioning. A
         provisioned profile replaces this value at runtime.
 
-config CSI_PACKET_RATE
-    int "Sensing packet rate (packets per second)"
-    range 1 500
+config CSI_BLE_SCHEDULER
+    bool
+    depends on (IDF_TARGET_ESP32C5 || IDF_TARGET_ESP32C6) && CSI_USB_CONTROL
+    default y
+
+config CSI_TX_POWER_QUARTER_DBM
+    int "Maximum sensing transmit power (quarter dBm)"
+    range 8 80
+    default 44
+    help
+        Initial limit is 44 (11 dBm). The driver quantizes supported levels.
+        Lower power can reduce link margin; verify CSI delivery at the actual
+        receiver positions. This is not a measured board-temperature limit.
+
+config CSI_DIAGNOSTIC_HT20
+    bool "Diagnostic HT20 sensing (not HE20 collection)"
+    default n
+    help
+        Isolate Wi-Fi PHY problems using HT20 instead of the collection HE20
+        PHY. Status explicitly reports ht20 and normal BLE collection rejects
+        this diagnostic image. This does not change the provisioned profile.
+
+config CSI_PEER_RETRY_BACKOFF_MS
+    int "Retry spacing for unreachable sensing peers (milliseconds)"
+    range 0 1000
     default 100
     help
-        Nominal rate of the sequence-numbered sensing packets. The upper
-        bound keeps the period representable with the default 1 kHz RTOS tick.
+        After a failed MAC acknowledgement, probe that peer again after this
+        interval. Successful peers keep the sensing rate. Grant ownership and
+        registered slot order never change. This bounds airtime spent on
+        disconnected peers; actual submissions remain explicit in round logs.
+
+config CSI_CONTROL_TIMEOUT_MS
+    int "Host control lease timeout (milliseconds)"
+    range 1000 10000
+    default 3000
+    help
+        Stop sensing and turn off the transmitter Wi-Fi radio if valid host
+        clock/control requests stop arriving. Normal host clock polling is 1 Hz.
 
 config CSI_SEND_MAC
     string "Transmitter MAC address"

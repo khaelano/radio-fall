@@ -1,6 +1,9 @@
 import json
+from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import serial
 from serial.tools import list_ports
 
@@ -8,7 +11,14 @@ from fall_detection.radio.acquisition.serial_framing import (
     TYPE_DEVICE_STATUS,
     encode_serial_frame,
 )
-from fall_detection.radio.provisioning import _open_serial_devices
+from fall_detection.radio.profile import RadioInventory, RadioProfile
+from fall_detection.radio.provisioning import (
+    DeviceStatus,
+    ProvisioningError,
+    RadioProvisioner,
+    _open_serial_devices,
+    provision,
+)
 
 
 class FakeSerialConnection:
@@ -72,3 +82,187 @@ def test_open_serial_devices_does_not_close_last_device_after_later_open_failure
     assert len(devices) == 1
     assert devices[0].connection.is_open
     devices[0].close()
+
+
+def test_discovery_preserves_power_and_reset_diagnostics():
+    payload = dict(
+        role="transmitter",
+        target="esp32c6",
+        mac="02:00:00:00:00:00",
+        protocol_version=2,
+        ready=True,
+        csi_transport="ble",
+        reset_reason="brownout",
+        uptime_ms=1500,
+        radio_active=False,
+        tx_power_quarter_dbm=44,
+    )
+    status = DeviceStatus.from_payload(json.dumps(payload).encode())
+    assert status.reset_reason == "brownout" and status.uptime_ms == 1500
+    assert status.csi_transport == "ble" and status.radio_active is False
+    assert status.tx_power_quarter_dbm == 44
+
+
+class FakeProvisioningDevice:
+    def __init__(self, device):
+        self.status = DeviceStatus(device.role, device.target, device.mac, "test", 2)
+        self.payloads = []
+        self.commits = 0
+        self.closed = False
+
+    def stage_profile(self, payload):
+        self.payloads.append(json.loads(payload))
+
+    def commit_profile(self):
+        self.commits += 1
+        payload = self.payloads[-1]
+        self.status = replace(
+            self.status,
+            ready=True,
+            profile_id=payload["profile"]["profile_id"],
+            profile_fingerprint=payload["fingerprint"],
+        )
+
+    def refresh_status(self):
+        return self.status
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.fixture
+def provisioning_setup():
+    def device(i):
+        return dict(
+            id=f"board-{i}",
+            role="transmitter" if i == 0 else "receiver",
+            target="esp32c6",
+            mac=f"02:00:00:00:00:{i:02x}",
+        )
+
+    inventory = RadioInventory.from_mapping(
+        dict(
+            schema_version=1,
+            transmitter=device(0),
+            receivers=[device(i) for i in range(1, 5)],
+        )
+    )
+    profile = RadioProfile.load(
+        Path("configs/radio/profiles/indonesia_2g_ch6_80hz.json")
+    )
+    return inventory, profile
+
+
+def test_sequential_provisioning_preserves_full_inventory_on_every_board(
+    provisioning_setup,
+):
+    inventory, profile = provisioning_setup
+    boards = [
+        FakeProvisioningDevice(device)
+        for device in (inventory.transmitter, *inventory.receivers)
+    ]
+    reports = [
+        RadioProvisioner([board]).provision(inventory, profile, sequential=True)
+        for board in reversed(boards)
+    ]
+    assert len({report.fingerprint for report in reports}) == 1
+    for board in boards:
+        assert board.commits == 1
+        assert board.payloads == boards[0].payloads
+        assert board.payloads[0]["receivers"] == [d.mac for d in inventory.receivers]
+        assert board.payloads[0]["transmitter_mac"] == inventory.transmitter.mac
+        assert board.status.ready
+
+
+@pytest.mark.parametrize("count", [0, 2, 5])
+def test_sequential_requires_exactly_one_board(provisioning_setup, count):
+    inventory, profile = provisioning_setup
+    boards = [FakeProvisioningDevice(inventory.transmitter) for _ in range(count)]
+    with pytest.raises(ProvisioningError, match="exactly one"):
+        RadioProvisioner(boards).provision(inventory, profile, sequential=True)
+    assert all(not board.payloads for board in boards)
+
+
+@pytest.mark.parametrize(
+    "change,match",
+    [
+        ({"mac": "02:00:00:00:ff:ff"}, "unknown device MAC"),
+        ({"target": "esp32c5"}, "role/target"),
+        ({"role": "receiver"}, "role/target"),
+        ({"protocol_version": 1}, "unsupported protocol"),
+    ],
+)
+def test_sequential_rejects_unverified_identity(provisioning_setup, change, match):
+    inventory, profile = provisioning_setup
+    board = FakeProvisioningDevice(inventory.transmitter)
+    board.status = replace(board.status, **change)
+    with pytest.raises(ProvisioningError, match=match):
+        RadioProvisioner([board]).provision(inventory, profile, sequential=True)
+    assert not board.payloads
+
+
+def test_default_provisioning_still_requires_all_boards(provisioning_setup):
+    inventory, profile = provisioning_setup
+    board = FakeProvisioningDevice(inventory.transmitter)
+    with pytest.raises(ProvisioningError, match="expected 5 devices"):
+        RadioProvisioner([board]).provision(inventory, profile)
+    boards = [
+        FakeProvisioningDevice(device)
+        for device in (inventory.transmitter, *inventory.receivers)
+    ]
+    report = RadioProvisioner(boards).provision(inventory, profile)
+    assert len(report.devices) == 5 and all(board.status.ready for board in boards)
+
+
+def test_sequential_validates_disconnected_board_capabilities(provisioning_setup):
+    inventory, _ = provisioning_setup
+    inventory = replace(
+        inventory, transmitter=replace(inventory.transmitter, target="esp32c5")
+    )
+    profile = RadioProfile.load(
+        Path("configs/radio/profiles/indonesia_5g_ch44_80hz.json")
+    )
+    board = FakeProvisioningDevice(inventory.transmitter)
+    with pytest.raises(ProvisioningError, match="5ghz profiles require ESP32-C5"):
+        RadioProvisioner([board]).provision(inventory, profile, sequential=True)
+    assert not board.payloads
+
+
+def test_sequential_requires_post_commit_verification(provisioning_setup):
+    inventory, profile = provisioning_setup
+    board = FakeProvisioningDevice(inventory.receivers[0])
+    board.refresh_status = lambda: replace(board.status, ready=False)
+    with pytest.raises(ProvisioningError, match="did not complete"):
+        RadioProvisioner([board]).provision(inventory, profile, sequential=True)
+
+
+def test_sequential_cli_verifies_only_connected_board(
+    provisioning_setup, tmp_path, monkeypatch, capsys
+):
+    inventory, profile = provisioning_setup
+    config_path = tmp_path / "receivers.json"
+    profile_path = tmp_path / "profile.json"
+    config_path.write_text(json.dumps(inventory.as_dict()))
+    profile_path.write_text(json.dumps(profile.as_dict()))
+    board = FakeProvisioningDevice(inventory.receivers[2])
+    monkeypatch.setattr(
+        "fall_detection.radio.provisioning._open_serial_devices", lambda: [board]
+    )
+    assert (
+        provision(
+            [
+                "--receiver-config",
+                str(config_path),
+                "--radio-profile",
+                str(profile_path),
+                "--sequential",
+            ]
+        )
+        == 0
+    )
+    assert board.closed
+    output = capsys.readouterr().out
+    assert (
+        board.status.mac in output
+        and "other configured boards were not checked" in output
+    )

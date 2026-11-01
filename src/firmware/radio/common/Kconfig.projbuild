@@ -1,0 +1,24 @@
+menu "CSI board hardware"
+
+choice CSI_BOARD
+    prompt "Development board"
+    default CSI_BOARD_GENERIC
+
+config CSI_BOARD_GENERIC
+    bool "Generic ESP32-C5/C6 (no antenna GPIO control)"
+
+config CSI_BOARD_XIAO_ESP32C6
+    bool "Seeed Studio XIAO ESP32-C6"
+    depends on IDF_TARGET_ESP32C6
+
+endchoice
+
+config CSI_XIAO_EXTERNAL_ANTENNA
+    bool "Use an attached external antenna on XIAO C6"
+    depends on CSI_BOARD_XIAO_ESP32C6
+    default n
+    help
+        Enable the RF switch with GPIO3 low. GPIO14 high selects the external
+        antenna; otherwise GPIO14 low selects the built-in ceramic antenna.
+
+endmenu

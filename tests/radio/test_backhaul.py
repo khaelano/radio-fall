@@ -3,7 +3,6 @@ from __future__ import annotations
 from fall_detection.radio.acquisition.telemetry import (
     BackhaulTelemetrySnapshot,
     GatewayTelemetry,
-    ReceiverTelemetry,
     TransmitterTelemetry,
     telemetry_delta,
 )
@@ -77,7 +76,9 @@ def test_backhaul_delta_marks_restart_and_unavailable_stages():
 
     assert not delta["complete"]
     assert any("restarted" in warning for warning in delta["warnings"])
-    assert any("gateway statistics unavailable" in warning for warning in delta["warnings"])
+    assert any(
+        "gateway statistics unavailable" in warning for warning in delta["warnings"]
+    )
     assert telemetry_delta(start, None)["values"] is None
 
 
@@ -99,17 +100,8 @@ def test_backhaul_summary_declares_profile_and_stage_metrics():
 
 
 def test_backhaul_parser_and_five_cycle_summary():
-    args = _parser().parse_args(
-        [
-            "backhaul-run",
-            "--profile",
-            "final-50-mcs0-20",
-            "--gateway-port",
-            "/dev/ttyACM0",
-        ]
-    )
-    assert args.duration == 600
-    assert args.warmup == 30
+    args = _parser().parse_args(["backhaul-summarize", "old-summary.json"])
+    assert args.summaries[0].name == "old-summary.json"
 
     runs = []
     for cycle in range(1, 6):
@@ -122,7 +114,12 @@ def test_backhaul_parser_and_five_cycle_summary():
                     duration_seconds=10,
                     geometry_notes="",
                     start=snapshot(0),
-                    end=snapshot(10_000_000_000, records=500, attempts=profile.nominal_rate_hz * 10, accepted=500),
+                    end=snapshot(
+                        10_000_000_000,
+                        records=500,
+                        attempts=profile.nominal_rate_hz * 10,
+                        accepted=500,
+                    ),
                 )
             )
 

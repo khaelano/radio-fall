@@ -1,4 +1,4 @@
-idf_component_register(SRCS "app_main.c"
+idf_component_register(SRCS "app_main.c" "ble_transmitter.c"
                        INCLUDE_DIRS "."
                        PRIV_REQUIRES
                            esp_driver_usb_serial_jtag
@@ -7,4 +7,5 @@ idf_component_register(SRCS "app_main.c"
                            esp_netif
                            esp_timer
                            esp_wifi
-                           nvs_flash)
+                           nvs_flash
+                           vfs)

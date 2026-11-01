@@ -32,6 +32,11 @@ class CsiRecord:
     raw_line: str = ""
     receiver_mac: str = ""
     transport_sequence: int = 0
+    run_id: int | None = None
+    transmitter_boot_id: int | None = None
+    receiver_boot_id: int | None = None
+    capture_host_monotonic_ns: int | None = None
+    capture_clock_uncertainty_us: float | None = None
     tx_timestamp_us: int | None = None
     rx_callback_timestamp_us: int | None = None
     first_word_invalid: bool = False

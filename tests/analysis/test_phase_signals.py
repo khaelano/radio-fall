@@ -192,3 +192,42 @@ def test_load_phase_signal_requires_existing_receiver(phase_capture):
     root, _ = phase_capture
     with pytest.raises(FileNotFoundError):
         load_phase_signal(root, "001/01", "rx-2")
+
+
+def test_ble_phase_uses_capture_clock_sidecar_and_sorts_derived_view(phase_capture):
+    root, receiver = phase_capture
+    values = [1_100_000_000, 1_050_000_000, 1_200_000_000, 1_300_000_000]
+    rows = [
+        dict(
+            schema_version=1,
+            sequence=i,
+            rx_radio_timestamp_us=100000 + i * 100000,
+            run_id="123",
+            transmitter_boot_id=11,
+            capture_host_monotonic_ns=value,
+            clock_uncertainty_us=100,
+        )
+        for i, value in enumerate(values)
+    ]
+    (receiver / "ble_timing.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows)
+    )
+    signal = load_phase_signal(root, "001/01", "rx-1")
+    np.testing.assert_allclose(signal.time_seconds, [0.05, 0.1, 0.2])
+    assert "BLE" in signal.time_source and signal.sync_uncertainty_us == 100
+    # The view is sorted; immutable source rows retain their original order.
+    assert (
+        json.loads((receiver / "ble_timing.jsonl").read_text().splitlines()[0])[
+            "sequence"
+        ]
+        == 0
+    )
+
+
+def test_ble_analysis_refuses_arrival_time_fallback_when_sidecar_missing(phase_capture):
+    root, _ = phase_capture
+    manifest = json.loads((root / "session.json").read_text())
+    manifest["environment"]["transport"] = "ble"
+    (root / "session.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="capture-time sidecar"):
+        load_phase_signal(root, "001/01", "rx-1")

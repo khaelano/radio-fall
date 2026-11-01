@@ -348,6 +348,7 @@ def _source_files(job, attempt_paths):
                 "csi.csv",
                 "radio_timing.csv",
                 "usb_clock_sync.csv",
+                "ble_timing.jsonl",
             )
         )
     return [

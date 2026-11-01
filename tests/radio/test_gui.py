@@ -1,5 +1,6 @@
 import pytest
 
+from fall_detection.radio.acquisition.buffer import RollingCsiBuffer
 from fall_detection.radio.visualization.app import (
     GUI_FPS_CHOICES,
     GUI_FPS_DEFAULT,
@@ -8,7 +9,6 @@ from fall_detection.radio.visualization.app import (
     _parser,
     frame_interval_ms,
 )
-from fall_detection.radio.acquisition.buffer import RollingCsiBuffer
 
 
 def test_gui_uses_constant_sixteen_or_twenty_four_fps():
@@ -29,46 +29,17 @@ def test_gui_parser_uses_physical_subcarrier_controls():
     assert args.inspect_subcarrier == 2
 
 
-def test_gui_parser_accepts_udp_listener_options():
-    args = _parser().parse_args(
-        [
-            "--transport",
-            "udp",
-            "--listen-host",
-            "192.168.50.1",
-            "--listen-port",
-            "5501",
-            "--receiver-mac",
-            "24:6f:28:aa:bb:cc",
-        ]
-    )
-
-    assert args.transport == "udp"
-    assert args.listen_host == "192.168.50.1"
-    assert args.listen_port == 5501
-    assert args.receiver_mac == "24:6f:28:aa:bb:cc"
+@pytest.mark.parametrize("transport", ["serial", "espnow", "udp"])
+def test_gui_parser_rejects_legacy_transports(transport):
+    with pytest.raises(SystemExit):
+        _parser().parse_args(["--transport", transport])
 
 
-def test_gui_parser_accepts_espnow_gateway_serial_options():
-    args = _parser().parse_args(
-        [
-            "--transport",
-            "espnow",
-            "--port",
-            "/dev/ttyUSB0",
-            "--baud",
-            "921600",
-            "--receiver-mac",
-            "24:6f:28:aa:bb:cc",
-        ]
-    )
-
-    assert args.transport == "espnow"
-    assert args.port == "/dev/ttyUSB0"
-    assert args.receiver_mac == "24:6f:28:aa:bb:cc"
+def test_gui_defaults_to_ble():
+    assert _parser().parse_args([]).transport == "ble"
 
 
-def test_gui_parser_accepts_usb_receiver_selection():
+def test_gui_parser_accepts_ble_receiver_selection():
     args = _parser().parse_args(
         [
             "--receiver-config",

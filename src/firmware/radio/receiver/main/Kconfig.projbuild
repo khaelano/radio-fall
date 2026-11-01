@@ -14,24 +14,10 @@ config CSI_BAND_5G
 
 endchoice
 
-choice CSI_OUTPUT_MODE
-    prompt "CSI output mode"
-    default CSI_OUTPUT_SERIAL
-    help
-        Select whether CSI records are emitted as legacy CSV, retained only
-        for metrics, or streamed as compact binary batches.
-
-config CSI_OUTPUT_SERIAL
-    bool "USB binary batches"
-
-config CSI_OUTPUT_METRICS_ONLY
-    bool "Metrics only (no AP or CSI output)"
-    help
-        Keep the receiver on the fixed sensing channel and emit only periodic
-        receiver counter snapshots. This mode provides an RF baseline without
-        serial formatting or processor-AP traffic.
-
-endchoice
+config CSI_OUTPUT_BLE
+    bool
+    default y
+    select ESP_COEX_SW_COEXIST_ENABLE
 
 config CSI_CHANNEL
     int "Wi-Fi channel"
@@ -46,22 +32,6 @@ config CSI_SEND_MAC
     default "1a:00:00:00:00:00"
     help
         MAC address of the transmitter whose packets should be logged.
-
-config CSI_BATCH_RECORDS
-    int "Maximum CSI records per batch"
-    range 1 4
-    default 4
-    help
-        Flush a batch after this many records. The 1400-byte payload limit may
-        force an earlier flush for unusually large CSI records.
-
-config CSI_BATCH_MAX_WAIT_MS
-    int "Maximum batch wait (milliseconds)"
-    range 1 1000
-    default 35
-    help
-        Maximum time from the first queued record until its batch is flushed.
-        A sensing-sequence batch boundary can flush it sooner.
 
 config CSI_USB_CONTROL
     bool "USB profile provisioning control"

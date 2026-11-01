@@ -1,0 +1,3 @@
+CONFIG_CSI_BOARD_XIAO_ESP32C6=y
+# Built-in ceramic antenna; no external antenna is required.
+CONFIG_CSI_XIAO_EXTERNAL_ANTENNA=n

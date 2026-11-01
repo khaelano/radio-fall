@@ -885,3 +885,12 @@ Related documentation:
 - [`src/fall_detection/collection/README.md`](../src/fall_detection/collection/README.md) — collector operation and schema-2 writer
 - [`src/fall_detection/session_inspector/`](../src/fall_detection/session_inspector/) — manifest reader, CSV loader, review sidecar, exporter
 - [`src/fall_detection/radio/acquisition/protocol.py`](../src/fall_detection/radio/acquisition/protocol.py) — exact `CSI_DATA` parser and formatter
+
+## Optional BLE transport sidecars
+
+BLE sessions retain schema-2 attempt CSVs and add independently versioned
+`transport/ble/<run-id>/` journals plus per-receiver `ble_timing.jsonl`.
+Capture, notification arrival, and processing availability are separate times.
+Packets are assigned to attempts by capture time; late delivery cannot backfill
+finalized availability bins. See [BLE transport files and wire contract](ble-transport.md).
+USB-only sessions do not require these sidecars.

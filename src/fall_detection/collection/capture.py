@@ -78,6 +78,7 @@ class TrialCapture:
             mac.lower(): receiver_id for mac, receiver_id in receiver_ids.items()
         }
         self._receiver_streams: dict[str, tuple[TextIO, TextIO]] = {}
+        self._ble_streams: dict[str, TextIO] = {}
         for receiver_id in sorted(set(self.receiver_ids.values())):
             receiver_path = self.path / "receivers" / _slug(receiver_id)
             receiver_path.mkdir(parents=True, exist_ok=True)
@@ -101,7 +102,9 @@ class TrialCapture:
             receiver_id = self.receiver_ids.get(record.receiver_mac.lower())
             if receiver_id is None:
                 return
-            tx_timestamp = "" if record.tx_timestamp_us is None else record.tx_timestamp_us
+            tx_timestamp = (
+                "" if record.tx_timestamp_us is None else record.tx_timestamp_us
+            )
             rx_callback = (
                 ""
                 if record.rx_callback_timestamp_us is None
@@ -114,6 +117,31 @@ class TrialCapture:
                 f"{tx_timestamp},{record.timestamp_us},{rx_callback},"
                 f"{host_receive_monotonic_ns}\n"
             )
+            if record.run_id is not None:
+                self._write_ble_timing(receiver_id, record, host_receive_monotonic_ns)
+
+    def _write_ble_timing(
+        self, receiver_id: str, record: CsiRecord, arrival_ns: int
+    ) -> None:
+        if receiver_id not in self._ble_streams:
+            path = self.path / "receivers" / _slug(receiver_id) / "ble_timing.jsonl"
+            self._ble_streams[receiver_id] = path.open("x", encoding="utf-8")
+        value = dict(
+            schema_version=1,
+            sequence=record.sequence,
+            receiver_mac=record.receiver_mac,
+            run_id=str(record.run_id),
+            transmitter_boot_id=record.transmitter_boot_id,
+            receiver_boot_id=record.receiver_boot_id,
+            rx_radio_timestamp_us=record.timestamp_us,
+            tx_enqueue_timestamp_us=record.tx_timestamp_us,
+            capture_host_monotonic_ns=record.capture_host_monotonic_ns,
+            clock_uncertainty_us=record.capture_clock_uncertainty_us,
+            host_receive_monotonic_ns=arrival_ns,
+        )
+        self._ble_streams[receiver_id].write(
+            json.dumps(value, separators=(",", ":")) + "\n"
+        )
 
     def write_clock_sync(
         self,
@@ -139,22 +167,36 @@ class TrialCapture:
                     f"{estimate.drift_ppm:.6f},{estimate.uncertainty_us:.6f}\n"
                 )
 
-    def finish(self, status: str, **updates: Any) -> dict[str, Any]:
-        """Close all streams and atomically publish final attempt metadata."""
-
+    def close_streams(self) -> None:
+        """Close writers after the optional BLE drain interval."""
         with self._lock:
             for csi_file, timing_file in self._receiver_streams.values():
-                csi_file.flush()
-                timing_file.flush()
-                csi_file.close()
-                timing_file.close()
+                if not csi_file.closed:
+                    csi_file.flush()
+                    timing_file.flush()
+                    csi_file.close()
+                    timing_file.close()
+
+            for stream in self._ble_streams.values():
+                if not stream.closed:
+                    stream.flush()
+                    stream.close()
+
+    def finish(
+        self, status: str, *, defer_close: bool = False, **updates: Any
+    ) -> dict[str, Any]:
+        """Publish final metadata, optionally deferring stream closure for BLE."""
+
+        with self._lock:
+            if not defer_close:
+                self.close_streams()
             self._metadata.update(updates)
             self._metadata["status"] = status
             _write_json(self.path / "attempt.json", self._metadata)
             return dict(self._metadata)
 
     def update_status(self, status: str, **updates: Any) -> dict[str, Any]:
-        """Update disposition after the streams have already been closed."""
+        """Update disposition independently of the optional file-drain interval."""
 
         with self._lock:
             self._metadata.update(updates)
@@ -226,7 +268,9 @@ class SessionArtifactStore:
     ) -> TrialCapture:
         """Create a new numbered attempt bundle for a trial."""
 
-        scenario_dir = self.root / "trials" / f"{trial.ordinal:03d}_{_slug(trial.scenario.id)}"
+        scenario_dir = (
+            self.root / "trials" / f"{trial.ordinal:03d}_{_slug(trial.scenario.id)}"
+        )
         attempt_dir = scenario_dir / f"attempt_{attempt_number:02d}"
         metadata = {
             "session_id": self.session_id,

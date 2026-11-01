@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include "serial_frame.h"
 
 #define CSI_SENSING_MAGIC "CSIT"
 #define CSI_SENSING_VERSION 1
@@ -24,6 +25,7 @@
 
 typedef struct {
     uint32_t sequence;
+    uint8_t version;
     uint32_t sync_id;
     uint64_t tx_t1_us;
     bool sync_requested;
@@ -117,11 +119,15 @@ static inline bool csi_sensing_decode(const uint8_t *source, size_t length,
 {
     if (source == NULL || packet == NULL || length < CSI_SENSING_HEADER_SIZE ||
         memcmp(source, CSI_SENSING_MAGIC, 4) != 0 ||
-        source[4] != CSI_SENSING_VERSION ||
+        (source[4] != CSI_SENSING_VERSION && source[4] != 2 && source[4] != 3) ||
         (source[5] & ~CSI_SENSING_FLAG_SYNC_REQUEST) != 0 ||
-        csi_clock_read_u16(source + 6) != CSI_SENSING_HEADER_SIZE) {
+        (source[4] == 1 ? csi_clock_read_u16(source + 6) != CSI_SENSING_HEADER_SIZE :
+         source[4] == 2 ? (length < 84 || csi_clock_read_u16(source + 6) != 84) :
+         (length < 88 || csi_clock_read_u16(source + 6) != 88 ||
+          csi_serial_crc32(source, 84) != csi_clock_read_u32(source + 84)))) {
         return false;
     }
+    packet->version = source[4];
     packet->sequence = csi_clock_read_u32(source + 8);
     packet->sync_id = csi_clock_read_u32(source + 12);
     packet->tx_t1_us = csi_clock_read_u64(source + 16);

@@ -1,4 +1,4 @@
-"""USB discovery and atomic radio-profile provisioning.
+"""USB discovery and radio-profile provisioning for groups or individual boards.
 
 The host speaks one small framed JSON control protocol to both transmitter
 and receiver firmware.  The transport adapter is deliberately separate from
@@ -8,10 +8,10 @@ physical USB boards.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
-from pathlib import Path
 import time
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Iterable, Protocol
 
 from .acquisition.serial_framing import (
@@ -21,13 +21,10 @@ from .acquisition.serial_framing import (
     TYPE_PROFILE_COMMIT_ACK,
     TYPE_PROFILE_STAGE,
     TYPE_PROFILE_STAGE_ACK,
-    SerialFrame,
-    SerialFrameError,
     SerialFrameStreamDecoder,
     encode_serial_frame,
 )
 from .profile import (
-    RadioDevice,
     RadioInventory,
     RadioProfile,
     RadioProfileError,
@@ -37,7 +34,7 @@ from .profile import (
 
 
 class ProvisioningError(RuntimeError):
-    """Raised when discovery or an atomic provisioning phase fails."""
+    """Raised when discovery or a provisioning phase fails."""
 
 
 @dataclass(frozen=True)
@@ -52,6 +49,15 @@ class DeviceStatus:
     profile_fingerprint: str | None = None
     profile_id: str | None = None
     ready: bool = False
+    csi_transport: str | None = None
+    reset_reason: str | None = None
+    uptime_ms: int | None = None
+    radio_active: bool | None = None
+    tx_power_quarter_dbm: int | None = None
+    board: str | None = None
+    antenna: str | None = None
+    sensing_phy: str | None = None
+    sensing_version: int | None = None
 
     @classmethod
     def from_payload(cls, payload: bytes) -> "DeviceStatus":
@@ -73,8 +79,19 @@ class DeviceStatus:
                     if value.get("profile_fingerprint")
                     else None
                 ),
-                profile_id=(str(value["profile_id"]) if value.get("profile_id") else None),
+                profile_id=(
+                    str(value["profile_id"]) if value.get("profile_id") else None
+                ),
                 ready=bool(value.get("ready", False)),
+                csi_transport=value.get("csi_transport"),
+                reset_reason=value.get("reset_reason"),
+                uptime_ms=value.get("uptime_ms"),
+                radio_active=value.get("radio_active"),
+                tx_power_quarter_dbm=value.get("tx_power_quarter_dbm"),
+                board=value.get("board"),
+                antenna=value.get("antenna"),
+                sensing_phy=value.get("sensing_phy"),
+                sensing_version=value.get("sensing_version"),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ProvisioningError("device status is missing required fields") from exc
@@ -84,17 +101,13 @@ class ProvisioningDevice(Protocol):
     """Small adapter interface required by :class:`RadioProvisioner`."""
 
     @property
-    def status(self) -> DeviceStatus:
-        ...
+    def status(self) -> DeviceStatus: ...
 
-    def stage_profile(self, payload: bytes) -> None:
-        ...
+    def stage_profile(self, payload: bytes) -> None: ...
 
-    def commit_profile(self) -> None:
-        ...
+    def commit_profile(self) -> None: ...
 
-    def close(self) -> None:
-        ...
+    def close(self) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -126,50 +139,77 @@ def _profile_payload(
 
 
 class RadioProvisioner:
-    """Preflight every device, then stage and commit one profile atomically."""
+    """Validate connected identities before staging one shared profile.
+
+    Sequential mode requires exactly one connected board while retaining the
+    complete inventory in its payload. Other boards are not checked in that mode.
+    """
 
     def __init__(self, devices: Iterable[ProvisioningDevice]) -> None:
         self.devices = tuple(devices)
 
     def preflight(
-        self, inventory: RadioInventory, profile: RadioProfile
+        self,
+        inventory: RadioInventory,
+        profile: RadioProfile,
+        *,
+        sequential: bool = False,
     ) -> tuple[tuple[ProvisioningDevice, DeviceStatus], ...]:
+        """Validate all configured boards, or one registered board sequentially."""
         expected = {inventory.transmitter.mac: inventory.transmitter}
         expected.update({device.mac: device for device in inventory.receivers})
-        if len(self.devices) != len(expected):
+        required_count = 1 if sequential else len(expected)
+        if len(self.devices) != required_count:
             raise ProvisioningError(
-                f"expected {len(expected)} devices, discovered {len(self.devices)}"
+                f"expected {required_count} devices, discovered {len(self.devices)}"
+                + (
+                    "; --sequential requires exactly one connected board"
+                    if sequential
+                    else ""
+                )
             )
         bound: list[tuple[ProvisioningDevice, DeviceStatus]] = []
         seen: set[str] = set()
         for device in self.devices:
             status = device.status
             if status.mac in seen:
-                raise ProvisioningError(f"duplicate device MAC discovered: {status.mac}")
+                raise ProvisioningError(
+                    f"duplicate device MAC discovered: {status.mac}"
+                )
             seen.add(status.mac)
             expected_device = expected.get(status.mac)
             if expected_device is None:
                 raise ProvisioningError(f"unknown device MAC discovered: {status.mac}")
-            if status.role != expected_device.role or status.target != expected_device.target:
+            if (
+                status.role != expected_device.role
+                or status.target != expected_device.target
+            ):
                 raise ProvisioningError(
                     f"device {status.mac} role/target does not match inventory"
                 )
             if status.protocol_version != 2:
-                raise ProvisioningError(f"device {status.mac} uses unsupported protocol")
+                raise ProvisioningError(
+                    f"device {status.mac} uses unsupported protocol"
+                )
             bound.append((device, status))
         try:
-            expected_profile = profile_fingerprint(profile, inventory)
+            profile_fingerprint(profile, inventory)
         except RadioProfileError as exc:
             raise ProvisioningError(str(exc)) from exc
         # Re-provisioning an already-provisioned device is how band or channel
         # gets changed, so a differing active profile must not block preflight.
-        # Staging and commit remain all-or-nothing across the whole set.
+        # Even sequential mode validates capabilities against the full inventory.
         return tuple(bound)
 
     def provision(
-        self, inventory: RadioInventory, profile: RadioProfile
+        self,
+        inventory: RadioInventory,
+        profile: RadioProfile,
+        *,
+        sequential: bool = False,
     ) -> ProvisioningReport:
-        bound = self.preflight(inventory, profile)
+        """Stage, commit and verify the selected boards using the full inventory."""
+        bound = self.preflight(inventory, profile, sequential=sequential)
         fingerprint = profile_fingerprint(profile, inventory)
         payload = _profile_payload(inventory, profile, fingerprint)
         staged: list[ProvisioningDevice] = []
@@ -186,10 +226,7 @@ class RadioProvisioner:
                     verified.append(device.status)
                     continue
                 status = refresh()
-                if (
-                    status.profile_fingerprint != fingerprint
-                    or not status.ready
-                ):
+                if status.profile_fingerprint != fingerprint or not status.ready:
                     raise ProvisioningError(
                         f"device {status.mac} did not report the committed profile"
                     )
@@ -208,7 +245,9 @@ class RadioProvisioner:
 class SerialProvisioningDevice:
     """PySerial adapter for the framed JSON provisioning protocol."""
 
-    def __init__(self, connection: Any, status: DeviceStatus, timeout: float = 2.0) -> None:
+    def __init__(
+        self, connection: Any, status: DeviceStatus, timeout: float = 2.0
+    ) -> None:
         self.connection = connection
         self._status = status
         self.timeout = timeout
@@ -218,11 +257,15 @@ class SerialProvisioningDevice:
     def status(self) -> DeviceStatus:
         return self._status
 
-    def _request(self, request_type: int, response_type: int, payload: bytes = b"") -> bytes:
+    def _request(
+        self, request_type: int, response_type: int, payload: bytes = b""
+    ) -> bytes:
         self.connection.write(encode_serial_frame(request_type, payload))
         deadline = time.monotonic() + self.timeout
         while time.monotonic() < deadline:
-            chunk = self.connection.read(max(1, getattr(self.connection, "in_waiting", 0)))
+            chunk = self.connection.read(
+                max(1, getattr(self.connection, "in_waiting", 0))
+            )
             if not chunk:
                 continue
             for frame in self.decoder.feed(chunk):
@@ -245,7 +288,7 @@ class SerialProvisioningDevice:
     def refresh_status(self) -> DeviceStatus:
         """Read the post-reboot status used to verify an atomic commit."""
 
-        time.sleep(0.2)
+        time.sleep(0.6)
         payload = self._request(TYPE_DISCOVER_REQUEST, TYPE_DEVICE_STATUS)
         self._status = DeviceStatus.from_payload(payload)
         return self._status
@@ -343,7 +386,9 @@ def discover(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description="Discover CSI radio boards over USB")
-    parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    parser.add_argument(
+        "--json", action="store_true", help="emit machine-readable JSON"
+    )
     args = parser.parse_args(argv)
     try:
         devices = _open_serial_devices()
@@ -377,9 +422,16 @@ def provision(argv: list[str] | None = None) -> int:
 
     import argparse
 
-    parser = argparse.ArgumentParser(description="Provision a selectable CSI radio profile")
+    parser = argparse.ArgumentParser(
+        description="Provision a selectable CSI radio profile"
+    )
     parser.add_argument("--receiver-config", type=Path, required=True)
     parser.add_argument("--radio-profile", type=Path, required=True)
+    parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help="provision exactly one connected registered board using the complete inventory",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -399,6 +451,7 @@ def provision(argv: list[str] | None = None) -> int:
                         "channel": profile.channel,
                         "fingerprint": fingerprint,
                         "devices": len(inventory.receivers) + 1,
+                        "provisioning_mode": "sequential" if args.sequential else "all",
                     },
                     indent=2,
                     sort_keys=True,
@@ -407,11 +460,18 @@ def provision(argv: list[str] | None = None) -> int:
             return 0
         devices = _open_serial_devices()
         try:
-            report = RadioProvisioner(devices).provision(inventory, profile)
+            report = RadioProvisioner(devices).provision(
+                inventory, profile, sequential=args.sequential
+            )
         finally:
             for device in devices:
                 device.close()
     except (RadioProfileError, ProvisioningError) as exc:
         parser.error(str(exc))
     print(f"provisioned {report.profile_id} fingerprint={report.fingerprint}")
+    if args.sequential:
+        print(
+            f"verified device {report.devices[0].mac}; "
+            "other configured boards were not checked"
+        )
     return 0

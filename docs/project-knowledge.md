@@ -21,17 +21,26 @@ remain in their dedicated documents.
 
 - Goal: detect human falls from Wi-Fi channel state information (CSI) for a
   bachelor's thesis.
-- Hardware: one ESP32-C5 transmitter and two ESP32-C5 receivers. ESP32-C6 is
-  also supported for 2.4 GHz operation.
+- Recorded cohort: one ESP32-C5 transmitter and two ESP32-C5 receivers. The
+  proposed BLE system targets four receivers; only two measured CSI views are
+  available in the current cohort. ESP32-C6 also supports 2.4 GHz operation.
 - Sensing link: ESP-NOW, 802.11ax HE20, MCS0, 20 MHz, long guard interval, and
-  100 transmitted frames per second per receiver.
-- Host transport: each receiver streams CRC-protected, COBS-framed binary
-  batches over USB Serial/JTAG.
+  50–100 configured sensing rounds per second per receiver. Historical profiles
+  remain at 100 Hz; BLE starting profiles use 80 Hz.
+- Host transport on `wifi-bt`: receiver CSI uses BLE only. USB remains for
+  provisioning and transmitter control/timing; live USB CSI adapters, firmware
+  writers, and gateway capture commands have been removed. The BLE transport
+  with transmitter-led round-robin grants, bounded queues, CRC-protected
+  batches and application ACKs is implemented; four-receiver RF behavior and
+  throughput have not been measured. See `docs/ble-transport.md`.
 - Firmware defaults cap both roles at 80 MHz with automatic dynamic frequency
-  scaling initialization. Wi-Fi stays in `WIFI_PS_NONE`; automatic light sleep
-  is not enabled. Existing local `sdkconfig` files must be updated explicitly.
+  scaling initialization. Transmitter power is initially capped at 44 quarter-dBm
+  (11 dBm), reported after driver quantization. Its Wi-Fi radio is stopped while
+  idle and after a 3 s host-control lease expires; receivers retain continuous
+  capture. Automatic light sleep is not enabled. Existing local `sdkconfig`
+  files and flashed binaries must be updated explicitly.
   Power savings and delivered-rate impact are unmeasured; see
-  `src/firmware/radio/README.md` for the comparison procedure.
+  `src/firmware/radio/README.md` for operating notes.
 - Current state: acquisition, synchronized recording, live visualization,
   session inspection, and operator review are implemented. An isolated offline
   CNN pilot is available under `notebooks/03_cnn_baseline/`; a production fall
@@ -40,7 +49,7 @@ remain in their dedicated documents.
 The high-level path is:
 
 ```text
-transmitter -> radio channel/person -> receivers -> USB -> host acquisition
+transmitter -> radio channel/person -> receivers -> BLE -> host acquisition
             -> immutable raw session -> derived preprocessing -> offline CNN pilot
 ```
 
@@ -49,7 +58,7 @@ transmitter -> radio channel/person -> receivers -> USB -> host acquisition
 - Raw sessions live under `data/raw/sessions/<session-id>/` and must not be
   modified during review or preprocessing.
 - A session pins its protocol and records events, attempts, receiver-specific
-  CSI, radio timing, and USB clock synchronization data.
+  CSI, radio timing, and transport-specific clock synchronization data.
 - The same transmitted frame is retained separately for every receiver that
   heard it. Receiver rows must not be merged as duplicates.
 - Ambient Wi-Fi frames can be present. Analysis of the sensing link must filter
@@ -78,9 +87,10 @@ transmitter -> radio channel/person -> receivers -> USB -> host acquisition
 ## Phase signal sanity
 
 - `analysis/phase_signals.py` loads one attempt/receiver using the canonical
-  LTF decoder and phase masks. It maps receiver callback times to host events
-  with the recorded USB affine clock fit when one boot is present; missing or
-  inapplicable sync data falls back explicitly to host receive time.
+  LTF decoder and phase masks. BLE recordings use their mapped enqueue-time
+  sidecar and refuse an arrival-time fallback. USB recordings map receiver
+  callback times through the recorded affine fit; missing or inapplicable USB
+  sync data falls back explicitly to host receive time.
 - The EDA notebook plots raw phase, calibrated phase, change from a circular
   baseline over the first second of countdown, a subcarrier/time heatmap,
   a median absolute circular phase-change score at a 100 ms lag, and the
@@ -201,6 +211,73 @@ transmitter -> radio channel/person -> receivers -> USB -> host acquisition
   windows may include recovery or truncate longer actions; impact timing,
   continuous detection, and independent-session generalization remain untested.
 
+## Scheduled BLE transport
+
+- `src/fall_detection/radio/ble_config.py` defines the default round-robin policy and opt-in seeded
+  random experiment policy. Receiver order is fixed for each run; an ordered-MAC
+  CRC binds on-air grant indices to provisioned board inventories. Radio and
+  transport fingerprints remain distinct. The versioned default inventory is the
+  historical two-receiver C5 cohort; use the setup's complete provisioned inventory.
+  Collection requires four verified identities; development supports one to four.
+- ESP32-C5/C6 firmware uses ESP-IDF 6.1 NimBLE, repeated future grants, absolute
+  transmitter timer deadlines, bounded recording queues, partial transfers,
+  batch ACKs, expiry and one application retry. Valid captures are retained
+  during upload windows. Application windows do not reserve exclusive RF time.
+  C6 and mixed C5/C6 inventories require 2.4 GHz; the 80 Hz starting profile is
+  `configs/radio/profiles/indonesia_2g_ch6_80hz.json`. BLE identity reports the
+  compiled target and host verification checks it against the inventory.
+- The C6 test boards were identified as Seeed XIAO ESP32-C6. Board-specific
+  initialization enables the RF switch and selects built-in or external antenna;
+  generic boards receive no GPIO writes. The active test receiver uses its
+  built-in ceramic antenna; the transmitter selects its attached external antenna.
+  Both selections are recorded in status. See `common/radio_board.c` and the
+  `.xiao_esp32c6` default overlays.
+- Hardware smoke tests exposed inconsistent sensing metadata and BLE backlog.
+  Sensing protocol v3 adds CRC32; both roles must be upgraded together. The host
+  verifies v3 before collection. Notification completion wakes the worker;
+  accepted-batch ACKs use write commands. Reassembly counts bounded oldest-partial
+  eviction rather than allowing expired batches to block fresh transfers. Wi-Fi
+  RX buffering is capped at 32. These are implementation changes, not throughput
+  guarantees; measured hardware limits must remain separate from replay results.
+- Explicit development timing experiments use CBLC v2 for continuous uploads,
+  multi-round turns, batch size, submission pacing, and requested connection
+  interval. Normal collection rejects experimental configurations; defaults and
+  their fingerprints are unchanged. The NimBLE notification callback signals a
+  submission attempt, not RF completion. Optional CBTM snapshots fit one read
+  at MTU 247 and sample four recent batch timelines; host journals separately
+  record reassembly, acceptance and ACK-write times. See
+  `radio/experiments/ble_timing.py` and `docs/ble-transport.md`.
+- CBLC v3 adds opt-in delivery admission (initial target 100 ms minus a 60 ms
+  completion estimate), a separate 150 ms started-transfer lifetime, and an
+  eight-fragment host-receipt window. The independent C ledger retains debt
+  after application expiry; full CRC/recorder acceptance still gates batch ACKs.
+  CBL2/CBPR scope and limits are in `docs/ble-delivery-policy.md`. Collection
+  defaults stay unchanged. The queue expiry check now guards future timestamps
+  and samples worker time under the queue lock.
+- Benchmark development mode can start with missing registered receivers while
+  retaining the complete configured order and grant rotation. Missing startup IDs
+  are journaled; normal collection still requires every configured receiver.
+- Boot diagnostics include reset reason and uptime over provisioning USB and
+  receiver BLE identity/status. No cause has been established for the reported
+  power-offs; power-on after supply loss cannot establish why the supply stopped.
+  Initial transmitter USB preflight found raw ROM statistics disrupting framing;
+  framed statistics fixed the fault, with 40 hardware clock exchanges verified.
+  See `docs/ble-transport.md` for the operating and power notes.
+- USB provisioning defaults to requiring every registered board together.
+  `csi-radio-provision --sequential` provisions exactly one connected, verified
+  board using the complete inventory; disconnected slots are preserved. Discover
+  all identities first and use unchanged files for every board in a pass. A
+  sequential success verifies only that board, not the rest of the system.
+- `src/fall_detection/radio/acquisition/ble_reader.py` owns independent BLE clients and a USB transmitter
+  reference. Additive journals preserve envelopes, rounds, counters, clock fits,
+  capture/arrival/processing times and causal availability bins. Receiver loss
+  leaves its stream missing; reference loss ends the run. No delivered-rate or
+  four-view detector accuracy claim has been established.
+- BLE attempt assignment uses mapped transmitter enqueue time, with a 300 ms
+  writer drain. Per-receiver `ble_timing.jsonl` carries epochs and uncertainty.
+  Canonical phase analysis validates this sidecar, sorts derived views only and
+  refuses an arrival-time fallback for BLE. USB data retains its existing clock
+  behavior. Bins finalize at 50 Hz with 100 ms grace and are not backfilled.
 ## Transport replay pilot
 
 - `notebooks/04_transport_simulation/` reuses the isolated pilot's pinned
@@ -325,6 +402,9 @@ short motion pattern associated with a fall.
 
 ## Open questions
 
+- What real BLE connection timing, throughput and capture-loss patterns occur
+  with four ESP32 receivers, and do replay-trained models retain performance
+  on new hardware recordings and independent sessions?
 - Which signal representation generalizes best: magnitude, calibrated phase,
   baseline-relative phase, another relative-phase construction, or a fusion?
 - Which temporal filter and passband retain fall motion while rejecting radio

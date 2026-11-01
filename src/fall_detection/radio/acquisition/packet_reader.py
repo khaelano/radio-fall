@@ -59,6 +59,7 @@ class BinaryCsiPacketReader:
         self.firmware_messages: deque[str] = deque(maxlen=20)
         self._recorder: Optional[CsiRecorder] = None
         self._stream_live = False
+        self._identity_context = None
 
     @property
     def total_datagrams(self) -> int:
@@ -146,7 +147,17 @@ class BinaryCsiPacketReader:
         self.last_batch_sequence = None
 
     def _ingest_packet(self, data: bytes) -> bool:
-        host_receive_monotonic_ns = time.monotonic_ns()
+        return self.ingest_packet(data)
+
+    def ingest_packet(self, data: bytes, *, host_receive_monotonic_ns: int | None = None,
+                      context: dict | None = None, capture_clock: Callable[[int], int | None] | None = None) -> bool:
+        """Accept a complete packet, returning false for validation rejection.
+
+        Storage exceptions propagate so a transport cannot ACK unaccepted data.
+        BLE context qualifies duplicates across transmitter and receiver epochs.
+        """
+        host_receive_monotonic_ns = (time.monotonic_ns() if host_receive_monotonic_ns is None
+                                     else host_receive_monotonic_ns)
         self.total_packets += 1
         try:
             packet = decode_csi_packet(data)
@@ -178,6 +189,13 @@ class BinaryCsiPacketReader:
                 self.foreign_packets += 1
                 return False
 
+        if context is not None:
+            identity = tuple(context.get(k) for k in ("run_id", "transmitter_boot_id", "receiver_boot_id"))
+            if identity != self._identity_context:
+                self._recent_keys.clear()
+                self._recent_key_set.clear()
+                self.last_batch_sequence = self.last_transport_sequence = None
+                self._identity_context = identity
         if packet.boot_id is not None:
             self._track_boot(packet.boot_id)
         if packet.batch_sequence is not None:
@@ -191,24 +209,26 @@ class BinaryCsiPacketReader:
         for decoded in packet.records:
             self._track_transport_sequence(decoded.transport_sequence)
             record = decoded.record
+            if context:
+                record = replace(record, **context)
+            if capture_clock is not None and record.tx_timestamp_us is not None:
+                record = replace(record, capture_host_monotonic_ns=capture_clock(record.tx_timestamp_us))
             if self.profile_fingerprint and not record.profile_fingerprint:
                 record = replace(record, profile_fingerprint=self.profile_fingerprint)
             # Each transmitted frame is captured about twice by the radio.  Keep
             # the first capture of a (sequence, tx timestamp) pair so a session
             # holds one row per sensing frame.  Rows without a transmit
             # timestamp (legacy/UDP transports) are never deduplicated.
+            key = None
             if record.tx_timestamp_us:
                 # Include the receiver so two receivers observing the same
                 # transmitted frame can never deduplicate each other, even if
                 # this state were ever shared between readers.
-                key = (record.receiver_mac, record.sequence, record.tx_timestamp_us)
+                key = (record.run_id, record.transmitter_boot_id, record.receiver_boot_id,
+                       record.receiver_mac, record.sequence, record.tx_timestamp_us)
                 if key in self._recent_key_set:
                     self.duplicate_records += 1
                     continue
-                if len(self._recent_keys) == self._recent_keys.maxlen:
-                    self._recent_key_set.discard(self._recent_keys[0])
-                self._recent_keys.append(key)
-                self._recent_key_set.add(key)
             if self.record_sink is not None:
                 self.record_sink(record, host_receive_monotonic_ns)
             else:
@@ -218,6 +238,11 @@ class BinaryCsiPacketReader:
                     record,
                     host_receive_monotonic_ns=host_receive_monotonic_ns,
                 )
+            if key is not None:
+                if len(self._recent_keys) == self._recent_keys.maxlen:
+                    self._recent_key_set.discard(self._recent_keys[0])
+                self._recent_keys.append(key)
+                self._recent_key_set.add(key)
             self.buffer.append(record)
             self.last_valid_time = time.monotonic()
         if not self._stream_live:

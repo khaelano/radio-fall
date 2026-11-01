@@ -219,3 +219,45 @@ def test_attempt_persists_boot_aware_radio_telemetry_delta(tmp_path: Path):
     )
     assert payload["radio_telemetry_delta"]["complete"]
     assert payload["radio_telemetry_delta"]["values"]["records"] == 5
+
+
+def test_ble_delayed_records_route_by_capture_time_across_attempts(tmp_path: Path):
+    from dataclasses import replace
+    from fall_detection.radio.acquisition.protocol import CsiRecord
+
+    clock = FakeClock()
+    controller = SessionController(
+        protocol_from_mapping(protocol()), tmp_path, clock=clock,
+        monotonic_ns=lambda: int(clock.value*1_000_000_000),
+        session_id_factory=lambda: "ble-session",
+        environment={"receiver_ids": {"00:11:22:33:44:55": "rx-1"},
+                     "transport": "ble", "ble_transport": {"drain_ms": 300}},
+    )
+    start_ready(controller)
+    controller.dispatch(OperatorCommand.START_TRIAL)
+    clock.advance(1)
+    controller.dispatch(OperatorCommand.ABORT)
+    controller.dispatch(OperatorCommand.RETRY)
+    clock.advance(0.01)
+    controller.dispatch(OperatorCommand.START_TRIAL)
+    record = CsiRecord(1, "00:11:22:33:44:66", -40, -95, 100,
+        (1+2j,), receiver_mac="00:11:22:33:44:55", csi_length=2,
+        run_id=123, transmitter_boot_id=11, receiver_boot_id=21,
+        capture_host_monotonic_ns=900_000_000)
+    controller.write_radio(record, 1_050_000_000)
+    controller.write_radio(replace(record, sequence=2, capture_host_monotonic_ns=1_020_000_000),
+                           1_060_000_000)
+    # Alignment failures and arrivals beyond the previous attempt's drain
+    # deadline cannot become fresh observations in the new attempt.
+    controller.write_radio(replace(record, sequence=3, capture_host_monotonic_ns=None), 1_070_000_000)
+    clock.advance(0.4)
+    controller.tick()
+    controller.write_radio(replace(record, sequence=4), 1_410_000_000)
+    controller.dispatch(OperatorCommand.ABORT)
+    controller.flush_radio()
+    root = controller.session_root/"trials"/"001_one"
+    first = (root/"attempt_01"/"receivers"/"rx-1"/"csi.csv").read_text().splitlines()
+    second = (root/"attempt_02"/"receivers"/"rx-1"/"csi.csv").read_text().splitlines()
+    assert len(first) == 2 and first[1].startswith("CSI_DATA,1,")
+    assert len(second) == 2 and second[1].startswith("CSI_DATA,2,")
+    controller.dispatch(OperatorCommand.END_SESSION)

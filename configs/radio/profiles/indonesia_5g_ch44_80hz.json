@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "profile_id": "indonesia-5g-ch44-80hz",
+  "country_code": "ID",
+  "band": "5ghz",
+  "channel": 44,
+  "bandwidth_mhz": 20,
+  "nominal_rate_hz": 80
+}

@@ -44,10 +44,10 @@ def load_phase_signal(
     """Load and calibrate sensing-link CSI for one attempt and receiver.
 
     Uses the canonical LTF decoder and its amplitude/physical-slot masks.
-    Receiver callback timestamps are mapped to host time with the recorded USB
-    affine clock fit. Missing/inapplicable sync data falls back to host receive
-    timestamps, explicitly identified by ``time_source``. Multiple receiver boot
-    IDs also trigger this fallback rather than mixing clock fits.
+    BLE captures use their validated mapped enqueue-time sidecar. USB receiver
+    callbacks use the recorded affine fit; unavailable USB sync falls back to
+    host receive timestamps, explicitly identified by ``time_source``. BLE
+    captures never silently substitute delivery time for sensing time.
 
     Args:
         session_dir: Schema-2 session directory.
@@ -90,6 +90,27 @@ def load_phase_signal(
         raise ValueError("CSI and radio timing rows do not align by sequence")
     if not np.array_equal(csi["local_timestamp"], timing["rx_radio_timestamp_us"]):
         raise ValueError("CSI and radio timing receiver timestamps do not align")
+    ble_path = receiver / "ble_timing.jsonl"
+    if ble_path.is_file():
+        ble = pd.read_json(ble_path, lines=True)
+        if (
+            len(ble) != len(timing)
+            or not ble["schema_version"].eq(1).all()
+            or not np.array_equal(ble["sequence"], timing["sequence"])
+            or not np.array_equal(
+                ble["rx_radio_timestamp_us"], timing["rx_radio_timestamp_us"]
+            )
+        ):
+            raise ValueError("BLE timing sidecar does not align with CSI")
+        if ble["run_id"].nunique() != 1 or ble["transmitter_boot_id"].nunique() != 1:
+            raise ValueError("BLE attempt mixes transmitter epochs")
+        timing["capture_host_monotonic_ns"] = ble["capture_host_monotonic_ns"]
+        timing["capture_clock_uncertainty_us"] = ble["clock_uncertainty_us"]
+        # Transport delivery can reorder records. Sort derived views only.
+        order = timing["capture_host_monotonic_ns"].sort_values(kind="stable").index
+        csi, timing = csi.loc[order], timing.loc[order]
+    elif manifest.get("environment", {}).get("transport") == "ble":
+        raise ValueError("BLE capture requires its capture-time sidecar")
     environment = manifest.get("environment", {})
     transmitter = (
         environment.get("radio_inventory", {})
@@ -200,6 +221,21 @@ def _phase_trend(raw, values, indices):
 
 
 def _event_times(timing, sync_path, origin_ns):
+    if "capture_host_monotonic_ns" in timing:
+        captured = pd.to_numeric(
+            timing["capture_host_monotonic_ns"], errors="coerce"
+        ).to_numpy()
+        if not np.isfinite(captured).all():
+            raise ValueError("BLE capture clock alignment is unavailable")
+        uncertainty = pd.to_numeric(
+            timing["capture_clock_uncertainty_us"], errors="coerce"
+        ).to_numpy()
+        bound = float(np.max(uncertainty)) if np.isfinite(uncertainty).all() else None
+        return (
+            (captured - origin_ns) / 1e9,
+            "transmitter enqueue mapped by USB affine fit (BLE)",
+            bound,
+        )
     host_times = (
         timing["host_receive_monotonic_ns"].to_numpy(dtype=np.int64) - origin_ns
     ) / 1e9

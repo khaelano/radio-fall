@@ -117,7 +117,7 @@ bool csi_radio_profile_validate(const csi_radio_profile_t *profile,
                                 bool supports_5ghz)
 {
     if (profile == NULL || profile->version != CSI_RADIO_PROFILE_VERSION ||
-        profile->bandwidth_mhz != 20 || profile->nominal_rate_hz != 100 ||
+        profile->bandwidth_mhz != 20 || (profile->nominal_rate_hz < 50 || profile->nominal_rate_hz > 100) ||
         strncmp(profile->country_code, "ID", 2) != 0 ||
         profile->profile_id[0] == '\0' || profile->fingerprint[0] == '\0' ||
         (profile->transmitter_mac[0] == 0 && profile->transmitter_mac[1] == 0 &&

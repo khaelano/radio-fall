@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import argparse
-from collections import deque
 import os
-from pathlib import Path
 import sys
 import time
+from collections import deque
+from dataclasses import asdict
+from pathlib import Path
 from typing import Any, Sequence
 
+from ..radio.acquisition.ble_reader import BleReceiverManager
+from ..radio.acquisition.buffer import DEFAULT_NOMINAL_RATE_HZ, RollingCsiBuffer
+from ..radio.ble_config import BleTransportConfig
+from ..radio.profile import RadioProfileError, load_inventory_and_profile
+from ..radio.visualization.dashboard import DEFAULT_VIEW_SECONDS, CsiDashboardPanel
+from ..radio.visualization.state import LiveState
 from .capture import SessionMetadata
 from .controller import (
     HealthSnapshot,
@@ -25,16 +32,6 @@ from .protocol import (
     load_protocol,
     select_blocks,
 )
-from ..radio.acquisition.buffer import DEFAULT_NOMINAL_RATE_HZ, RollingCsiBuffer
-from ..radio.acquisition.espnow_serial_reader import EspNowSerialCsiReader
-from ..radio.acquisition.serial_reader import SerialCsiReader
-from ..radio.acquisition.udp_reader import UdpCsiReader
-from ..radio.acquisition.usb_reader import UsbReceiverManager
-from ..radio.profile import RadioProfileError, load_inventory_and_profile
-from ..radio.provisioning import ProvisioningError, configure_connected_devices
-from ..radio.visualization.dashboard import CsiDashboardPanel, DEFAULT_VIEW_SECONDS
-from ..radio.visualization.state import LiveState
-
 
 DEFAULT_PROTOCOL = Path("configs/collection/fall_v1.json")
 COLLECTOR_FPS_CHOICES = (16, 24)
@@ -111,9 +108,7 @@ def _format_radio_metrics(
     if snapshot is None:
         snapshot_fn = getattr(reader, "telemetry_snapshot", None)
         if snapshot_fn is None:
-            return (
-                f"CSI records: {reader.buffer.received_records} | telemetry: unavailable"
-            )
+            return f"CSI records: {reader.buffer.received_records} | telemetry: unavailable"
         snapshot = snapshot_fn()
     receiver = snapshot.receiver_stats
     transmitter = snapshot.transmitter_stats
@@ -138,10 +133,7 @@ def _format_radio_metrics(
     gateway_text = (
         "unavailable"
         if gateway is None
-        else (
-            f"gateway queue {gateway.queue_drops} | "
-            f"serial {gateway.serial_errors}"
-        )
+        else (f"gateway queue {gateway.queue_drops} | serial {gateway.serial_errors}")
     )
     return (
         f"CSI records: {snapshot.records} / {nominal_rate_hz} Hz | "
@@ -160,9 +152,7 @@ def _status_metrics(
     snapshot_fn = getattr(reader, "telemetry_snapshot", None)
     snapshot = snapshot_fn() if snapshot_fn is not None else None
     if snapshot is None:
-        text = (
-            f"CSI records: {reader.buffer.received_records} | telemetry: unavailable"
-        )
+        text = f"CSI records: {reader.buffer.received_records} | telemetry: unavailable"
         return text, text
     receiver = snapshot.receiver_stats
     missing = "—" if receiver is None else receiver.sensing_missing
@@ -180,17 +170,16 @@ def _status_metrics(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Guide and record operator-confirmed USB radio collection trials."
+        description="Guide and record operator-confirmed BLE radio collection trials."
     )
     parser.add_argument("--protocol", type=Path, default=DEFAULT_PROTOCOL)
+    parser.add_argument("--transport", choices=("ble",), default="ble")
     parser.add_argument(
-        "--transport", choices=("serial", "udp", "espnow"), default="espnow"
+        "--ble-config",
+        type=Path,
+        help="BLE transport policy JSON (round robin by default)",
     )
-    parser.add_argument("--port", help="Serial device for serial or espnow transport")
-    parser.add_argument("--baud", type=int, default=921600)
-    parser.add_argument("--listen-host", default="0.0.0.0")
-    parser.add_argument("--listen-port", type=int, default=5500)
-    parser.add_argument("--receiver-mac")
+    parser.add_argument("--port", help="Native USB transmitter control port")
     parser.add_argument("--receiver-config", type=Path)
     parser.add_argument("--radio-profile", type=Path)
     parser.add_argument(
@@ -288,7 +277,9 @@ class _MetadataDialog:
         """Return the selected scenario block identifiers in protocol order."""
 
         return tuple(
-            block_id for block_id, checkbox, _trials in self._blocks if checkbox.isChecked()
+            block_id
+            for block_id, checkbox, _trials in self._blocks
+            if checkbox.isChecked()
         )
 
     def get(self) -> SessionMetadata | None:
@@ -327,9 +318,7 @@ class _ScenarioDetailDialog:
         self.window = QtWidgets.QDialog(parent)
         self.window.setWindowFlag(QtCore.Qt.WindowType.Tool, True)
         self.window.setModal(False)
-        self.window.setWindowTitle(
-            f"Scenario {trial.ordinal:03d} — {scenario.title}"
-        )
+        self.window.setWindowTitle(f"Scenario {trial.ordinal:03d} — {scenario.title}")
         self.window.resize(460, 560)
 
         layout = QtWidgets.QVBoxLayout(self.window)
@@ -393,9 +382,7 @@ class _ScenarioDetailDialog:
     def _section(self, layout: Any, title: str, value: str) -> Any:
         QtWidgets = self.QtWidgets
         heading = QtWidgets.QLabel(title.upper())
-        heading.setStyleSheet(
-            "color: palette(mid); font-size: 10px; font-weight: 700;"
-        )
+        heading.setStyleSheet("color: palette(mid); font-size: 10px; font-weight: 700;")
         body = QtWidgets.QLabel(value)
         body.setWordWrap(True)
         body.setTextInteractionFlags(
@@ -770,7 +757,9 @@ class _OperatorWindow:
 class _PerformerWindow:
     """Full-screen performer guidance shown on the second display."""
 
-    def __init__(self, QtCore: Any, QtWidgets: Any, protocol: CollectionProtocol) -> None:
+    def __init__(
+        self, QtCore: Any, QtWidgets: Any, protocol: CollectionProtocol
+    ) -> None:
         self.QtCore = QtCore
         self.QtWidgets = QtWidgets
         self.window = QtWidgets.QMainWindow()
@@ -831,17 +820,13 @@ class _PerformerWindow:
             )
         elif snapshot.state is SessionState.RECOVERY:
             self.state_label.setText("RECOVER")
-            self.instruction_label.setText(
-                "Remain still until the operator continues."
-            )
+            self.instruction_label.setText("Remain still until the operator continues.")
             self.timer_label.setText(
                 str(max(1, int(snapshot.phase_remaining_seconds + 0.999)))
             )
         elif snapshot.state is SessionState.REVIEW:
             self.state_label.setText("WAIT")
-            self.instruction_label.setText(
-                "The operator is reviewing this attempt."
-            )
+            self.instruction_label.setText("The operator is reviewing this attempt.")
             self.timer_label.setText("")
         else:
             self.state_label.setText("WAITING")
@@ -854,7 +839,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args = _parser().parse_args(argv)
     if bool(args.receiver_config) != bool(args.radio_profile):
-        _parser().error("--receiver-config and --radio-profile must be provided together")
+        _parser().error(
+            "--receiver-config and --radio-profile must be provided together"
+        )
     inventory = profile = None
     profile_fingerprint = None
     if args.receiver_config is not None:
@@ -869,12 +856,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         _parser().error(
             "--receiver-config and --radio-profile are required for collection"
         )
+    ble_config = None
+    if args.transport == "ble":
+        if not args.port:
+            _parser().error("--transport ble requires --port for the USB transmitter")
+        if len(inventory.receivers) != 4:
+            _parser().error(
+                "BLE collection requires four real registered receivers; use the viewer/benchmark for development"
+            )
+        try:
+            ble_config = BleTransportConfig.load(args.ble_config)
+        except (OSError, ValueError) as exc:
+            _parser().error(str(exc))
     if args.nominal_rate_hz < 1:
         _parser().error("--nominal-rate-hz must be at least 1")
     try:
         from PySide6 import QtCore, QtWidgets
     except ImportError as exc:
-        print("Install collection dependencies with: uv sync --extra radio", file=sys.stderr)
+        print(
+            "Install collection dependencies with: uv sync --extra radio",
+            file=sys.stderr,
+        )
         print(f"Missing GUI dependency: {exc}", file=sys.stderr)
         return 2
 
@@ -911,21 +913,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.output_dir,
         environment={
             "transport": args.transport,
+            "ble_transport": asdict(ble_config) if ble_config else None,
+            "ble_transport_fingerprint": ble_config.fingerprint if ble_config else None,
             "port": args.port,
-            "listen_host": args.listen_host,
-            "listen_port": args.listen_port,
-            "receiver_mac": args.receiver_mac,
             "nominal_rate_hz": nominal_rate_hz,
-            "receiver_ids": {
-                device.mac: device.id for device in inventory.receivers
-            },
+            "receiver_ids": {device.mac: device.id for device in inventory.receivers},
             "receiver_config": str(args.receiver_config) if profile_mode else None,
             "radio_inventory": inventory.as_dict() if profile_mode else None,
-            "radio_profile": profile.as_dict() if profile_mode else (
-                "espnow-50hz-mcs0-20dbm"
-                if args.transport == "espnow" and args.nominal_rate_hz == 50
-                else "custom"
-            ),
+            "radio_profile": profile.as_dict(),
             "radio_profile_fingerprint": profile_fingerprint if profile_mode else None,
         },
         telemetry_provider=telemetry_provider,
@@ -943,70 +938,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                 connected=connected,
             )
 
-    if profile_mode:
-        # The collector configures the radios itself: plug the boards in, start
-        # the session, and the profile is applied before any receiver binds.
-        try:
-            reconfigured = configure_connected_devices(
-                inventory,
-                profile,
-                log=lambda message: reader_status.appendleft((message, True)),
-            )
-        except ProvisioningError as exc:
-            print(f"Unable to configure connected boards: {exc}", file=sys.stderr)
-            return 2
-        if reconfigured:
-            reader_status.appendleft(
-                (
-                    f"configured {len(reconfigured)} board(s) for {profile.profile_id}",
-                    True,
-                )
-            )
-        reader = UsbReceiverManager(
-            inventory,
-            profile,
-            args.output_dir,
-            on_status=radio_status,
-            record_sink=controller.write_radio,
-            clock_sync_sink=controller.write_clock_sync,
-        )
-    elif args.transport == "espnow":
-        reader = EspNowSerialCsiReader(
-            args.port,
-            args.baud,
-            buffer,
-            args.output_dir,
-            receiver_mac=args.receiver_mac,
-            on_status=radio_status,
-            record_sink=controller.write_radio,
-            clock_sync_sink=controller.write_clock_sync,
-        )
-    elif args.transport == "serial":
-        reader = SerialCsiReader(
-            args.port,
-            args.baud,
-            buffer,
-            args.output_dir,
-            on_status=radio_status,
-            record_sink=controller.write_radio,
-        )
-    else:
-        reader = UdpCsiReader(
-            args.listen_host,
-            args.listen_port,
-            buffer,
-            args.output_dir,
-            receiver_mac=args.receiver_mac,
-            on_status=radio_status,
-            record_sink=controller.write_radio,
-        )
+    reader = BleReceiverManager(
+        inventory,
+        profile,
+        args.output_dir,
+        transmitter_port=args.port,
+        config=ble_config,
+        require_four=True,
+        on_status=radio_status,
+        record_sink=controller.write_radio,
+        journal_root=lambda: controller.session_root,
+    )
     reader_holder["reader"] = reader
-    usb_bindings: tuple[Any, ...] = ()
+    receiver_bindings: tuple[Any, ...] = ()
     if profile_mode:
         try:
-            usb_bindings = reader.bind()
+            receiver_bindings = reader.bind()
         except RuntimeError as exc:
-            print(f"Unable to bind configured USB receivers: {exc}", file=sys.stderr)
+            print(f"Unable to bind configured BLE receivers: {exc}", file=sys.stderr)
             return 2
         controller.update_environment(
             {
@@ -1026,7 +975,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     state = LiveState(nominal_rate_hz)
     if profile_mode:
         state.configure_receivers(
-            {receiver_id: usb_reader.buffer for receiver_id, usb_reader in reader.readers.items()}
+            {
+                receiver_id: receiver_state.buffer
+                for receiver_id, receiver_state in reader.readers.items()
+            }
         )
     else:
         state.attach_buffer(buffer)
@@ -1034,7 +986,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         state,
         fps=args.fps,
         window_seconds=COLLECTOR_VIEW_SECONDS,
-        receivers=[binding.receiver_id for binding in usb_bindings] or None,
+        receivers=[binding.receiver_id for binding in receiver_bindings] or None,
     )
 
     def dispatch(command: OperatorCommand) -> None:
@@ -1069,24 +1021,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         now = time.monotonic()
         radio_last = getattr(reader, "last_valid_time", None)
         radio_live = radio_last is not None and now - radio_last < 2.5
+        if args.transport == "ble":
+            active = controller.state in (
+                SessionState.COUNTDOWN,
+                SessionState.ACTION,
+                SessionState.RECOVERY,
+            )
+            radio_live = (
+                reader.clock_sync_ready
+                if active
+                else reader.all_live
+                and reader.any_recent_record
+                and reader.clock_sync_ready
+            )
         radio_detail = (
             reader_status[0][0]
             if reader_status
             else (
-                "waiting for USB receiver stream"
+                "waiting for BLE receiver streams"
                 if profile_mode
                 else "waiting for radio"
             )
         )
-        clock_ready = (
-            reader.clock_sync_ready
-            if profile_mode
-            else (
-                args.transport != "espnow"
-                or getattr(getattr(reader, "clock_sync", None), "estimate", None)
-                is not None
-            )
-        )
+        clock_ready = reader.clock_sync_ready
         storage_ready = (
             os.access(args.output_dir.parent, os.W_OK)
             if args.output_dir.parent.exists()
@@ -1113,6 +1070,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         metrics_text, metrics_tooltip = _status_metrics(
             reader, nominal_rate_hz, panel.measured_fps
         )
+        if args.transport == "ble":
+            metrics_tooltip += "\n" + reader.diagnostic_text()
+            radio_detail = reader.failure or reader.diagnostic_text()
         operator.apply(
             snapshot,
             health_text=health_text,
@@ -1137,6 +1097,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             except RuntimeError:
                 pass
         reader.stop()
+        controller.flush_radio()
 
     app.aboutToQuit.connect(close)
     operator.window.show()

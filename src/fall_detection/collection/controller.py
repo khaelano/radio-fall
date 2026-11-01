@@ -89,16 +89,16 @@ class SessionSnapshot:
 class CaptureSink(Protocol):
     """Callback seam used by the radio adapter."""
 
-    def write_radio(self, record: CsiRecord, host_receive_monotonic_ns: int) -> None:
-        ...
+    def write_radio(
+        self, record: CsiRecord, host_receive_monotonic_ns: int
+    ) -> None: ...
 
     def write_clock_sync(
         self,
         sample: ClockSyncSample,
         estimate: ClockSyncEstimate,
         host_receive_monotonic_ns: int,
-    ) -> None:
-        ...
+    ) -> None: ...
 
 
 class SessionController:
@@ -119,7 +119,8 @@ class SessionController:
         monotonic_ns: Callable[[], int] = time.monotonic_ns,
         session_id_factory: Callable[[], str] | None = None,
         environment: dict[str, Any] | None = None,
-        telemetry_provider: Callable[[], BackhaulTelemetrySnapshot | None] | None = None,
+        telemetry_provider: Callable[[], BackhaulTelemetrySnapshot | None]
+        | None = None,
         manual_confirmation_required: bool = False,
     ) -> None:
         self.protocol = protocol
@@ -135,6 +136,8 @@ class SessionController:
         self._store: SessionArtifactStore | None = None
         self._capture: TrialCapture | None = None
         self._last_capture: TrialCapture | None = None
+        self._capture_start_ns = 0
+        self._draining_captures: list[tuple[TrialCapture, int, int, int]] = []
         self._state = SessionState.SETUP
         self._session_id: str | None = None
         self._trial_index = 0
@@ -164,6 +167,27 @@ class SessionController:
         """Return the adapter callback seam."""
 
         return self
+
+    @property
+    def session_root(self) -> Path:
+        """Return the active session directory for additive transport journals."""
+        if self._store is None:
+            raise RuntimeError("session has not started")
+        return self._store.root
+
+    def flush_radio(self) -> None:
+        """Close deferred writers after the transport has finished draining."""
+        with self._lock:
+            self._expire_draining_locked(self._monotonic_ns(), force=True)
+
+    def _expire_draining_locked(self, now_ns: int, *, force: bool = False) -> None:
+        remaining = []
+        for capture, start, end, deadline in self._draining_captures:
+            if force or now_ns >= deadline:
+                capture.close_streams()
+            else:
+                remaining.append((capture, start, end, deadline))
+        self._draining_captures = remaining
 
     def update_environment(self, values: dict[str, Any]) -> None:
         """Add runtime bindings before the session manifest is created."""
@@ -244,8 +268,12 @@ class SessionController:
         """Advance timed phases using an injected monotonic clock."""
 
         with self._lock:
+            self._expire_draining_locked(self._monotonic_ns())
             current = self._clock() if now is None else now
-            if self._state is SessionState.COUNTDOWN and current >= self._phase_deadline:
+            if (
+                self._state is SessionState.COUNTDOWN
+                and current >= self._phase_deadline
+            ):
                 self._change_phase_locked(SessionState.ACTION, current)
                 self._phase_deadline = current + self._current_scenario.action_seconds
             if self._state is SessionState.ACTION and current >= self._phase_deadline:
@@ -258,7 +286,9 @@ class SessionController:
                     self._state = SessionState.REVIEW
                     self._attempt_status = "invalid"
                     self._phase_deadline = current
-                    self._message = "action was not confirmed; retry or skip this attempt"
+                    self._message = (
+                        "action was not confirmed; retry or skip this attempt"
+                    )
                     return self._notify_locked()
                 self._change_phase_locked(SessionState.RECOVERY, current)
                 self._phase_deadline = current + self._current_scenario.recovery_seconds
@@ -301,8 +331,23 @@ class SessionController:
         """Receive radio data from an adapter and write it if a trial is active."""
 
         with self._lock:
-            if self._capture is not None:
+            if record.run_id is None:
+                if self._capture is not None:
+                    self._capture.write_radio(record, host_receive_monotonic_ns)
+                return
+            # BLE attribution uses capture time. Unaligned or very late data
+            # remains in the session journal rather than another attempt.
+            captured = record.capture_host_monotonic_ns
+            if captured is None:
+                return
+            self._expire_draining_locked(host_receive_monotonic_ns)
+            if self._capture is not None and captured >= self._capture_start_ns:
                 self._capture.write_radio(record, host_receive_monotonic_ns)
+                return
+            for capture, start, end, deadline in self._draining_captures:
+                if start <= captured < end and host_receive_monotonic_ns < deadline:
+                    capture.write_radio(record, host_receive_monotonic_ns)
+                    return
 
     def write_clock_sync(
         self,
@@ -346,14 +391,13 @@ class SessionController:
         self._attempt_numbers[trial.ordinal] = attempt
         self._attempt_number = attempt
         telemetry_start = (
-            self._telemetry_provider()
-            if self._telemetry_provider is not None
-            else None
+            self._telemetry_provider() if self._telemetry_provider is not None else None
         )
+        self._capture_start_ns = self._monotonic_ns()
         self._capture = self._store.begin_attempt(
             trial,
             attempt,
-            self._monotonic_ns(),
+            self._capture_start_ns,
             extra_metadata={
                 "radio_telemetry_start": (
                     telemetry_start.to_dict() if telemetry_start is not None else None
@@ -389,7 +433,9 @@ class SessionController:
                 "phase_changed",
                 self._monotonic_ns(),
                 state=state.value,
-                trial_ordinal=self._current_trial.ordinal if self._current_trial else None,
+                trial_ordinal=self._current_trial.ordinal
+                if self._current_trial
+                else None,
                 attempt=self._attempt_number,
             )
 
@@ -466,7 +512,10 @@ class SessionController:
     def _skip_locked(self) -> None:
         if self._state not in (SessionState.READY, SessionState.REVIEW):
             raise RuntimeError("skip is only available before or after a trial")
-        if self._state is SessionState.REVIEW and self._attempt_status == "pending_review":
+        if (
+            self._state is SessionState.REVIEW
+            and self._attempt_status == "pending_review"
+        ):
             self._finish_capture_locked("skipped", self._clock())
         self._advance_locked("skipped")
 
@@ -508,9 +557,16 @@ class SessionController:
             SessionState.ACTION,
             SessionState.RECOVERY,
         ):
-            self._finish_capture_locked("incomplete", self._clock(), interruption_reason=reason)
-        elif self._state is SessionState.REVIEW and self._attempt_status == "pending_review":
-            self._finish_capture_locked("incomplete", self._clock(), interruption_reason=reason)
+            self._finish_capture_locked(
+                "incomplete", self._clock(), interruption_reason=reason
+            )
+        elif (
+            self._state is SessionState.REVIEW
+            and self._attempt_status == "pending_review"
+        ):
+            self._finish_capture_locked(
+                "incomplete", self._clock(), interruption_reason=reason
+            )
         self._state = SessionState.COMPLETE
         self._message = reason
         if self._store is not None:
@@ -541,19 +597,18 @@ class SessionController:
                 else None
             )
         if self._capture is None:
-            if self._last_capture is not None and self._attempt_status == "pending_review":
-                self._last_capture.update_status(
-                    status,
-                    ended_monotonic_ns=self._monotonic_ns(),
-                    **updates,
-                )
+            if (
+                self._last_capture is not None
+                and self._attempt_status == "pending_review"
+            ):
+                if self._environment.get("transport") != "ble":
+                    updates["ended_monotonic_ns"] = self._monotonic_ns()
+                self._last_capture.update_status(status, **updates)
             self._attempt_status = status
             return
         capture = self._capture
         telemetry_end = (
-            self._telemetry_provider()
-            if self._telemetry_provider is not None
-            else None
+            self._telemetry_provider() if self._telemetry_provider is not None else None
         )
         if self._telemetry_provider is not None:
             updates.setdefault(
@@ -564,11 +619,21 @@ class SessionController:
                 "radio_telemetry_delta",
                 telemetry_delta(self._attempt_telemetry_start, telemetry_end),
             )
+        ended_ns = self._monotonic_ns()
+        deferred = self._environment.get("transport") == "ble"
         capture.finish(
-            status,
-            ended_monotonic_ns=self._monotonic_ns(),
-            **updates,
+            status, defer_close=deferred, ended_monotonic_ns=ended_ns, **updates
         )
+        if deferred:
+            drain_ms = self._environment.get("ble_transport", {}).get("drain_ms", 300)
+            self._draining_captures.append(
+                (
+                    capture,
+                    self._capture_start_ns,
+                    ended_ns,
+                    ended_ns + drain_ms * 1_000_000,
+                )
+            )
         self._last_capture = capture
         self._capture = None
         self._attempt_telemetry_start = None

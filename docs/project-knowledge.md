@@ -201,6 +201,38 @@ transmitter -> radio channel/person -> receivers -> USB -> host acquisition
   windows may include recovery or truncate longer actions; impact timing,
   continuous detection, and independent-session generalization remain untested.
 
+## Transport replay pilot
+
+- `notebooks/04_transport_simulation/` reuses the isolated pilot's pinned
+  environment, decoder, clock mapper and small CNN. It reads raw sessions
+  without modification. Four-slot cases add two virtual byte workloads, never
+  extra CSI views. All BLE service and synthetic loss settings are assumptions.
+- Replay distinguishes scheduled capture gaps, independent/burst loss, finite
+  queues, expiry, partial service and bounded retries. Original sequence IDs,
+  packet values and capture timestamps remain intact. Approximate 80 Hz input
+  retains four of five source rounds with 10/20 ms spacing; uniform simulated
+  upload grants avoid assigning the thinning gap repeatedly to one receiver.
+  This does not emulate BLE connection anchors or measured RF coexistence.
+- The same 154 pilot attempts and frozen scenario split are retained without
+  post-loss quality exclusions. Four-second cue windows use 50 bins/s with
+  a 100 ms delivery grace, calibrated-phase sine/cosine, finite masks, packet
+  counts and sample ages. No temporal interpolation/filtering is introduced.
+  Late packets cannot fill their original finalized input bins.
+- Clean and missingness-trained CNNs use three training seeds, matched maximum
+  update budgets, train-only normalization, validation early stopping, and
+  separate training/validation/test replay seeds. Signal-summary logistic,
+  missingness-only and majority baselines diagnose what the scores capture.
+  The earlier pilot test set has already been inspected, so comparisons remain
+  exploratory within-session attempt classification, not new-session evidence
+  or a continuous detector. See its README and executed report for assumptions.
+- Executed `replay_v1`: both CNN ensembles obtain 28/30 correct (balanced
+  accuracy 0.929, 16/16 falls, 2/14 false-positive non-falls) in seven of eight
+  conditions. Missingness training shows no extra threshold-score benefit in
+  those conditions. The overloaded assumed 1.0 Mbit/s case misses many 100 ms
+  deadlines and yields balanced accuracy 0.500/0.536 for clean/missingness
+  training. These are synthetic, reused-split results; no minimum hardware
+  throughput, four-view performance or augmentation improvement is established.
+
 ## CSI preprocessing
 
 ### Implemented
@@ -320,5 +352,6 @@ short motion pattern associated with a fall.
 | Radio profiles and receivers | `configs/radio/` |
 | Phase calibration | `src/fall_detection/radio/preprocessing/phase.py` |
 | Acquisition and CSI parsing | `src/fall_detection/radio/acquisition/` |
+| Synthetic transport replay and masked CNN comparison | `notebooks/04_transport_simulation/README.md` |
 | Verified behavior | `tests/` |
 | Thesis prose | `draft/` |

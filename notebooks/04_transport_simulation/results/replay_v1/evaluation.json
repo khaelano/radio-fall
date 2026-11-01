@@ -1,0 +1,6 @@
+{
+  "selection_sha256": "100ca5147a79175fbdf779fc8a4ae9c3c8ace6a1a577262043c4fc0509ebedcb",
+  "metrics_sha256": "929401ea61bf076dece972ab7f600ac5bd9f160e9a3a7c8372e37ba56f493f49",
+  "predictions_sha256": "ef2c4e53bfb121b409a5752085f9d35ec08a54b9e96402e0f594d2c02b4dced7",
+  "scope": "Exploratory reused within-session scenario split, not new-session generalization or hardware validation."
+}

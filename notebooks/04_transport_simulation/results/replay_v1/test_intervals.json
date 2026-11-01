@@ -1,0 +1,354 @@
+[
+  {
+    "regime": "clean_trained",
+    "condition": "original_100",
+    "intervals": {
+      "balanced_accuracy": [
+        0.7669642857142858,
+        1.0
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.5339285714285715,
+        1.0
+      ],
+      "roc_auc": [
+        0.9421111111111111,
+        1.0
+      ]
+    }
+  },
+  {
+    "regime": "clean_trained",
+    "condition": "rate_80",
+    "intervals": {
+      "balanced_accuracy": [
+        0.7669642857142858,
+        1.0
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.5339285714285715,
+        1.0
+      ],
+      "roc_auc": [
+        0.9166666666666667,
+        1.0
+      ]
+    }
+  },
+  {
+    "regime": "clean_trained",
+    "condition": "rr2_80",
+    "intervals": {
+      "balanced_accuracy": [
+        0.7669642857142858,
+        1.0
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.5339285714285715,
+        1.0
+      ],
+      "roc_auc": [
+        0.9259259259259259,
+        1.0
+      ]
+    }
+  },
+  {
+    "regime": "clean_trained",
+    "condition": "rr4_80",
+    "intervals": {
+      "balanced_accuracy": [
+        0.7669642857142858,
+        1.0
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.5339285714285715,
+        1.0
+      ],
+      "roc_auc": [
+        0.9305555555555556,
+        1.0
+      ]
+    }
+  },
+  {
+    "regime": "clean_trained",
+    "condition": "random4_80",
+    "intervals": {
+      "balanced_accuracy": [
+        0.7669642857142858,
+        1.0
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.5339285714285715,
+        1.0
+      ],
+      "roc_auc": [
+        0.9305555555555556,
+        1.0
+      ]
+    }
+  },
+  {
+    "regime": "clean_trained",
+    "condition": "loss4_80",
+    "intervals": {
+      "balanced_accuracy": [
+        0.7669642857142858,
+        1.0
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.5339285714285715,
+        1.0
+      ],
+      "roc_auc": [
+        0.9421111111111111,
+        1.0
+      ]
+    }
+  },
+  {
+    "regime": "clean_trained",
+    "condition": "ble4_1400k",
+    "intervals": {
+      "balanced_accuracy": [
+        0.7669642857142858,
+        1.0
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.5339285714285715,
+        1.0
+      ],
+      "roc_auc": [
+        0.9421111111111111,
+        1.0
+      ]
+    }
+  },
+  {
+    "regime": "clean_trained",
+    "condition": "ble4_1000k",
+    "intervals": {
+      "balanced_accuracy": [
+        0.5,
+        0.5
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.0,
+        0.0
+      ],
+      "roc_auc": [
+        0.41975,
+        0.8698705808080808
+      ]
+    }
+  },
+  {
+    "regime": "missingness_trained",
+    "condition": "original_100",
+    "intervals": {
+      "balanced_accuracy": [
+        0.7669642857142858,
+        1.0
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.5339285714285715,
+        1.0
+      ],
+      "roc_auc": [
+        0.90625,
+        1.0
+      ]
+    }
+  },
+  {
+    "regime": "missingness_trained",
+    "condition": "rate_80",
+    "intervals": {
+      "balanced_accuracy": [
+        0.7669642857142858,
+        1.0
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.5339285714285715,
+        1.0
+      ],
+      "roc_auc": [
+        0.8907738095238096,
+        1.0
+      ]
+    }
+  },
+  {
+    "regime": "missingness_trained",
+    "condition": "rr2_80",
+    "intervals": {
+      "balanced_accuracy": [
+        0.7669642857142858,
+        1.0
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.5339285714285715,
+        1.0
+      ],
+      "roc_auc": [
+        0.9044270833333334,
+        1.0
+      ]
+    }
+  },
+  {
+    "regime": "missingness_trained",
+    "condition": "rr4_80",
+    "intervals": {
+      "balanced_accuracy": [
+        0.7669642857142858,
+        1.0
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.5339285714285715,
+        1.0
+      ],
+      "roc_auc": [
+        0.9044270833333334,
+        1.0
+      ]
+    }
+  },
+  {
+    "regime": "missingness_trained",
+    "condition": "random4_80",
+    "intervals": {
+      "balanced_accuracy": [
+        0.7669642857142858,
+        1.0
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.5339285714285715,
+        1.0
+      ],
+      "roc_auc": [
+        0.9044270833333334,
+        1.0
+      ]
+    }
+  },
+  {
+    "regime": "missingness_trained",
+    "condition": "loss4_80",
+    "intervals": {
+      "balanced_accuracy": [
+        0.7669642857142858,
+        1.0
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.5339285714285715,
+        1.0
+      ],
+      "roc_auc": [
+        0.9166666666666667,
+        1.0
+      ]
+    }
+  },
+  {
+    "regime": "missingness_trained",
+    "condition": "ble4_1400k",
+    "intervals": {
+      "balanced_accuracy": [
+        0.7669642857142858,
+        1.0
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.5339285714285715,
+        1.0
+      ],
+      "roc_auc": [
+        0.9166666666666667,
+        1.0
+      ]
+    }
+  },
+  {
+    "regime": "missingness_trained",
+    "condition": "ble4_1000k",
+    "intervals": {
+      "balanced_accuracy": [
+        0.5,
+        0.625
+      ],
+      "fall_recall": [
+        1.0,
+        1.0
+      ],
+      "specificity": [
+        0.0,
+        0.25
+      ],
+      "roc_auc": [
+        0.6633364898989899,
+        0.9591145833333333
+      ]
+    }
+  }
+]

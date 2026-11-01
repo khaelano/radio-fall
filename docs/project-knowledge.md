@@ -254,6 +254,33 @@ transmitter -> radio channel/person -> receivers -> BLE -> host acquisition
   CBL2/CBPR scope and limits are in `docs/ble-delivery-policy.md`. Collection
   defaults stay unchanged. The queue expiry check now guards future timestamps
   and samples worker time under the queue lock.
+- A five-minute pair on that revision (one RX4, four fixed slots, verified
+  7.5 ms BLE) delivered 20.92 versus 21.05 records/s: no sustained throughput
+  gain. Median delay fell 263.34→108.44 ms and 100 ms-grace timely delivery rose
+  0.04→10.46 records/s; partial evictions fell 3,401→0. Capture fell 63.70→44.84
+  records/s and p99 delay worsened 322.68→378.88 ms; causes are not isolated.
+  Replay with 250 ms grace accepts 20.25 records/s, 18.08 available bins/s, for
+  the candidate. The user's priority remains live detection, with delayed
+  processing acceptable; neither 100 ms nor 50 Hz is a proven model requirement.
+  Raw integrity passed, but 16 candidate records had driver state 65. Normal
+  defaults were restored. See `docs/ble-c6-delivery-2026-11-01.md`.
+- Ten one-receiver hardware timing screens (5 s warm-up, 30 s measurement;
+  receiver approximately 20 cm from laptop) retained four fixed slots. Baseline
+  delivery was 24.20 records/s with zero timely records and 265.53 ms median
+  delay; sampled capture-to-first-submission median was 228.77 ms. An 80 ms age
+  limit delivered 17.17 records/s, 11.67 timely, at 97.53 ms median delay.
+  Continuous uploads improved delivery but reduced capture. The 25 ms interval
+  request negotiated 7.5 ms and is not a valid 25 ms comparison. Integrity checks
+  found no CRC/round-metadata errors, but 33/6,980 records had driver state 65.
+  A later matched 7.5 ms pair (30 s warm-up, 300 s measurement each) delivered
+  20.61 records/s, 0.11 timely, at 262.24 ms median with 250 ms retention;
+  80 ms retention delivered 10.56 records/s, 8.79 timely, at 88.78 ms median.
+  The latter provided only 6.86 available 50 Hz bins/s. Both had no CRC/round
+  mismatches, no restart and zero new send errors. Shorter retention is not a
+  collection candidate. Experimental preflight now rejects unnegotiated intervals
+  before sensing. Normal policy was restored and transmitter radio-off verified;
+  four-link and room qualification remain untested. See
+  `docs/ble-c6-timing-2026-11-01.md`.
 - Benchmark development mode can start with missing registered receivers while
   retaining the complete configured order and grant rotation. Missing startup IDs
   are journaled; normal collection still requires every configured receiver.
@@ -278,6 +305,18 @@ transmitter -> radio channel/person -> receivers -> BLE -> host acquisition
   Canonical phase analysis validates this sidecar, sorts derived views only and
   refuses an arrival-time fallback for BLE. USB data retains its existing clock
   behavior. Bins finalize at 50 Hz with 100 ms grace and are not backfilled.
+- `csi-ble-benchmark` provides measured run/report commands and a rate/scheduler
+  matrix; `csi-ble-discover` reports actual GATT identities. A five-minute XIAO C6
+  development test with one active receiver and four fixed grant slots delivered
+  23.48 records/s from a 61.36 Hz capture counter rate, but only 2/7,044 delivered
+  records met the configured input deadline (median latency 262 ms). No restart
+  was observed; all measurement record identities/timestamps matched round logs.
+  This does not qualify four-receiver collection. See
+  `docs/ble-c6-quality-2026-11-01.md` for conditions, flagged records and artifacts.
+  Four simultaneous receivers, hub-powered stability, movement tests and the soak
+  remain outstanding. `report --signal-quality` verifies bytes and raw-slot quality.
+  Commands, defaults and wire contracts are in `docs/ble-transport.md`.
+
 ## Transport replay pilot
 
 - `notebooks/04_transport_simulation/` reuses the isolated pilot's pinned

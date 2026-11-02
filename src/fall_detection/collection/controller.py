@@ -601,7 +601,7 @@ class SessionController:
                 self._last_capture is not None
                 and self._attempt_status == "pending_review"
             ):
-                if self._environment.get("transport") != "ble":
+                if self._environment.get("transport") not in {"ble", "espnow_gateway"}:
                     updates["ended_monotonic_ns"] = self._monotonic_ns()
                 self._last_capture.update_status(status, **updates)
             self._attempt_status = status
@@ -620,12 +620,12 @@ class SessionController:
                 telemetry_delta(self._attempt_telemetry_start, telemetry_end),
             )
         ended_ns = self._monotonic_ns()
-        deferred = self._environment.get("transport") == "ble"
+        deferred = self._environment.get("transport") in {"ble", "espnow_gateway"}
         capture.finish(
             status, defer_close=deferred, ended_monotonic_ns=ended_ns, **updates
         )
         if deferred:
-            drain_ms = self._environment.get("ble_transport", {}).get("drain_ms", 300)
+            drain_ms = self._environment.get("gateway_transport" if self._environment.get("transport") == "espnow_gateway" else "ble_transport", {}).get("drain_ms", 1000)
             self._draining_captures.append(
                 (
                     capture,

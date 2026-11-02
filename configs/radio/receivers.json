@@ -21,6 +21,20 @@
       "target": "esp32c5",
       "mac": "44:bd:8d:d0:b3:50",
       "placement": "receiver position 2"
+    },
+    {
+      "id": "rx-3",
+      "role": "receiver",
+      "target": "esp32c5",
+      "mac": "44:bd:8d:d0:be:9c",
+      "placement": "receiver position 2"
+    },
+    {
+      "id": "rx-4",
+      "role": "receiver",
+      "target": "esp32c5",
+      "mac": "44:bd:8d:d0:b6:6c",
+      "placement": "receiver position 2"
     }
   ]
 }

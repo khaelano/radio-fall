@@ -124,7 +124,8 @@ class TrialCapture:
         self, receiver_id: str, record: CsiRecord, arrival_ns: int
     ) -> None:
         if receiver_id not in self._ble_streams:
-            path = self.path / "receivers" / _slug(receiver_id) / "ble_timing.jsonl"
+            filename = "gateway_timing.jsonl" if record.transport == "espnow_gateway" else "ble_timing.jsonl"
+            path = self.path / "receivers" / _slug(receiver_id) / filename
             self._ble_streams[receiver_id] = path.open("x", encoding="utf-8")
         value = dict(
             schema_version=1,

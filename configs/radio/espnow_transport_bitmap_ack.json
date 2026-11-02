@@ -1,0 +1,22 @@
+{
+  "schema_version": 3,
+  "channel": 6,
+  "phy": "ht20_mcs0_lgi",
+  "slot_ms": 50,
+  "start_guard_ms": 5,
+  "return_reserve_ms": 10,
+  "queue_capacity": 64,
+  "maximum_age_ms": 500,
+  "outstanding_batches": 8,
+  "early_return_idle_ms": 0,
+  "minimum_revisit_ms": 150,
+  "send_completion_guard_ms": 10,
+  "batch_acknowledgements": true,
+  "measure_send_completions": false,
+  "ack_timeout_ms": 50,
+  "maximum_retries": 1,
+  "records_per_slot": 16,
+  "bin_hz": 50,
+  "delivery_grace_ms": 500,
+  "drain_ms": 1000
+}

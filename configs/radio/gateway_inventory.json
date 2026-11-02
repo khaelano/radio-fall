@@ -1,0 +1,47 @@
+{
+  "schema_version": 2,
+  "transmitter": {
+    "id": "tx-1",
+    "role": "transmitter",
+    "target": "esp32c5",
+    "mac": "1a:00:00:00:00:00",
+    "placement": "configured during experiment setup"
+  },
+  "receivers": [
+    {
+      "id": "rx-1",
+      "role": "receiver",
+      "target": "esp32c5",
+      "mac": "44:bd:8d:d0:b1:4c",
+      "placement": "receiver position 1"
+    },
+    {
+      "id": "rx-2",
+      "role": "receiver",
+      "target": "esp32c5",
+      "mac": "44:bd:8d:d0:b3:50",
+      "placement": "receiver position 2"
+    },
+    {
+      "id": "rx-3",
+      "role": "receiver",
+      "target": "esp32c5",
+      "mac": "44:bd:8d:d0:be:9c",
+      "placement": "receiver position 2"
+    },
+    {
+      "id": "rx-4",
+      "role": "receiver",
+      "target": "esp32c5",
+      "mac": "44:bd:8d:d0:b6:6c",
+      "placement": "receiver position 2"
+    }
+  ],
+  "gateway": {
+    "id": "gateway-1",
+    "role": "gateway",
+    "target": "esp32c6",
+    "mac": "10:bd:a3:9e:cd:68",
+    "placement": "verified XIAO C6 USB gateway"
+  }
+}

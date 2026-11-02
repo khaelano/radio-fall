@@ -1,0 +1,2 @@
+# Experimental nonblocking uploads with bounded callback wakeups.
+CONFIG_CSI_GATEWAY_EVENT_UPLOAD=y

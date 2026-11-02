@@ -22,11 +22,6 @@ config CSI_CHANNEL
         Safe 2.4 GHz fallback channel used before USB provisioning. A
         provisioned profile replaces this value at runtime.
 
-config CSI_BLE_SCHEDULER
-    bool
-    depends on (IDF_TARGET_ESP32C5 || IDF_TARGET_ESP32C6) && CSI_USB_CONTROL
-    default y
-
 config CSI_TX_POWER_QUARTER_DBM
     int "Maximum sensing transmit power (quarter dBm)"
     range 8 80

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "radio-fall-detection"
 version = "0.1.0"
-description = "Radio fall detector with BLE CSI collection and operator labeling"
+description = "Radio fall detector with scheduled ESP-NOW CSI collection and operator labeling"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -19,7 +19,6 @@ analysis = [
 ]
 radio = [
     "pyserial>=3.5",
-    "bleak>=3.0,<4",
     "PySide6>=6.6",
     "pyqtgraph>=0.13",
 ]
@@ -28,8 +27,7 @@ radio = [
 csi-viewer = "fall_detection.radio.visualization.app:main"
 csi-radio-discover = "fall_detection.radio.provisioning:discover"
 csi-radio-provision = "fall_detection.radio.provisioning:provision"
-csi-ble-benchmark = "fall_detection.radio.experiments.ble:main"
-csi-ble-discover = "fall_detection.radio.experiments.ble:discover"
+csi-gateway-benchmark = "fall_detection.radio.experiments.gateway:main"
 csi-experiment = "fall_detection.radio.experiments.transport:main"
 fall-collection = "fall_detection.collection.app:main"
 fall-session-inspector = "fall_detection.session_inspector.app:main"

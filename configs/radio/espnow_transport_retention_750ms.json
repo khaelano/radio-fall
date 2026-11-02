@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "channel": 6,
+  "phy": "ht20_mcs0_lgi",
+  "slot_ms": 50,
+  "start_guard_ms": 5,
+  "return_reserve_ms": 10,
+  "queue_capacity": 64,
+  "maximum_age_ms": 750,
+  "outstanding_batches": 4,
+  "ack_timeout_ms": 50,
+  "maximum_retries": 1,
+  "records_per_slot": 16,
+  "bin_hz": 50,
+  "delivery_grace_ms": 900,
+  "drain_ms": 1000
+}

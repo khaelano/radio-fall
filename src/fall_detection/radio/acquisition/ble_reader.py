@@ -613,6 +613,8 @@ class BleReceiverManager:
         workers = []
         clock_task = None
         try:
+            if self.hardware_backend:
+                raise RuntimeError("Live BLE acquisition is retired; use the ESP-NOW gateway transport")
             if self.scanner is None or self.client_factory is None:
                 from bleak import BleakClient, BleakScanner
 

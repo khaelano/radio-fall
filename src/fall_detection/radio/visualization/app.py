@@ -7,9 +7,9 @@ import sys
 import time
 from pathlib import Path
 
-from ..acquisition.ble_reader import BleReceiverManager
+from ..acquisition.gateway_reader import GatewayReceiverManager
 from ..acquisition.buffer import DEFAULT_NOMINAL_RATE_HZ
-from ..ble_config import BleTransportConfig
+from ..espnow_config import EspnowTransportConfig
 from ..profile import RadioProfileError, load_inventory_and_profile
 from .dashboard import (
     DASHBOARD_TRACE_COUNTS,
@@ -38,17 +38,18 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Display live Espressif CSI data.")
     parser.add_argument(
         "--transport",
-        choices=("ble",),
-        default="ble",
-        help="CSI over BLE; USB carries transmitter control and timing only",
+        choices=("espnow_gateway",),
+        default="espnow_gateway",
+        help="CSI over ESP-NOW gateway; USB carries transmitter control and timing only",
     )
+    parser.add_argument("--gateway-port", help="Native USB C6 gateway port")
     parser.add_argument("--port", help="Native USB transmitter control port")
-    parser.add_argument("--ble-config", type=Path, help="BLE transport policy JSON")
+    parser.add_argument("--gateway-config", type=Path, help="ESP-NOW gateway transport policy JSON")
     parser.add_argument("--receiver-config", type=Path)
     parser.add_argument("--radio-profile", type=Path)
     parser.add_argument(
         "--receiver-id",
-        help="receiver inventory ID to preview when multiple BLE receivers are configured",
+        help="receiver inventory ID to preview when multiple ESP-NOW gateway receivers are configured",
     )
     parser.add_argument("--output-dir", type=Path, default=Path("data/raw"))
     parser.add_argument(
@@ -103,12 +104,12 @@ def main(argv: list[str] | None = None) -> int:
         _parser().error(
             "--receiver-config and --radio-profile are required for csi-viewer"
         )
-    ble_config = None
-    if args.transport == "ble":
-        if not args.port:
-            _parser().error("--transport ble requires --port for the USB transmitter")
+    gateway_config = None
+    if args.transport == "espnow_gateway":
+        if not args.port or not args.gateway_port:
+            _parser().error("--transport espnow_gateway requires --port and --gateway-port")
         try:
-            ble_config = BleTransportConfig.load(args.ble_config)
+            gateway_config = EspnowTransportConfig.load(args.gateway_config)
         except (OSError, ValueError) as exc:
             _parser().error(str(exc))
     if args.receiver_id is not None and not profile_mode:
@@ -132,19 +133,20 @@ def main(argv: list[str] | None = None) -> int:
     app = QtWidgets.QApplication(sys.argv)
     state = LiveState(profile.nominal_rate_hz if profile_mode else args.nominal_rate_hz)
     receiver_bindings = ()
-    if args.transport == "ble":
-        reader = BleReceiverManager(
+    if args.transport == "espnow_gateway":
+        reader = GatewayReceiverManager(
             inventory,
             profile,
             args.output_dir,
             transmitter_port=args.port,
-            config=ble_config,
+            gateway_port=args.gateway_port,
+            config=gateway_config,
             on_status=state.set_status,
         )
         try:
             receiver_bindings = reader.bind()
-        except RuntimeError as exc:
-            print(f"Unable to prepare BLE receivers: {exc}", file=sys.stderr)
+        except (RuntimeError, ValueError) as exc:
+            print(f"Unable to prepare ESP-NOW gateway receivers: {exc}", file=sys.stderr)
             return 2
         state.configure_receivers(
             {key: value.buffer for key, value in reader.readers.items()},
@@ -196,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
         status_label.setText(status if len(status) <= 42 else f"{status[:41]}…")
         status_label.setToolTip(
             status
-            + ("\n" + reader.diagnostic_text() if args.transport == "ble" else "")
+            + ("\n" + reader.diagnostic_text() if args.transport == "espnow_gateway" else "")
         )
         sequence = state.buffer.last_sequence
         if selected_reader.last_valid_time is None:

@@ -14,11 +14,6 @@ config CSI_BAND_5G
 
 endchoice
 
-config CSI_OUTPUT_BLE
-    bool
-    default y
-    select ESP_COEX_SW_COEXIST_ENABLE
-
 config CSI_CHANNEL
     int "Wi-Fi channel"
     range 1 14
@@ -32,6 +27,14 @@ config CSI_SEND_MAC
     default "1a:00:00:00:00:00"
     help
         MAC address of the transmitter whose packets should be logged.
+
+config CSI_GATEWAY_EVENT_UPLOAD
+    bool "Experimental event-driven gateway upload worker"
+    default n
+    help
+        Submit upload frames without a fixed post-submit wait and wake the
+        worker on MAC completion or incoming messages. Keep one send in flight
+        and retain the configured slot, send cutoff and channel return reserve.
 
 config CSI_USB_CONTROL
     bool "USB profile provisioning control"

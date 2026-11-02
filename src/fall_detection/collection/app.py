@@ -11,9 +11,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Sequence
 
-from ..radio.acquisition.ble_reader import BleReceiverManager
+from ..radio.acquisition.gateway_reader import GatewayReceiverManager
 from ..radio.acquisition.buffer import DEFAULT_NOMINAL_RATE_HZ, RollingCsiBuffer
-from ..radio.ble_config import BleTransportConfig
+from ..radio.espnow_config import EspnowTransportConfig
 from ..radio.profile import RadioProfileError, load_inventory_and_profile
 from ..radio.visualization.dashboard import DEFAULT_VIEW_SECONDS, CsiDashboardPanel
 from ..radio.visualization.state import LiveState
@@ -170,15 +170,16 @@ def _status_metrics(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Guide and record operator-confirmed BLE radio collection trials."
+        description="Guide and record operator-confirmed ESP-NOW gateway radio collection trials."
     )
     parser.add_argument("--protocol", type=Path, default=DEFAULT_PROTOCOL)
-    parser.add_argument("--transport", choices=("ble",), default="ble")
+    parser.add_argument("--transport", choices=("espnow_gateway",), default="espnow_gateway")
     parser.add_argument(
-        "--ble-config",
+        "--gateway-config",
         type=Path,
-        help="BLE transport policy JSON (round robin by default)",
+        help="ESP-NOW gateway transport policy JSON (round robin by default)",
     )
+    parser.add_argument("--gateway-port", help="Native USB C6 gateway port")
     parser.add_argument("--port", help="Native USB transmitter control port")
     parser.add_argument("--receiver-config", type=Path)
     parser.add_argument("--radio-profile", type=Path)
@@ -856,16 +857,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         _parser().error(
             "--receiver-config and --radio-profile are required for collection"
         )
-    ble_config = None
-    if args.transport == "ble":
-        if not args.port:
-            _parser().error("--transport ble requires --port for the USB transmitter")
+    gateway_config = None
+    if args.transport == "espnow_gateway":
+        if not args.port or not args.gateway_port:
+            _parser().error("--transport espnow_gateway requires --port and --gateway-port")
         if len(inventory.receivers) != 4:
             _parser().error(
-                "BLE collection requires four real registered receivers; use the viewer/benchmark for development"
+                "ESP-NOW gateway collection requires four real registered receivers; use the viewer/benchmark for development"
             )
         try:
-            ble_config = BleTransportConfig.load(args.ble_config)
+            gateway_config = EspnowTransportConfig.load(args.gateway_config)
         except (OSError, ValueError) as exc:
             _parser().error(str(exc))
     if args.nominal_rate_hz < 1:
@@ -913,9 +914,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.output_dir,
         environment={
             "transport": args.transport,
-            "ble_transport": asdict(ble_config) if ble_config else None,
-            "ble_transport_fingerprint": ble_config.fingerprint if ble_config else None,
+            "gateway_transport": asdict(gateway_config) if gateway_config else None,
+            "gateway_transport_fingerprint": gateway_config.fingerprint(inventory, profile) if gateway_config else None,
             "port": args.port,
+            "gateway_port": args.gateway_port,
             "nominal_rate_hz": nominal_rate_hz,
             "receiver_ids": {device.mac: device.id for device in inventory.receivers},
             "receiver_config": str(args.receiver_config) if profile_mode else None,
@@ -938,12 +940,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 connected=connected,
             )
 
-    reader = BleReceiverManager(
+    reader = GatewayReceiverManager(
         inventory,
         profile,
         args.output_dir,
         transmitter_port=args.port,
-        config=ble_config,
+        gateway_port=args.gateway_port,
+        config=gateway_config,
         require_four=True,
         on_status=radio_status,
         record_sink=controller.write_radio,
@@ -954,8 +957,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if profile_mode:
         try:
             receiver_bindings = reader.bind()
-        except RuntimeError as exc:
-            print(f"Unable to bind configured BLE receivers: {exc}", file=sys.stderr)
+        except (RuntimeError, ValueError) as exc:
+            print(f"Unable to bind configured ESP-NOW gateway receivers: {exc}", file=sys.stderr)
             return 2
         controller.update_environment(
             {
@@ -1021,7 +1024,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         now = time.monotonic()
         radio_last = getattr(reader, "last_valid_time", None)
         radio_live = radio_last is not None and now - radio_last < 2.5
-        if args.transport == "ble":
+        if args.transport == "espnow_gateway":
             active = controller.state in (
                 SessionState.COUNTDOWN,
                 SessionState.ACTION,
@@ -1038,7 +1041,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             reader_status[0][0]
             if reader_status
             else (
-                "waiting for BLE receiver streams"
+                "waiting for ESP-NOW gateway receiver streams"
                 if profile_mode
                 else "waiting for radio"
             )
@@ -1070,7 +1073,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         metrics_text, metrics_tooltip = _status_metrics(
             reader, nominal_rate_hz, panel.measured_fps
         )
-        if args.transport == "ble":
+        if args.transport == "espnow_gateway":
             metrics_tooltip += "\n" + reader.diagnostic_text()
             radio_detail = reader.failure or reader.diagnostic_text()
         operator.apply(

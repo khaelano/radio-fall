@@ -59,8 +59,8 @@ class RadioDevice:
     def from_mapping(cls, value: Mapping[str, Any], *, index: int) -> "RadioDevice":
         device_id = _text(value.get("id"), f"devices[{index}].id")
         role = _text(value.get("role"), f"devices[{index}].role").lower()
-        if role not in {"transmitter", "receiver"}:
-            raise RadioProfileError(f"devices[{index}].role must be transmitter or receiver")
+        if role not in {"transmitter", "receiver", "gateway"}:
+            raise RadioProfileError(f"devices[{index}].role must be transmitter, receiver or gateway")
         target = _text(value.get("target"), f"devices[{index}].target").lower()
         if target not in SUPPORTED_TARGETS:
             raise RadioProfileError(f"devices[{index}].target is unsupported: {target}")
@@ -80,12 +80,13 @@ class RadioInventory:
     schema_version: int
     transmitter: RadioDevice
     receivers: tuple[RadioDevice, ...]
+    gateway: RadioDevice | None = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "RadioInventory":
         schema_version = value.get("schema_version")
-        if schema_version != 1:
-            raise RadioProfileError("inventory schema_version must be 1")
+        if schema_version not in (1, 2):
+            raise RadioProfileError("inventory schema_version must be 1 or 2")
 
         raw_transmitter = value.get("transmitter")
         if not isinstance(raw_transmitter, Mapping):
@@ -107,14 +108,20 @@ class RadioInventory:
         if any(device.role != "receiver" for device in receivers):
             raise RadioProfileError("inventory.receivers entries must have role receiver")
 
-        devices = (transmitter, *receivers)
+        raw_gateway = value.get("gateway")
+        gateway = RadioDevice.from_mapping(raw_gateway, index=5) if isinstance(raw_gateway, Mapping) else None
+        if schema_version == 2 and (gateway is None or gateway.role != "gateway" or gateway.target != "esp32c6"):
+            raise RadioProfileError("inventory v2 requires an ESP32-C6 gateway")
+        if raw_gateway is not None and schema_version == 1:
+            raise RadioProfileError("gateway requires inventory schema_version 2")
+        devices = (transmitter, *receivers, *((gateway,) if gateway else ()))
         ids = [device.id for device in devices]
         macs = [device.mac for device in devices]
         if len(set(ids)) != len(ids):
             raise RadioProfileError("device IDs must be unique")
         if len(set(macs)) != len(macs):
             raise RadioProfileError("device MAC addresses must be unique")
-        return cls(schema_version=1, transmitter=transmitter, receivers=receivers)
+        return cls(schema_version=schema_version, transmitter=transmitter, receivers=receivers, gateway=gateway)
 
     @classmethod
     def load(cls, path: Path) -> "RadioInventory":
@@ -131,6 +138,7 @@ class RadioInventory:
             "schema_version": self.schema_version,
             "transmitter": _device_dict(self.transmitter),
             "receivers": [_device_dict(device) for device in self.receivers],
+            **({"gateway": _device_dict(self.gateway)} if self.gateway else {}),
         }
 
 
@@ -148,8 +156,8 @@ class RadioProfile:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "RadioProfile":
-        if value.get("schema_version") != 1:
-            raise RadioProfileError("radio profile schema_version must be 1")
+        if type(value.get("schema_version")) is not int or value["schema_version"] not in (1, 2):
+            raise RadioProfileError("radio profile schema_version must be 1 or 2")
         profile_id = _text(value.get("profile_id"), "profile_id")
         country_code = _text(value.get("country_code"), "country_code").upper()
         if country_code != "ID":
@@ -161,6 +169,8 @@ class RadioProfile:
             band = "5ghz"
         else:
             raise RadioProfileError("band must be 2.4ghz or 5ghz")
+        if value["schema_version"] == 2 and band != "5ghz":
+            raise RadioProfileError("radio profile version 2 requires 5ghz gateway sensing")
         try:
             channel = int(value.get("channel"))
             bandwidth = int(value.get("bandwidth_mhz"))
@@ -169,8 +179,8 @@ class RadioProfile:
             raise RadioProfileError("channel, bandwidth_mhz, and nominal_rate_hz must be integers") from exc
         if bandwidth != 20:
             raise RadioProfileError("only 20 MHz bandwidth is supported")
-        if isinstance(value.get("nominal_rate_hz"), bool) or rate != value.get("nominal_rate_hz") or not 50 <= rate <= 100:
-            raise RadioProfileError("nominal_rate_hz must be an integer between 50 and 100")
+        if isinstance(value.get("nominal_rate_hz"), bool) or rate != value.get("nominal_rate_hz") or not 50 <= rate <= (120 if value["schema_version"] == 2 else 100):
+            raise RadioProfileError("nominal_rate_hz must be an integer between 50 and 100 (120 in profile version 2)")
         if band == "2.4ghz" and channel not in INDONESIA_2GHZ_CHANNELS:
             raise RadioProfileError("2.4ghz channel is not permitted in Indonesia")
         if band == "5ghz":
@@ -178,7 +188,7 @@ class RadioProfile:
                 raise RadioProfileError(
                     "5ghz channel must be a supported non-DFS channel"
                 )
-        return cls(1, profile_id, country_code, band, channel, bandwidth, rate)
+        return cls(value["schema_version"], profile_id, country_code, band, channel, bandwidth, rate)
 
     @classmethod
     def load(cls, path: Path) -> "RadioProfile":
@@ -225,7 +235,7 @@ def validate_inventory_for_profile(
         ]
         if incompatible:
             raise RadioProfileError(
-                "5ghz profiles require ESP32-C5 for every device: "
+                "5ghz profiles require ESP32-C5 for sensing devices: "
                 + ", ".join(incompatible)
             )
 

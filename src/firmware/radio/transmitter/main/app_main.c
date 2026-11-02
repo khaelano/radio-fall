@@ -26,8 +26,8 @@
 #include "radio_profile.h"
 #include "radio_board.h"
 #include "radio_diagnostics.h"
-#include "ble_transmitter.h"
-#include "sensing_send_policy.h"
+#include "gateway_transmitter.h"
+#include "gateway_io.h"
 
 #include "serial_frame.h"
 
@@ -58,7 +58,6 @@ typedef struct {
 static transmitter_stats_t s_stats;
 static volatile bool s_radio_active;
 static int8_t s_tx_power_quarter_dbm = -1;
-static csi_sensing_send_policy_t s_send_policy;
 static uint8_t s_radio_mac[6];
 static SemaphoreHandle_t s_control_write_mutex;
 static bool usb_control_write(uint8_t type, const uint8_t *payload, size_t length);
@@ -79,27 +78,6 @@ static transmitter_stats_t stats_snapshot(void)
     return snapshot;
 }
 
-static void espnow_send_callback(const esp_now_send_info_t *tx_info,
-                                 esp_now_send_status_t status)
-{
-    if (tx_info && tx_info->des_addr) {
-        portENTER_CRITICAL(&s_stats_lock);
-        for (unsigned i = 0; i < s_profile.receiver_count; ++i) {
-            if (!memcmp(tx_info->des_addr, s_profile.receiver_macs[i], 6)) {
-                csi_sensing_result(&s_send_policy, i, status == ESP_NOW_SEND_SUCCESS,
-                    esp_timer_get_time(), (uint64_t)CONFIG_CSI_PEER_RETRY_BACKOFF_MS * 1000);
-                break;
-            }
-        }
-        portEXIT_CRITICAL(&s_stats_lock);
-    }
-    if (status == ESP_NOW_SEND_SUCCESS) {
-        stats_add(&s_stats.asynchronous_successes, 1);
-    } else {
-        stats_add(&s_stats.asynchronous_failures, 1);
-    }
-}
-
 static void transmitter_stats_task(void *arg)
 {
     (void)arg;
@@ -107,7 +85,7 @@ static void transmitter_stats_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(1000));
         const transmitter_stats_t stats = stats_snapshot();
         /* ROM printing can reach USB even with the secondary console disabled.
-         * Every writer on the BLE reference link must use the framing mutex. */
+         * Every writer on the transmitter reference link must use the framing mutex. */
         char line[128];
         const int length = snprintf(
             line, sizeof(line),
@@ -194,32 +172,32 @@ static void usb_status(void)
 #endif
     const transmitter_stats_t tx_stats = stats_snapshot();
     portENTER_CRITICAL(&s_stats_lock);
-    uint32_t busy_skips = s_send_policy.busy_skips;
-    uint32_t backoff_skips = s_send_policy.backoff_skips;
+    uint32_t busy_skips = gw_io_mac_failures();
+    uint32_t backoff_skips = gw_io_drops();
     portEXIT_CRITICAL(&s_stats_lock);
     const int length = snprintf(
         payload, sizeof(payload),
         "{\"role\":\"transmitter\",\"target\":\"%s\","
-        "\"mac\":\"" MACSTR "\",\"firmware_version\":\"2\","
-        "\"protocol_version\":2,\"profile_id\":\"%s\","
+        "\"mac\":\"" MACSTR "\",\"firmware_version\":\"3\","
+        "\"protocol_version\":3,\"transport_config_max_version\":7,\"cpu_max_mhz\":%u,\"profile_id\":\"%s\","
         "\"profile_fingerprint\":\"%s\",\"ready\":%s,"
-        "\"csi_transport\":\"ble\",\"reset_reason\":\"%s\","
+        "\"csi_transport\":\"espnow_gateway\",\"reset_reason\":\"%s\","
         "\"uptime_ms\":%" PRIu64 ",\"radio_active\":%s,"
         "\"tx_power_quarter_dbm\":%d,"
-        "\"radio_mac\":\"" MACSTR "\",\"busy_skips\":%" PRIu32 ","
+        "\"radio_mac\":\"" MACSTR "\",\"mac_failures\":%" PRIu32 ","
         "\"sensing_phy\":\"%s\","
         "\"board\":\"%s\",\"antenna\":\"%s\","
-        "\"sensing_version\":3,"
-        "\"peer_retry_backoff_ms\":%u,\"backoff_skips\":%" PRIu32 ","
+        "\"sensing_version\":4,"
+        "\"peer_retry_backoff_ms\":%u,\"rx_control_drops\":%" PRIu32 ","
         "\"tx\":{\"attempts\":%lu,\"imm_err\":%lu,\"ok\":%lu,\"fail\":%lu}}",
-        target, MAC2STR(s_transmitter_mac), s_profile.profile_id,
+        target, MAC2STR(s_transmitter_mac), (unsigned)CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ, s_profile.profile_id,
         s_profile.fingerprint, s_profile_provisioned ? "true" : "false",
         csi_reset_reason_name(), (uint64_t)(esp_timer_get_time() / 1000),
         s_radio_active ? "true" : "false", s_tx_power_quarter_dbm,
         MAC2STR(s_radio_mac), busy_skips,
         s_sensing_phy,
         csi_board_name(), csi_board_antenna(),
-        CONFIG_CSI_PEER_RETRY_BACKOFF_MS, backoff_skips,
+        0U, backoff_skips,
         (unsigned long)tx_stats.attempts,
         (unsigned long)tx_stats.immediate_errors,
         (unsigned long)tx_stats.asynchronous_successes,
@@ -272,10 +250,10 @@ static void usb_control_task(void *arg)
                  (uint32_t)raw[9 + payload_length] << 16 |
                  (uint32_t)raw[10 + payload_length] << 8 |
                  raw[11 + payload_length])) continue;
-        if (raw[5] == CSI_SERIAL_BLE_CONTROL) {
+        if (raw[5] == GW_CONTROL) {
             uint8_t response[64];
-            size_t response_length = csi_ble_tx_control(raw + CSI_SERIAL_HEADER_SIZE, payload_length, response);
-            usb_control_write(CSI_SERIAL_BLE_RESPONSE, response, response_length);
+            size_t response_length = gw_tx_control(raw + CSI_SERIAL_HEADER_SIZE, payload_length, response);
+            usb_control_write(GW_RESPONSE, response, response_length);
             continue;
         }
         if (raw[5] == CSI_SERIAL_TYPE_PROFILE_STAGE) {
@@ -310,7 +288,7 @@ static void usb_control_init(void)
 {
     s_control_write_mutex = xSemaphoreCreateMutex();
     if (!s_control_write_mutex) abort();
-    csi_ble_tx_init(&s_profile, usb_control_write);
+    gw_tx_init(&s_profile, usb_control_write);
     if (!usb_serial_jtag_is_driver_installed()) {
         usb_serial_jtag_driver_config_t config = {
             .tx_buffer_size = CSI_SERIAL_MAX_FRAME_SIZE * 4,
@@ -366,37 +344,10 @@ static void wifi_init(void)
 static void espnow_init(void)
 {
     portENTER_CRITICAL(&s_stats_lock);
-    s_send_policy.pending_mask = 0;
-    memset(s_send_policy.next_probe_us, 0, sizeof(s_send_policy.next_probe_us));
     portEXIT_CRITICAL(&s_stats_lock);
     ESP_ERROR_CHECK(esp_wifi_get_mac(WIFI_IF_STA, s_radio_mac));
-    ESP_ERROR_CHECK(esp_now_init());
-    ESP_ERROR_CHECK(esp_now_set_pmk((uint8_t *)"pmk1234567890123"));
-    ESP_ERROR_CHECK(esp_now_register_send_cb(espnow_send_callback));
-
-    // Unicast peers are what makes the configured HE20/MCS0 rate take effect.
-    // A broadcast peer is always sent at a basic legacy rate, which produces
-    // no HE CSI at the receiver.
-    esp_now_rate_config_t rate = {
-#if CONFIG_CSI_DIAGNOSTIC_HT20
-        .phymode = WIFI_PHY_MODE_HT20,
-#else
-        .phymode = WIFI_PHY_MODE_HE20,
-#endif
-        .rate = WIFI_PHY_RATE_MCS0_LGI,
-        .ersu = false,
-        .dcm = false,
-    };
-    for (uint8_t index = 0; index < s_profile.receiver_count; ++index) {
-        esp_now_peer_info_t peer = {0};
-        memcpy(peer.peer_addr, s_profile.receiver_macs[index],
-               sizeof(peer.peer_addr));
-        peer.channel = s_profile.channel;
-        peer.ifidx = WIFI_IF_STA;
-        peer.encrypt = false;
-        ESP_ERROR_CHECK(esp_now_add_peer(&peer));
-        ESP_ERROR_CHECK(esp_now_set_peer_rate_config(peer.peer_addr, &rate));
-    }
+    gw_io_init_sized(GW_STATUS_SIZE);
+    for(unsigned i=0;i<s_profile.receiver_count;++i)gw_peer(s_profile.receiver_macs[i],true);
     ESP_LOGI(TAG, "sensing link PHY=HE20 MCS0 long-GI peers=%u",
              s_profile.receiver_count);
 }
@@ -407,8 +358,8 @@ static void transmitter_task(void *arg)
     uint32_t sequence = 0, previous_generation = UINT32_MAX;
     uint64_t deadline = 0;
     for (;;) {
-        csi_ble_config_t config; uint32_t boot, generation;
-        if (!csi_ble_tx_snapshot(&config, &boot, &generation)) {
+        gw_config_t config; uint32_t boot, generation;
+        if (!gw_tx_snapshot(&config, &boot, &generation)) {
             if (s_radio_active) {
                 ESP_ERROR_CHECK(esp_now_deinit());
                 ESP_ERROR_CHECK(esp_wifi_stop());
@@ -428,38 +379,31 @@ static void transmitter_task(void *arg)
             continue; /* Recheck the host lease after radio startup. */
         }
         uint64_t now = esp_timer_get_time();
-        uint32_t period = 1000000U/config.rate_hz;
+        uint32_t period = 1000000U/config.rate;
         if (generation != previous_generation) {
             sequence = 0; deadline = now; previous_generation = generation;
         }
-        if (now < deadline) { csi_ble_tx_wait(deadline); continue; }
+        if (now < deadline) { gw_tx_wait(deadline); continue; }
         if (now-deadline >= period) {
             uint32_t skipped = (now-deadline)/period;
-            csi_ble_tx_round(&config, boot, sequence, now, deadline, 0x80000000U | skipped);
+            gw_tx_round(&config, boot, sequence, now, deadline, 0x80000000U | skipped);
             sequence += skipped; deadline += (uint64_t)skipped*period;
         }
         csi_sensing_packet_t sensing = {.sequence=sequence, .tx_t1_us=esp_timer_get_time()};
         memcpy(sensing.profile_fingerprint, s_profile.fingerprint, CSI_PROFILE_FINGERPRINT_SIZE);
-        uint8_t packet[CSI_BLE_SENSING_SIZE];
-        size_t length = csi_ble_sensing_encode(packet, sizeof(packet), &sensing, &config, boot, deadline);
+        uint8_t packet[GW_SENSING_SIZE];
+        gw_schedule_t schedule; gw_tx_schedule(&schedule);
+        size_t length = gw_sensing_encode(packet, &sensing, &config, boot, &schedule);
         uint32_t sent_mask = 0;
-        /* Bound queued retries per peer and rotate submission order so an
-         * unreachable early peer cannot starve a later receiver's sensing. */
-        for (unsigned offset = 0; offset < s_profile.receiver_count; ++offset) {
-            unsigned i = csi_sensing_peer(sequence, offset, s_profile.receiver_count);
-            portENTER_CRITICAL(&s_stats_lock);
-            bool reserved = csi_sensing_reserve_at(&s_send_policy, i, esp_timer_get_time());
-            portEXIT_CRITICAL(&s_stats_lock);
-            if (!reserved) continue;
-            stats_add(&s_stats.attempts, 1);
-            if (esp_now_send(s_profile.receiver_macs[i], packet, length) == ESP_OK) sent_mask |= 1U << i;
-            else {
-                portENTER_CRITICAL(&s_stats_lock); csi_sensing_complete(&s_send_policy, i);
-                portEXIT_CRITICAL(&s_stats_lock);
-                stats_add(&s_stats.immediate_errors, 1);
-            }
+        for(unsigned k=0;k<s_profile.receiver_count;++k){
+            unsigned i=(sequence+k)%s_profile.receiver_count;
+            uint64_t sent_at=esp_timer_get_time();
+            if(gw_omit_sensing(&config,&schedule,i,sensing.tx_t1_us,sent_at))continue;
+            stats_add(&s_stats.attempts,1);
+            if(gw_send(s_profile.receiver_macs[i],packet,length,1))sent_mask|=1U<<i;
+            else stats_add(&s_stats.immediate_errors,1);
         }
-        csi_ble_tx_round(&config, boot, sequence, sensing.tx_t1_us, deadline, sent_mask);
+        gw_tx_round(&config, boot, sequence, sensing.tx_t1_us, deadline, sent_mask);
         ++sequence; deadline += period;
     }
 }

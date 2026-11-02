@@ -13,7 +13,7 @@ from fall_detection.radio.visualization.app import GUI_FPS_CHOICES, GUI_INTERVAL
 from fall_detection.radio.visualization.dashboard import DEFAULT_VIEW_SECONDS
 
 
-def test_collection_parser_defaults_to_ble_protocol():
+def test_collection_parser_defaults_to_gateway_protocol():
     args = _parser().parse_args(
         [
             "--port",
@@ -23,7 +23,7 @@ def test_collection_parser_defaults_to_ble_protocol():
         ]
     )
 
-    assert args.transport == "ble"
+    assert args.transport == "espnow_gateway"
     assert args.output_dir.name == "test-sessions"
     assert args.nominal_rate_hz == 50
 

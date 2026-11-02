@@ -119,10 +119,12 @@ static inline bool csi_sensing_decode(const uint8_t *source, size_t length,
 {
     if (source == NULL || packet == NULL || length < CSI_SENSING_HEADER_SIZE ||
         memcmp(source, CSI_SENSING_MAGIC, 4) != 0 ||
-        (source[4] != CSI_SENSING_VERSION && source[4] != 2 && source[4] != 3) ||
+        (source[4] != CSI_SENSING_VERSION && source[4] != 2 && source[4] != 3 && source[4] != 4) ||
         (source[5] & ~CSI_SENSING_FLAG_SYNC_REQUEST) != 0 ||
         (source[4] == 1 ? csi_clock_read_u16(source + 6) != CSI_SENSING_HEADER_SIZE :
          source[4] == 2 ? (length < 84 || csi_clock_read_u16(source + 6) != 84) :
+         source[4] == 4 ? (length < 180 || csi_clock_read_u16(source + 6) != 180 ||
+          csi_serial_crc32(source, 176) != csi_clock_read_u32(source + 176)) :
          (length < 88 || csi_clock_read_u16(source + 6) != 88 ||
           csi_serial_crc32(source, 84) != csi_clock_read_u32(source + 84)))) {
         return false;

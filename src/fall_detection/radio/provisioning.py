@@ -158,6 +158,8 @@ class RadioProvisioner:
         """Validate all configured boards, or one registered board sequentially."""
         expected = {inventory.transmitter.mac: inventory.transmitter}
         expected.update({device.mac: device for device in inventory.receivers})
+        if inventory.gateway:
+            expected[inventory.gateway.mac] = inventory.gateway
         required_count = 1 if sequential else len(expected)
         if len(self.devices) != required_count:
             raise ProvisioningError(
@@ -187,7 +189,7 @@ class RadioProvisioner:
                 raise ProvisioningError(
                     f"device {status.mac} role/target does not match inventory"
                 )
-            if status.protocol_version != 2:
+            if status.protocol_version not in ((3,) if inventory.gateway else (2, 3)):
                 raise ProvisioningError(
                     f"device {status.mac} uses unsupported protocol"
                 )
@@ -216,11 +218,16 @@ class RadioProvisioner:
         verified: list[DeviceStatus] = []
         try:
             for device, _status in bound:
+                if _status.role == "gateway":
+                    verified.append(_status)
+                    continue
                 device.stage_profile(payload)
                 staged.append(device)
             for device in staged:
                 device.commit_profile()
             for device, _status in bound:
+                if _status.role == "gateway":
+                    continue
                 refresh = getattr(device, "refresh_status", None)
                 if refresh is None:
                     verified.append(device.status)

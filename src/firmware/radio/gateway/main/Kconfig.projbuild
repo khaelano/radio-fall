@@ -1,0 +1,12 @@
+menu "CSI gateway experiments"
+
+config CSI_GATEWAY_ACK_MAX_AGE_MS
+    int "Maximum age of receiver activity for immediate host ACK forwarding (ms)"
+    range 1 50
+    default 50
+    help
+        Experimental admission limit for immediate host acceptance ACKs. ACKs
+        remain cached for a later receiver poll when forwarding is skipped.
+        The default preserves the existing slot-length activity window.
+
+endmenu

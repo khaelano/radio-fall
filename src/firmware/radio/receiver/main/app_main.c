@@ -29,7 +29,8 @@
 #include "radio_profile.h"
 #include "radio_board.h"
 #include "radio_diagnostics.h"
-#include "ble_transport.h"
+#include "gateway_transport.h"
+#include "gateway_io.h"
 
 #if !CONFIG_IDF_TARGET_ESP32C5 && !CONFIG_IDF_TARGET_ESP32C6
 #error "The CSI receiver firmware requires an ESP32-C5 or ESP32-C6 target"
@@ -54,7 +55,7 @@ static volatile uint32_t s_transport_sequence;
 static uint32_t s_boot_id;
 static portMUX_TYPE s_stats_lock = portMUX_INITIALIZER_UNLOCKED;
 
-static const char *s_output_mode = "ble";
+static const char *s_output_mode = "espnow_gateway";
 
 /* Per-callback rejection counters.  These exist so the host can see why CSI
  * callbacks do not become records, instead of silently getting zero packets. */
@@ -201,7 +202,7 @@ static void usb_control_write(uint8_t type, const uint8_t *payload, size_t lengt
 static void usb_status(void)
 {
     /* usb_status() is called only by the USB control task. */
-    static char payload[768];
+    static char payload[1024];
     const char *target =
 #if CONFIG_IDF_TARGET_ESP32C5
         "esp32c5";
@@ -211,20 +212,29 @@ static void usb_status(void)
     const int length = snprintf(
         payload, sizeof(payload),
         "{\"role\":\"receiver\",\"target\":\"%s\","
-        "\"mac\":\"" MACSTR "\",\"firmware_version\":\"2\","
-        "\"protocol_version\":2,\"profile_id\":\"%s\","
+        "\"mac\":\"" MACSTR "\",\"firmware_version\":\"3\","
+        "\"protocol_version\":3,\"transport_config_max_version\":7,\"cpu_max_mhz\":%u,\"profile_id\":\"%s\","
         "\"profile_fingerprint\":\"%s\",\"ready\":%s,"
-        "\"csi_transport\":\"ble\",\"reset_reason\":\"%s\","
+        "\"csi_transport\":\"espnow_gateway\",\"reset_reason\":\"%s\","
         "\"uptime_ms\":%" PRIu64 ","
+        "\"free_heap_bytes\":%lu,\"minimum_free_heap_bytes\":%lu,"
+        "\"gateway_config_version\":7,\"max_outstanding_batches\":8,"
+        "\"upload_worker\":\"%s\","
         "\"board\":\"%s\",\"antenna\":\"%s\","
-        "\"sensing_version\":3,"
+        "\"sensing_version\":4,"
         "\"csi\":{\"cb\":%lu,\"null\":%lu,\"mac\":%lu,\"short\":%lu,"
         "\"decode\":%lu,\"fp\":%lu,\"empty\":%lu,\"queued\":%lu,"
         "\"espnow_sensing\":%lu,\"matching_mac\":%lu,\"channel\":%lu,"
         "\"format\":%lu,\"payload_len\":%lu}}",
-        target, MAC2STR(s_receiver_mac), s_profile.profile_id,
+        target, MAC2STR(s_receiver_mac), (unsigned)CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ, s_profile.profile_id,
         s_profile.fingerprint, s_profile_provisioned ? "true" : "false",
         csi_reset_reason_name(), (uint64_t)(esp_timer_get_time() / 1000),
+        (unsigned long)esp_get_free_heap_size(), (unsigned long)esp_get_minimum_free_heap_size(),
+#if CONFIG_CSI_GATEWAY_EVENT_UPLOAD
+        "event",
+#else
+        "legacy",
+#endif
         csi_board_name(), csi_board_antenna(),
         (unsigned long)s_csi_diag.callbacks,
         (unsigned long)s_csi_diag.null_info,
@@ -251,7 +261,7 @@ static void wifi_csi_init(void);
  * alive, WiFi is bounced into the new band/channel, and CSI is re-armed. */
 static void apply_staged_profile(void)
 {
-    /* Reload the BLE identity and fixed slot order after acknowledging NVS. */
+    /* Reload the transport identity and fixed slot order after acknowledging NVS. */
     usb_control_write(CSI_SERIAL_TYPE_PROFILE_COMMIT_ACK, (const uint8_t *)"ok", 2);
     vTaskDelay(pdMS_TO_TICKS(50));
     esp_restart();
@@ -339,27 +349,17 @@ static void wifi_init(void)
 
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    // On the dual-band part both the band mode and the protocol selection are
-    // only accepted after the driver is started, and bandwidth requires the
-    // band mode to be set first.  Doing any of this before esp_wifi_start()
-    // aborts with ESP_ERR_WIFI_NOT_STARTED / ESP_ERR_NOT_SUPPORTED.
-    if (s_profile.band == CSI_RADIO_BAND_5G) {
-#if !CONFIG_SOC_WIFI_SUPPORT_5G
-        ESP_LOGE(TAG, "5 GHz profile is not supported by this target");
-        abort();
+    if (s_profile.band != CSI_RADIO_BAND_5G) abort();
+#if CONFIG_SOC_WIFI_SUPPORT_5G
+    ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO));
+    wifi_protocols_t protocols={.ghz_2g=WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N,
+        .ghz_5g=WIFI_PROTOCOL_11A|WIFI_PROTOCOL_11N|WIFI_PROTOCOL_11AC|WIFI_PROTOCOL_11AX};
+    ESP_ERROR_CHECK(esp_wifi_set_protocols(WIFI_IF_STA,&protocols));
+    wifi_bandwidths_t bandwidths={.ghz_2g=WIFI_BW20,.ghz_5g=WIFI_BW20};
+    ESP_ERROR_CHECK(esp_wifi_set_bandwidths(WIFI_IF_STA,&bandwidths));
 #else
-        ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_5G_ONLY));
-        ESP_ERROR_CHECK(esp_wifi_set_protocol(
-            WIFI_IF_STA, WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N |
-                           WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX));
+#error "Scheduled dual-band receivers require ESP32-C5"
 #endif
-    } else {
-        ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_2G_ONLY));
-        ESP_ERROR_CHECK(esp_wifi_set_protocol(
-            WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G |
-                           WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AX));
-    }
-    ESP_ERROR_CHECK(esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW20));
     ESP_ERROR_CHECK(esp_wifi_set_country_code("ID", true));
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
     ESP_ERROR_CHECK(esp_wifi_set_channel(s_profile.channel, WIFI_SECOND_CHAN_NONE));
@@ -367,31 +367,9 @@ static void wifi_init(void)
 
 }
 
-static void sensing_received(const esp_now_recv_info_t *info, const uint8_t *data, int length)
-{
-    csi_sensing_packet_t sensing;
-    if (info && data && length > 0 && !memcmp(info->src_addr, s_transmitter_mac, 6)
-        && csi_sensing_decode(data, (size_t)length, &sensing)
-        && !memcmp(sensing.profile_fingerprint, s_profile.fingerprint, CSI_PROFILE_FINGERPRINT_SIZE)) {
-        stats_add(&s_csi_diag.espnow_sensing, 1);
-    }
-}
-
 static void espnow_init(void)
 {
-    static const uint8_t broadcast_mac[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-
-    ESP_ERROR_CHECK(esp_now_init());
-    ESP_ERROR_CHECK(esp_now_set_pmk((uint8_t *)"pmk1234567890123"));
-    ESP_ERROR_CHECK(esp_now_register_recv_cb(sensing_received));
-
-    esp_now_peer_info_t peer = {0};
-    memcpy(peer.peer_addr, broadcast_mac, sizeof(broadcast_mac));
-    peer.channel = s_profile.channel;
-    peer.ifidx = WIFI_IF_STA;
-    peer.encrypt = false;
-    ESP_ERROR_CHECK(esp_now_add_peer(&peer));
-
+    gw_io_init_sized(GW_SENSING_SIZE);
 }
 
 static size_t serialize_csi_record(const csi_record_t *record, uint8_t *buffer, size_t capacity);
@@ -448,7 +426,7 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
     }
 
     /* Snapshot callback metadata once: hardware may reuse the backing buffer. */
-    uint8_t sensing_bytes[CSI_BLE_SENSING_SIZE];
+    uint8_t sensing_bytes[GW_SENSING_SIZE];
     if (info->payload == NULL ||
         info->payload_len < CSI_SENSING_PAYLOAD_OFFSET + sizeof(sensing_bytes)) {
         stats_add(&s_csi_diag.short_payload, 1);
@@ -460,8 +438,9 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
     if (memcmp(sensing.profile_fingerprint, s_profile.fingerprint, CSI_PROFILE_FINGERPRINT_SIZE)) {
         stats_add(&s_csi_diag.fingerprint_mismatch, 1); return;
     }
-    if (memcmp(info->mac, s_transmitter_mac, 6) ||
-        !csi_ble_observe(sensing_bytes, sizeof(sensing_bytes), rx_callback_timestamp_us)) return;
+    if (info->rx_ctrl.channel != s_profile.channel || info->rx_ctrl.cur_bb_format != 4 ||
+        memcmp(info->mac, s_transmitter_mac, 6) ||
+        !gw_receiver_observe(sensing_bytes, sizeof(sensing_bytes), rx_callback_timestamp_us)) return;
     record.sequence = sensing.sequence;
     record.tx_timestamp_us = sensing.tx_t1_us;
     record.clock_timestamps_valid = true;
@@ -482,7 +461,7 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 
     uint8_t wire[CSI_WIRE_HEADER_SIZE + MAX_CSI_BYTES];
     size_t length = serialize_csi_record(&record, wire, sizeof(wire));
-    if (!length || !csi_ble_enqueue(wire, length, rx_callback_timestamp_us))
+    if (!length || !gw_receiver_enqueue(wire, length, rx_callback_timestamp_us))
         stats_add(&s_csi_diag.queue_drops, 1);
     else stats_add(&s_csi_diag.queued, 1);
 }
@@ -637,18 +616,18 @@ void app_main(void)
         ESP_LOGE(TAG, "unable to create USB control task");
         abort();
     }
-    if (!s_profile_provisioned) {
+    if (!s_profile_provisioned || s_profile.band != CSI_RADIO_BAND_5G) {
         ESP_LOGW(TAG, "no valid NVS radio profile; USB provisioning is required");
         return;
     }
 
     wifi_init();
     espnow_init();
-    csi_ble_init(&s_profile, s_receiver_mac, s_boot_id);
+    gw_receiver_init(&s_profile, s_receiver_mac, s_boot_id);
     wifi_csi_init();
     ESP_LOGI(TAG, "mode=%s channel=%d transmitter=" MACSTR " receiver=" MACSTR
              " boot=%" PRIu32,
              s_output_mode, s_profile.channel, MAC2STR(s_transmitter_mac),
              MAC2STR(s_receiver_mac), s_boot_id);
-    /* The BLE module owns its worker and bounded pool. */
+    /* The gateway module owns its worker and bounded pool. */
 }

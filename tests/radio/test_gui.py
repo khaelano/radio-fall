@@ -35,8 +35,8 @@ def test_gui_parser_rejects_legacy_transports(transport):
         _parser().parse_args(["--transport", transport])
 
 
-def test_gui_defaults_to_ble():
-    assert _parser().parse_args([]).transport == "ble"
+def test_gui_defaults_to_gateway():
+    assert _parser().parse_args([]).transport == "espnow_gateway"
 
 
 def test_gui_parser_accepts_ble_receiver_selection():

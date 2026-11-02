@@ -90,7 +90,9 @@ def load_phase_signal(
         raise ValueError("CSI and radio timing rows do not align by sequence")
     if not np.array_equal(csi["local_timestamp"], timing["rx_radio_timestamp_us"]):
         raise ValueError("CSI and radio timing receiver timestamps do not align")
-    ble_path = receiver / "ble_timing.jsonl"
+    ble_path = receiver / "gateway_timing.jsonl"
+    if not ble_path.is_file():
+        ble_path = receiver / "ble_timing.jsonl"
     if ble_path.is_file():
         ble = pd.read_json(ble_path, lines=True)
         if (
@@ -109,7 +111,7 @@ def load_phase_signal(
         # Transport delivery can reorder records. Sort derived views only.
         order = timing["capture_host_monotonic_ns"].sort_values(kind="stable").index
         csi, timing = csi.loc[order], timing.loc[order]
-    elif manifest.get("environment", {}).get("transport") == "ble":
+    elif manifest.get("environment", {}).get("transport") in {"ble", "espnow_gateway"}:
         raise ValueError("BLE capture requires its capture-time sidecar")
     environment = manifest.get("environment", {})
     transmitter = (

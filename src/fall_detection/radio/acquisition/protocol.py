@@ -59,6 +59,7 @@ class CsiRecord:
     csi_length: int = 0
     raw_csi: tuple[complex, ...] = ()
     profile_fingerprint: str = ""
+    transport: str = ""
     _mean_i: float = field(init=False, repr=False, compare=False)
     _mean_q: float = field(init=False, repr=False, compare=False)
     _derived_views_cache: Optional[

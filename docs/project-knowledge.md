@@ -21,18 +21,156 @@ remain in their dedicated documents.
 
 - Goal: detect human falls from Wi-Fi channel state information (CSI) for a
   bachelor's thesis.
-- Recorded cohort: one ESP32-C5 transmitter and two ESP32-C5 receivers. The
-  proposed BLE system targets four receivers; only two measured CSI views are
-  available in the current cohort. ESP32-C6 also supports 2.4 GHz operation.
+- Historical CSI cohort: one ESP32-C5 transmitter and two ESP32-C5 receivers.
+  New gateway transport tests use four C5 receivers and one C6 gateway; this
+  does not add four-view activity recordings or detector evaluation to the
+  historical cohort. ESP32-C6 supports the 2.4 GHz backhaul.
 - Sensing link: ESP-NOW, 802.11ax HE20, MCS0, 20 MHz, long guard interval, and
-  50–100 configured sensing rounds per second per receiver. Historical profiles
-  remain at 100 Hz; BLE starting profiles use 80 Hz.
-- Host transport on `wifi-bt`: receiver CSI uses BLE only. USB remains for
-  provisioning and transmitter control/timing; live USB CSI adapters, firmware
-  writers, and gateway capture commands have been removed. The BLE transport
-  with transmitter-led round-robin grants, bounded queues, CRC-protected
-  batches and application ACKs is implemented; four-receiver RF behavior and
-  throughput have not been measured. See `docs/ble-transport.md`.
+  50–100 configured sensing rounds per second per receiver in historical
+  profile schema v1; explicit 5 GHz profile v2 supports up to 120 Hz with CGCF-v6.
+  Historical profiles remain at 100 Hz; normal gateway sensing uses 80 Hz.
+- Host transport on `codex/espnow-gateway`: live BLE is replaced by scheduled
+  2.4 GHz ESP-NOW uploads from C5 receivers to a C6 USB gateway. Initial policy:
+  80 Hz 5 GHz sensing, 50 ms slots, explicit return interlock, bounded queues,
+  CRC-protected complete batches and processor-acceptance ACKs. Hardware
+  qualification remains separate from implementation; see `docs/espnow-gateway.md`.
+  Historical BLE/USB decoding, reports and replay inputs remain available.
+- Hardware probe (1 November 2026): one C5 receiver delivered 33.5 valid records/s
+  within one second; delivered latency p99 was 517.9 ms. The fixed rate and queue
+  stability checks failed. All 444 observed recovery intervals in that probe
+  were conservatively before slot expiry; this does not qualify four receivers
+  or post-switch phase stability. See `docs/espnow-hardware-probe-2026-11-01.md`.
+- Incremental gateway changes: early next-grant announcement after verified
+  return, unique slot-entry ACK polls and per-round pending-return notices are
+  implemented. A matched 30 s warm-up/60 s single-RX pair delivered 34.28→40.47
+  records/s and 472.62→52.34 ms median latency, but observed median recovery
+  intervals grew 35.78→42.86 ms. Queue stability and complete timing evidence
+  failed; four-RX qualification remains open. Callback-based send waiting was
+  tested and reverted. See `docs/espnow-incremental-2026-11-01.md`.
+- Eight-batch storage and work-dependent early return are implemented as opt-in
+  CGCF-v2 trials. Host acceptance ACKs remain on 2.4 GHz. Normal policy stays at
+  four batches/deadline return because early-return trials shortened median
+  conservative recovery from 42.63 to 29.18–31.08 ms but delivered 46.23 then
+  30.15 records/s, with median latency worsening from 53.33 to 468.86–489.86 ms.
+  Rate/timing qualification remains failed; see
+  `docs/espnow-window-return-2026-11-02.md` for memory, faults and evidence limits.
+  After USB reconnection, the restored-default ten-second smoke completed at
+  40.1 records/s, 41.31 ms median latency, stable queues and complete observed
+  return evidence. Transmitter shutdown was verified; four-RX qualification
+  remains pending. Receiver USB discovery required a reset despite working CSI
+  delivery; its cause is unisolated, with all three identities visible afterward.
+- CGCF-v3 cadence/ACK trials are implemented: per-receiver minimum revisit time,
+  separate send guard, selective eight-ID ACK polling on the existing 2.4 GHz
+  gateway path, and optional per-grant MAC timing summaries. A separate 100 Hz
+  profile supports controlled trials. These are opt-in; the default policy,
+  50 ms slots and 10 ms return reserve remain unchanged. Hardware screens and
+  limits are recorded in `docs/espnow-cadence-2026-11-02.md`; failed MAC sends
+  reached about 88 ms, so a 5 ms send guard is not qualified.
+  Single-RX screens delivered 40.00 records/s at baseline, 38.63 with 150 ms
+  revisit, 32.23 with bitmap ACKs, and 36.80 with 100 Hz sensing/150 ms revisit.
+  None met 50 records/s; new policies remain experimental and both C5 boards
+  were restored to 80 Hz. The new-firmware default smoke delivered 40.1 records/s
+  with 41.34 ms median latency; all three USB identities and transmitter radio
+  shutdown were verified. Those trials did not measure four-receiver operation.
+- Retention/retry experiments (2 November 2026): CGCF-v4 permits at most three
+  retries; older versions retain one. The opt-in 750 ms/two-retry/150 ms ACK
+  timeout policy recovered 60/60 deliberately withheld records within one second
+  in a 30 s single-RX loss screen, versus 20/77 for default. Maximum delivered
+  delay was 454.58 ms, with unchanged retransmitted bytes. Retention alone did
+  not improve that recovery. Healthy delivery remains about 40 records/s;
+  four-RX qualification is still pending. Original defaults were restored and
+  shutdown verified. See `docs/espnow-retention-2026-11-02.md` for fault scope,
+  counts, queue/timing failures and limitations; this is an experimental candidate.
+- Four-receiver bring-up (2 November 2026): all four real C5s delivered through
+  the C6 gateway with three receivers on power-only USB. The transmitter's old
+  one-peer roster required explicit reprovisioning; the canonical live inventory
+  is `configs/radio/gateway_inventory.json`. The 30 s warm-up/300 s paced-retry
+  trial failed qualification at 12.85–13.00 timely records/s per receiver despite
+  all delivered records arriving within one second. Thirty observed recoveries
+  were after slot deadline; one grant remained unproven. No mapped overlap was
+  observed, but complete timing evidence failed. Defaults were restored and
+  transmitter shutdown verified. See `docs/espnow-four-receivers-2026-11-02.md`.
+- Burst/ACK experiments: an opt-in event-driven worker on the USB-accessible
+  rx-1 raised its rate from 13.20 to 18.53 records/s while three unchanged
+  receivers stayed near 13.3. A 5 ms gateway ACK-activity window reduced MAC
+  failures but did not increase throughput; combined rx-1 delivery was 15.27/s.
+  All delivered records were subsecond, but no treatment met 50 records/s.
+  Exact original applications and default transport policy were restored.
+  Flags remain opt-in; see `docs/espnow-burst-ack-2026-11-02.md`. These results
+  implicate firmware scheduling/pacing, with MAC/driver timing still a constraint.
+- Larger-burst tests used only the powered rx-1, with controlled revisits to
+  approximate four-receiver timing. Increasing 50 ms/300 ms window/revisit to
+  125 ms/600 ms raised delivery from 18.27 to 49.53 records/s, then 49.33 in a
+  60 s repeat; every delivered record was subsecond. The 50-record/s target and
+  complete timing evidence remained unmet. A separate four-lane planning model
+  checks grant interlocking, not RF contention or synthetic CSI. Diagnostic
+  event loss appeared in longer bursts. The four-peer TX roster and original
+  defaults were restored; see `docs/espnow-bulk-timing-2026-11-02.md`.
+- An opt-in CGCF-v5 ACK-less mode removes host acceptance ACKs, polls and
+  application retries while retaining CRCs, unicast MAC feedback, bounded sender
+  ownership, clock exchanges and the 5 GHz return interlock. Local completion
+  is not proof of host delivery. Transmitter USB control/timing remains required.
+  Paced single-RX 50 ms screens delivered 16.80/s with ACKs versus 16.87/s
+  without; 125 ms windows with 600 ms revisits delivered 43.13/s versus 42.87/s
+  in 60 s repeats. All delivered records were subsecond, but ACK-less queue
+  growth failed. A corrected 30 s ACK-less screen reached 50.93/s versus 49.07/s
+  with ACKs, but failed queue growth and complete timing evidence. There is no
+  consistent demonstrated gain. Initial bring-up stalled once and recovered
+  after restoration/reflash; its cause remains unidentified. Local-completion
+  accounting is separate from expiry. Originals/defaults and the four-peer TX
+  roster were restored, sensing stopped, and 383 tests passed. See
+  `docs/espnow-ackless-2026-11-02.md`; normal collection remains acknowledged.
+- CGCF-v6 adds opt-in HT20 long-GI backhaul MCS0–3 and 120 Hz sensing support,
+  preserving the HE20 MCS0 sensing PHY and older transport/profile contracts.
+  Event-worker and fixed-160-MHz CPU overlays are available; the latter disables
+  DFS while normal 80 MHz defaults remain unchanged. A bounded 128-entry
+  diagnostic queue retains longer burst evidence. CGCF-v7 adds an opt-in
+  96-slot record pool; old policies/defaults retain active capacity 64. Sized
+  control queues keep depth 32 while reserving 180/96-byte receiver/transmitter
+  payloads; the gateway retains complete 1400-byte envelopes. Net receiver heap
+  increased from 42,360 to 58,344 bytes despite the larger reserved record pool.
+  Benchmark reports can explicitly require 80 records/s. A paced single-RX
+  30 s warm-up/300 s ACK-less trial at 120 Hz, MCS3 and fixed 160 MHz delivered
+  95.77/s with every delivered record subsecond, stable queues (peak 79/96,
+  growth +1) and no diagnostic loss. The ACK variant delivered 93.84/s but
+  failed growth (+13). Each report retains one unproven grant; four-radio
+  qualification remains open. Original applications, 80 Hz/default policy and
+  four-peer TX roster were restored and sensing stopped. All 401 tests/eight
+  builds passed; see `docs/espnow-throughput-2026-11-02.md`.
+- Subsequent deployment (2 November): rx-2, rx-3 and rx-4 now run the tested
+  event-worker/fixed-160-MHz/v7 receiver image and have the full four-peer
+  inventory's 120 Hz profile (`8b28a906a0fbcd1f`), verified after hardware reset.
+  TX, rx-1 and the XIAO C6 were subsequently upgraded to the matching tested
+  fixed-160-MHz/v7 images; TX/rx-1 have the same persistent 120 Hz profile.
+  All six boards have now been upgraded in two USB batches. Original
+  applications/NVS were backed up and all connected boards verified after
+  reset. TX accepted the complete four-peer v7 configuration; C6 accepted
+  channel 6/MCS3. Both were stopped afterward, with TX radio-off verified.
+  Transport policy is applied at run startup, not by profile provisioning.
+  No four-receiver run was performed; rx-2–4 were disconnected during the
+  second batch. See the throughput report's deployment section for artifacts.
+- Optimized four-receiver bring-up: three MCS3 attempts stopped on rx-3 boot
+  changes before completing warm-up. Initial gateway receipt stayed zero;
+  an MCS0 control also timed out. Resetting the identified C6 restored all four
+  streams (452 records in an 8.78 s partial sensing span), then rx-3 restarted
+  again. No sustained rate/latency/queue qualification is available. USB data
+  access to rx-3 was requested for reset logging; supply versus firmware cause
+  remains unproven. See `docs/espnow-four-optimized-2026-11-02.md` and its raw
+  attempt directories. Restart guards and test criteria were retained.
+- Replacement-hub comparison: with all four receivers powered from a different
+  hub on a phone charger adapter, the unchanged 120 Hz/MCS3/v7 ACK-less setup
+  completed 30 s warm-up/300 s measurement at 98.82–98.86 valid records/s each.
+  Every delivered record was subsecond (p99 about 474 ms, maximum 639.37 ms),
+  queues passed (peaks 60–64/96, growth -1 to +1), and no boot changes occurred.
+  Complete grant evidence showed no cross-receiver overlap; 117 individual
+  return/deadline comparisons remained uncertain, none was classified late.
+  All 15,000 finalized 50 Hz/900 ms-grace bins had at least three receivers.
+  The sustained transport benchmark passed its explicit 80-record/s target;
+  fault, phase-stability and detector qualification remain separate. This
+  comparison supports investigating the previous power path but does not prove
+  the old hub caused resets: boards were power-cycled and gateway boot changed
+  too. TX radio-off/gateway stopped were verified. See
+  `docs/espnow-four-optimized-2026-11-02.md` for raw artifacts and limits.
 - Firmware defaults cap both roles at 80 MHz with automatic dynamic frequency
   scaling initialization. Transmitter power is initially capped at 44 quarter-dBm
   (11 dBm), reported after driver quantization. Its Wi-Fi radio is stopped while
@@ -49,7 +187,7 @@ remain in their dedicated documents.
 The high-level path is:
 
 ```text
-transmitter -> radio channel/person -> receivers -> BLE -> host acquisition
+transmitter -> radio channel/person -> receivers -> 2.4 GHz gateway -> USB host acquisition
             -> immutable raw session -> derived preprocessing -> offline CNN pilot
 ```
 
@@ -86,6 +224,8 @@ transmitter -> radio channel/person -> receivers -> BLE -> host acquisition
 
 ## Phase signal sanity
 
+- Gateway timing sidecars use the same capture-time alignment discipline as BLE;
+  unavailable alignment never falls back to gateway USB arrival time.
 - `analysis/phase_signals.py` loads one attempt/receiver using the canonical
   LTF decoder and phase masks. BLE recordings use their mapped enqueue-time
   sidecar and refuse an arrival-time fallback. USB recordings map receiver
@@ -441,9 +581,14 @@ short motion pattern associated with a fall.
 
 ## Open questions
 
-- What real BLE connection timing, throughput and capture-loss patterns occur
-  with four ESP32 receivers, and do replay-trained models retain performance
-  on new hardware recordings and independent sessions?
+- Gateway optimization decision (1 November 2026): prioritize small changes to
+  the existing scheduling, send pacing and 2.4 GHz ACK path. Transmitter-relayed
+  host ACKs over 5 GHz are a deferred, unimplemented fallback, to reconsider only
+  after measured limits of smaller changes. Preserve the single-departure/return
+  interlock; see `docs/espnow-gateway.md`, “Optimization direction”.
+- Does the successful four-C5 120 Hz/MCS3 transport trial repeat across room
+  placements, supplies and fault checks, and do replay-trained models retain
+  performance on new hardware recordings and independent sessions?
 - Which signal representation generalizes best: magnitude, calibrated phase,
   baseline-relative phase, another relative-phase construction, or a fusion?
 - Which temporal filter and passband retain fall motion while rejecting radio

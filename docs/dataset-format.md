@@ -894,3 +894,80 @@ Capture, notification arrival, and processing availability are separate times.
 Packets are assigned to attempts by capture time; late delivery cannot backfill
 finalized availability bins. See [BLE transport files and wire contract](ble-transport.md).
 USB-only sessions do not require these sidecars.
+
+## Scheduled ESP-NOW gateway sidecars
+
+Gateway sessions use `environment.transport = espnow_gateway` and snapshot the
+ordered inventory, sensing profile and gateway policy. Attempt CSV formats are
+unchanged; `gateway_timing.jsonl` records run/boot identities, transmitter enqueue
+reference, mapped host capture time and clock uncertainty alongside each CSI row.
+Readers require that sidecar for capture-time alignment and do not fall back to
+USB arrival times. Historical `ble_timing.jsonl` remains supported.
+
+Session journals under `transport/gateway/<run-id>/` contain versioned manifests,
+CRC-protected complete envelopes, acceptance events, raw grants/clock/status
+messages, conservative channel intervals and immutable 50 Hz availability bins.
+See [gateway contracts and qualification](espnow-gateway.md). Host acceptance is
+file-buffer acceptance; it does not guarantee persistence through power failure.
+
+Optional CGCF-v2 policies add an eight-batch window and early-return grace to the
+manifest/fingerprint without changing CSI rows. `CGQE` events 9/10 distinguish
+early-return decisions from return-channel API completion; `CGPR` identifies
+resumed sensing probes. First sensing-frame recovery remains in receiver status.
+See [window/return protocol details](espnow-window-return-2026-11-02.md).
+
+CGCF-v3 manifests also pin minimum revisit time, send-completion guard, bitmap
+ACK polling and MAC timing collection. Raw `CGPQ`/`CGPB` requests/replies stay
+on the receiver/gateway radio path; host `CGAK` submissions retain their existing
+journal format. `CGMT` radio events and decoded `mac_completion_summary` entries
+report per-grant MAC durations, failures, late completions and sender ownership
+at return. They do not establish host acceptance or capture recovery. The
+original CSI/envelope encoding and immutable availability-bin rules are unchanged.
+See [transport details](espnow-gateway.md) and
+[cadence trial report](espnow-cadence-2026-11-02.md).
+
+CGCF-v4 retains the v3 wire layout and fingerprints its bounded application retry
+budget (0–3). Existing v1–v3 budgets remain limited to one retry. Retention trials
+can use 750 ms record lifetime and 900 ms availability grace; the one-second
+transport metric is unchanged. Preserve each manifest's grace when interpreting
+mask counts, because masks from different grace settings are not a controlled
+comparison of transport delivery. Fault-injection experiments additionally
+journal ACK hold/release events; host acceptance can precede transmission of its
+ACK to the gateway. See [retention trials](espnow-retention-2026-11-02.md).
+
+CGCF-v5 adds `application_acknowledgements` to the manifest and fingerprint.
+When false, byte 103 bit 2 is set, application retries must be zero, and bitmap
+ACKs are forbidden. CSI/envelope bytes and capture-time attribution are unchanged.
+`host_acceptance` events record successful validation and recorder acceptance
+without sending `CGAK`; `host_acceptance_ack` remains specific to acknowledged
+runs. `CGQE` code 11 records local buffer release after MAC send completion,
+including failed MAC sends. It does not establish gateway or host receipt.
+Lost diagnostic events remain flagged in receiver status; absence of an event
+is not evidence of delivery or loss. See [ACK-less trials](espnow-ackless-2026-11-02.md).
+
+Timing-only four-receiver simulations stay separate from acquisition journals.
+Their authorization phases and potential sensing coverage do not count as real
+receiver records, readiness, clock evidence or missingness masks. A hardware
+probe with only one powered receiver records only that receiver even when its
+revisit interval approximates a four-receiver cycle. See
+[bulk/timing experiment boundaries](espnow-bulk-timing-2026-11-02.md).
+
+CGCF-v6 retains complete CSI/envelope encoding and fingerprints the negotiated
+HT20 long-GI MCS0–3 backhaul PHY. Byte 103 bits 3–4 carry its MCS index. Extended
+5 GHz profile schema v2 permits up to 120 Hz; historical schema-v1 profiles keep
+their original rate limit and fingerprints. Manifests retain the actual profile,
+transport policy and radio identities. Firmware hashes, build settings and USB
+status distinguish event-worker and CPU-policy treatments; CPU policy is not a
+CGCF field. Benchmark reports include `target_records_s` (default 50, explicit
+80 for throughput trials). The availability grid remains 50 Hz and its finalized
+bins are never revised by late records. See
+[higher-throughput experiments](espnow-throughput-2026-11-02.md).
+
+CGCF-v7 additionally permits an explicit record capacity up to 96; older versions
+retain their 64-slot limit. Queue occupancy/peak fields retain their existing
+meaning and widths. Peak occupancy is a boot-level counter, so high-rate
+comparisons reset the identified receiver before each run and retain reset logs.
+The experimental 96-slot pool is fingerprinted separately and does not increase
+the 64-record submission allowance, 750 ms retention or one-second target.
+Role-specific control ingress storage does not truncate any CSI bytes or alter
+the gateway's full-envelope journal format.

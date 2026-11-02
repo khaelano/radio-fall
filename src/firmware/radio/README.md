@@ -1,83 +1,94 @@
-# ESP32-C5/C6 BLE CSI firmware
+# Scheduled dual-band CSI firmware
 
-This branch uses ESP-NOW HE20 MCS0 sensing and BLE receiver-to-laptop CSI.
-The transmitter keeps native USB Serial/JTAG for provisioning, start/stop,
-clock exchanges, round logs, and diagnostics. Receivers use USB only for
-flashing, provisioning, and diagnostics. There is no USB CSI writer or gateway.
+Build C5 transmitter/receiver and C6 gateway firmware with ESP-IDF 6.1 using the
+[gateway procedure](../../../docs/espnow-gateway.md). Bluetooth is disabled.
+Images report protocol 3 and sensing version 4. Use isolated build/config paths;
+old BLE binaries are incompatible with live gateway acquisition. Historical BLE
+control sources remain only as offline regression fixtures.
 
-ESP32-C6 and mixed C5/C6 inventories require 2.4 GHz. A 5 GHz profile requires
-C5 on every board. Profiles select an integer sensing rate from 50 to 100 Hz;
-the initial C6 profile is `indonesia_2g_ch6_80hz.json`.
+## Board setup
 
-## Build and provision
+C5 boards perform 5 GHz sensing; the C6 stays on the fixed 2.4 GHz upload channel.
+On a XIAO C6 gateway, select the shared XIAO board overlay. GPIO3 low enables its
+RF switch, and GPIO14 low selects the built-in antenna. The external-antenna
+option requires an attached external antenna. See the gateway procedure for the
+exact overlay/build command and verified-identity provisioning.
 
-Use ESP-IDF 6.1 and the [build/flash procedure](../../../docs/ble-transport.md#firmware-and-board-setup).
-Both projects now default to BLE mode, including NimBLE/coexistence and the
-larger receiver application partition. Use a clean target-specific build and
-configuration directory. Old `build/` images may still contain USB firmware.
+## Power and timing
 
-Before provisioning, boards expose USB identity/status but do not start sensing.
-`csi-radio-provision --sequential` supports one connected board at a time using
-the same complete inventory and profile. Committing a profile acknowledges the
-write and reboots the board so receiver order and BLE identity reload together.
-Provisioning remains in NVS across ordinary flashes; do not erase flash.
+Defaults retain an 80 MHz CPU cap and dynamic frequency scaling initialization.
+The transmitter initially caps Wi-Fi transmit power at 44 quarter-dBm (11 dBm),
+reports the quantized setting, and stops Wi-Fi while idle or when its three-second
+host-control lease expires. Automatic light sleep is not enabled. Power and
+temperature improvements remain unmeasured; lower transmit power can affect link
+margin and CSI delivery.
 
-## XIAO ESP32-C6 antenna setup
+The transmitter continues sensing while one receiver has an upload grant.
+Receivers use dual-band mode without AP association, own bounded record pools,
+and return to sensing independently of application ACKs. The transmitter waits
+for explicit 5 GHz return confirmation before the next departure. Actual round
+submissions, skipped rounds, grants and return statuses are recorded. An accepted
+ESP-NOW submission is not evidence of delivery to the processor.
 
-Select `CSI_BOARD_XIAO_ESP32C6` for Seeed XIAO boards. GPIO3 is driven low to
-activate the RF switch; GPIO14 selects built-in (low) or external (high).
-The receiver can use its built-in ceramic antenna without an external antenna.
-The generic board setting leaves GPIOs untouched.
+## Upload experiments
 
-Append `sdkconfig.defaults.xiao_esp32c6` to the default-file list for built-in
-mode. A transmitter with an attached external antenna can instead use
-`sdkconfig.defaults.xiao_esp32c6_external`. Board/antenna selection is exposed in
-USB and BLE status. After changing Kconfig definitions, run `idf.py reconfigure`.
-See the [board manufacturer's guide](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/#hardware-overview).
+The receiver's `CONFIG_CSI_GATEWAY_EVENT_UPLOAD` is disabled by default. It
+uses nonblocking upload submissions and task notifications while preserving
+single-send ownership and the existing return cutoff. USB status reports
+`upload_worker: event` or `legacy`.
 
-## Transmitter power and timing
+The gateway's `CONFIG_CSI_GATEWAY_ACK_MAX_AGE_MS` defaults to 50 ms. A shorter
+value limits immediate host-ACK forwarding by age of receiver activity; skipped
+ACKs remain cached for receiver polling. This is an activity heuristic, not a
+verified channel lease. The selected window and diagnostic counters appear in
+gateway status. Reconfigure cached build directories after adding Kconfig
+options. See [measured burst/ACK results](../../../docs/espnow-burst-ack-2026-11-02.md)
+before selecting experimental firmware. No change is enabled by default.
 
-Both roles use an 80 MHz maximum CPU frequency with automatic dynamic frequency
-scaling. The transmitter's initial maximum Wi-Fi transmit power is 44 quarter-dBm
-(11 dBm), set after Wi-Fi starts. The driver reports the quantized value in USB
-status. Change `CONFIG_CSI_TX_POWER_QUARTER_DBM` through `idf.py menuconfig` if
-range testing requires a different value. Lower RF power changes CSI amplitude
-and link margin; record the setting with every hardware comparison.
+## Reset and USB diagnostics
 
-The transmitter stops its Wi-Fi radio between runs. A valid `CBGO` command starts
-sensing; `CBST` stops it. Valid clock/control exchanges renew a 3-second host
-lease. If exchanges cease, sensing stops and the transmitter task shuts Wi-Fi
-down. A later clock exchange alone cannot restart sensing. The host must start a
-new run explicitly. The sensing rate and fixed receiver-slot order are retained. Each peer has one
-pending send at most. Failed MAC acknowledgements impose 100 ms retry spacing;
-submission order rotates so an absent early peer cannot starve later slots.
-Round telemetry records which sends were accepted; acceptance is not proof
-of RF delivery.
-Receivers keep capturing during valid upload windows; automatic light sleep is
-not enabled. Temperature and power reduction have not been measured.
+C5 discovery reports reset reason, uptime, radio state and profile. Gateway boot
+identity changes identify a restart; disappearance alone cannot distinguish reset,
+lost power, USB disconnection or disabled USB. A board cannot report while its
+supply is absent. Check a power bank's low-current cutoff with the actual load;
+do not infer overheating or shutdown from an LED alone.
 
-## Diagnosing resets or apparent power loss
+If the C6 disappears, check kernel USB enumeration before the serial reader.
+Bootloader mode bypasses the application: hold BOOT and tap RESET. Use a known
+working data cable and host port. A cable/path recovery does not prove which
+original component failed. Keep these observations separate from transport
+throughput or detector claims.
 
-USB discovery and BLE identity/status report `reset_reason` and `uptime_ms`.
-Transmitter status also reports `radio_active` and `tx_power_quarter_dbm`.
-A changing boot identity, restarting uptime, or watchdog/panic/brownout reason
-provides evidence of a reset. A device that stops enumerating on USB may have
-lost power, disconnected, or reset; disappearance alone does not identify the
-cause. Firmware cannot report while its supply is off.
+### Opt-in throughput builds
 
-If using a USB power bank, check its low-current auto-off behavior independently
-with the actual bank and board load. Do not infer thermal shutdown from a dark
-LED. Use a stable supply for firmware and RF validation. Keep reset diagnostics
-separate from measured temperature and supply-current results.
+The normal 80 MHz/DFS configuration and legacy upload worker remain defaults.
+`receiver/sdkconfig.event_upload` enables nonblocking uploads with bounded MAC
+completion wakeups. `common/sdkconfig.performance160` selects fixed 160 MHz CPU
+operation and disables DFS for a controlled CPU-policy trial. Use separate build
+and SDK configuration paths; changing a defaults file does not override an
+existing cached SDK configuration automatically. For example, from the repo root:
 
-Sensing protocol v3 adds CRC32 over the 84-byte scheduling header. Receivers
-snapshot and validate it before updating sequence/grant state. Live acquisition
-requires v3 on both roles; reflash all boards after this protocol upgrade.
-BLE ACKs use write commands, and the writer wakes on notification completion.
-Dynamic Wi-Fi RX buffers are capped at 32 to preserve BLE memory headroom.
+```sh
+idf.py -C src/firmware/radio/receiver -B /tmp/csi-rx-fast \
+  -DIDF_TARGET=esp32c5 -DSDKCONFIG=/tmp/csi-rx-fast/sdkconfig \
+  -D"SDKCONFIG_DEFAULTS=$PWD/src/firmware/radio/receiver/sdkconfig.defaults;$PWD/src/firmware/radio/receiver/sdkconfig.defaults.esp32c5;$PWD/src/firmware/radio/receiver/sdkconfig.event_upload;$PWD/src/firmware/radio/common/sdkconfig.performance160" build
+```
 
-All runtime USB telemetry is framed and shares a write mutex. Raw ROM printing
-is excluded from transmitter statistics; it previously corrupted clock exchanges.
-The initial hardware preflight verified 40 clock exchanges after that fix. CSI
-quality, sustained four-receiver BLE behavior, and thermal behavior remain to be
-measured. Full protocol and benchmark instructions are in [BLE transport](../../../docs/ble-transport.md).
+The transmitter and gateway can use the same CPU overlay without the receiver
+worker overlay. Preserve the XIAO C6 antenna defaults when building for that
+identified board. Device status reports `cpu_max_mhz`, receiver worker mode and
+maximum transport version; the gateway also reports negotiated `backhaul_mcs`.
+CGCF-v6 selects HT20 MCS0–3 without changing the HE20 MCS0 sensing link. The
+explicit 120 Hz profile requires updated C5 firmware and profile schema v2;
+restore an 80 Hz profile before returning to older application binaries.
+See [throughput experiments](../../../docs/espnow-throughput-2026-11-02.md) for
+measurements and qualification limits. Builds and single-receiver probes do not
+qualify four receivers or detector accuracy.
+
+CGCF-v7 optionally increases active CSI storage to 96 records for the explicit
+120 Hz/750 ms retention experiment; normal policies still use 64. Receiver and
+transmitter control queues retain 32 entries with maximum payloads of 180 and
+96 bytes respectively. Gateway data ingress remains 1400 bytes. These role
+limits save more receiver RAM than the extra 32 record slots consume. Oversized
+control messages are counted and rejected; CSI data and envelope encoding are
+unchanged. All roles must advertise v7 support before using the 96-slot policy.

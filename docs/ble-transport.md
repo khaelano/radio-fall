@@ -1,4 +1,9 @@
-# Scheduled BLE CSI transport
+# Historical scheduled BLE CSI transport
+
+Live BLE has been retired on `codex/espnow-gateway`. Use
+[the ESP-NOW gateway procedure](espnow-gateway.md) for current firmware and commands.
+The following contract is retained to interpret historical recordings.
+
 
 The BLE mode uses one USB-connected ESP32-C5 or ESP32-C6 transmitter and up to four
 ESP32-C5/C6 receivers connected to the laptop through BLE. Round robin is the

@@ -1,30 +1,25 @@
 # Radio fall detection
 
 Wi-Fi channel-state-information (CSI) fall-detection research for a bachelor's
-thesis. This `wifi-bt` branch carries receiver CSI over BLE. USB remains for
-provisioning and the transmitter's control, round logs, and clock reference.
-USB CSI streaming is maintained on a separate branch.
-
-The transmitter and one to four ESP32-C5/C6 receivers use ESP-NOW HE20 MCS0.
-Round robin is the default upload scheduler; random grants are experimental.
-The initial sensing rate is 80 Hz. C6 or mixed inventories require 2.4 GHz;
-5 GHz requires C5 on every board. Four receivers are required for collection.
+thesis. This branch replaces live BLE with scheduled dual-band ESP-NOW uploads:
 
 ```text
-USB control/timing <-> transmitter -> Wi-Fi sensing -> receivers -> BLE -> laptop
+C5 transmitter -> 5 GHz sensing -> C5 receivers
+                                     -> 2.4 GHz ESP-NOW -> C6 gateway -> USB -> laptop
 ```
 
-Acquisition, recording, operator labels, and historical-session inspection are
-implemented. BLE throughput, coverage, thermal behavior, and a production fall
-classifier remain under evaluation. Earlier USB results are not BLE benchmarks.
-The [initial C6 hardware test](docs/ble-c6-quality-2026-11-01.md) verified recorded
-bytes but found excessive delivery latency under the current grant/deadline settings.
+The starting configuration uses 80 sensing rounds/s and 50 ms round-robin upload
+slots. Normal collection requires four real C5 receivers. A dedicated C6 gateway
+and the transmitter remain USB-connected for data and timing/control respectively.
+Queues, capture timestamps, missingness masks and application acknowledgements are
+explicit. Hardware throughput and detection performance require qualification.
+Historical BLE/USB recordings and research reports remain available.
 
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
-| `src/firmware/radio/` | ESP-IDF transmitter and receiver projects |
+| `src/firmware/radio/` | ESP-IDF transmitter, receiver and gateway projects |
 | `src/fall_detection/` | Python package: acquisition, radio processing, collection, evaluation |
 | `configs/` | Radio profiles, receiver inventory, collection protocol and scenarios |
 | `tests/` | Unit tests mirroring the package modules |
@@ -42,28 +37,25 @@ uv sync --extra radio
 
 ## Quick start
 
-Build and provision all boards using the [BLE setup procedure](docs/ble-transport.md).
-The same complete inventory must be provisioned on every board. Sequential
-provisioning is supported. Then keep the transmitter on USB data and power the
-receivers independently. Replace the inventory and port below with your setup:
+Follow the [gateway build, provisioning and qualification procedure](docs/espnow-gateway.md).
+Register actual identities in a schema-v2 inventory with a C6 `gateway` entry.
+The historical inventory is not a four-receiver gateway deployment.
 
 ```sh
-uv run csi-viewer --port /dev/ttyACM0 \
-  --receiver-config data/interim/ble/c6-receivers.json \
-  --radio-profile configs/radio/profiles/indonesia_2g_ch6_80hz.json
+uv run csi-viewer --port <transmitter-usb> --gateway-port <gateway-usb> \
+  --receiver-config data/interim/gateway/inventory.json \
+  --radio-profile configs/radio/profiles/indonesia_5g_ch44_80hz.json
 
-uv run fall-collection --port /dev/ttyACM0 \
-  --receiver-config data/interim/ble/c6-receivers.json \
-  --radio-profile configs/radio/profiles/indonesia_2g_ch6_80hz.json \
-  --protocol configs/collection/fall_v1.json \
-  --output-dir data/raw/sessions
+uv run fall-collection --port <transmitter-usb> --gateway-port <gateway-usb> \
+  --receiver-config data/interim/gateway/inventory.json \
+  --radio-profile configs/radio/profiles/indonesia_5g_ch44_80hz.json \
+  --protocol configs/collection/fall_v1.json --output-dir data/raw/sessions
 
 uv run fall-session-inspector --sessions-dir data/raw/sessions
 ```
 
-Both acquisition applications use BLE by default and verify identities,
-configuration fingerprints, decoding, and the USB transmitter reference.
-They do not connect to receiver USB ports or silently change provisioned profiles.
+Both live applications use `espnow_gateway`; receiver IDs and model channels
+remain stable regardless of USB arrival order. Firmware protocol 3 is required.
 
 The collector uses the same dashboard as `csi-viewer`, wrapped in a collection
 sidebar. The start dialog asks for session metadata and which scenario blocks
@@ -112,13 +104,13 @@ Each session writes one directory under `data/raw/sessions/<session-id>/`:
   frame for that receiver.
 - `trials/<trial>/attempt_<n>/receivers/<rx>/radio_timing.csv` — timing row for
   each CSI row.
-- `trials/<trial>/attempt_<n>/receivers/<rx>/ble_timing.jsonl` — mapped sensing
+- `trials/<trial>/attempt_<n>/receivers/<rx>/gateway_timing.jsonl` — mapped sensing
   times, original receiver timestamps, run/boot identities, and uncertainty.
-- `transport/ble/<run-id>/` — raw batch envelopes, clock exchanges, round logs,
+- `transport/gateway/<run-id>/` — raw batch envelopes, clock exchanges, round logs,
   connection/queue events, and immutable availability bins.
 
 The same transmitted frame appears once under every receiver that heard it; do
-not merge those rows. Historical USB captures can include ambient traffic; BLE firmware verifies the
+not merge those rows. Historical USB captures can include ambient traffic; gateway firmware verifies the
 sensing transmitter, run, and profile before retaining records. See [`docs/dataset-format.md`](docs/dataset-format.md)
 for every field and the exact CSV schemas.
 
@@ -126,8 +118,9 @@ for every field and the exact CSV schemas.
 
 Requires ESP-IDF 6.1 or newer.
 
-Both firmware projects build BLE-mode images by default. Use an explicit target
-and isolated configuration/build directory; see [build and flash instructions](docs/ble-transport.md#firmware-and-board-setup).
+The transmitter and receiver build C5 gateway-mode images; the dedicated gateway
+builds for C6. Bluetooth is disabled. Use isolated build directories and the
+[build and flash instructions](docs/espnow-gateway.md).
 The transmitter caps RF power at 11 dBm initially and turns Wi-Fi off while idle
 or after host control expires. Actual temperature reduction is unmeasured.
 
@@ -140,7 +133,7 @@ uv run pytest -q      # run the complete test suite
 ## Known limitations
 
 - A production classifier and independent-session evaluation are not implemented.
-- BLE RF throughput and joint coverage with four receivers require hardware tests.
+- Dual-band switching, gateway throughput and four-receiver coverage require hardware qualification.
 - Lower transmit power changes link margin; validate it at the intended placements.
 - Reset diagnostics distinguish reported reset causes; a lost power supply may
   prevent the board from reporting anything until it is powered again.

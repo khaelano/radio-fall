@@ -41,7 +41,8 @@ written or read.
 
 ## 1. Where the data lives
 
-Raw capture directories under `data/` are git-ignored. Raw recordings are
+Dataset contents under `data/` are git-ignored; only the directory README files
+are versioned. Raw recordings are
 immutable: analysis code may read them, but must not rewrite or re-label them in
 place. Review decisions belong in the sidecar described in
 [2.4](#24-session_reviewjson).

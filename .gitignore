@@ -14,13 +14,15 @@ __pycache__/
 **/.pytest_cache/
 src/*.egg-info/
 
-# Local CSI captures (raw data is intentionally not versioned)
-data/raw/
-data/archive/
-data/experiments/
-data/interim/
-data/models/
-data/processed/
+# Local datasets and artifacts; keep the directory guides versioned.
+/data/*
+!/data/README.md
+!/data/annotations/
+/data/annotations/*
+!/data/annotations/README.md
+!/data/splits/
+/data/splits/*
+!/data/splits/README.md
 
 # Codex local build and validation artifacts
 .codex-build/

@@ -27,7 +27,8 @@ Historical BLE/USB recordings and research reports remain available.
 | `draft/` | Thesis chapters |
 | `Resources/Papers/` | Literature library (PDFs plus Markdown conversions) |
 | `tools/` | Paper conversion, RAG index, draft builders |
-| `data/` | Raw recordings and derived datasets (not versioned) |
+| `data/` | Local raw recordings and derived datasets; only directory guides are versioned |
+| `notebooks/` | Experiments and historical notebooks in `trash/` |
 
 ## Setup
 

@@ -1,7 +1,7 @@
 # Data layout
 
-Raw recordings are immutable. `data/raw/` and the other capture directories are
-git-ignored, so nothing here is published with the repository. The complete
+Raw recordings are immutable. Dataset contents under `data/` are git-ignored;
+only the directory README files are versioned. The complete
 file-by-file reference is [`docs/dataset-format.md`](../docs/dataset-format.md);
 this page is the short map.
 

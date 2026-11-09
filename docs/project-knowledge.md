@@ -210,7 +210,7 @@ transmitter -> radio channel/person -> receivers -> 2.4 GHz gateway -> USB host 
 
 - `fall_detection.analysis.analyze_session()` and `analyze_latest_session()`
   return session, attempt, receiver, and reconstructed-phase tables. The EDA
-  notebook, `notebooks/01_data_exploration.ipynb`, keeps pandas aggregation and
+  notebook, `notebooks/trash/01_data_exploration.ipynb`, keeps pandas aggregation and
   quality filters explicit while the shared module handles file processing.
 - CSI scans use bounded NumPy batches and the cached physical-slot masks in
   `radio/preprocessing/phase.py`; optional worker processes scan independent
@@ -261,7 +261,7 @@ transmitter -> radio channel/person -> receivers -> 2.4 GHz gateway -> USB host 
 
 ## Exploratory phase bursts
 
-- Section 5 of `notebooks/02_simple_eda.ipynb` reuses the shared 100 ms
+- Section 5 of `notebooks/trash/02_simple_eda.ipynb` reuses the shared 100 ms
   phase-motion loader for all usable attempts with complete phase events. It
   shows cue-aligned traces and per-attempt measurements separately for raw and
   calibrated phase and each receiver. Sections 0–4 retain their direct-file
@@ -283,7 +283,7 @@ transmitter -> radio channel/person -> receivers -> 2.4 GHz gateway -> USB host 
 
 ## Separate-subcarrier phase changes
 
-- Section 6 of `notebooks/02_simple_eda.ipynb` retains signed 100 ms circular
+- Section 6 of `notebooks/trash/02_simple_eda.ipynb` retains signed 100 ms circular
   changes as packet-by-physical-subcarrier matrices. The shared
   `analysis/phase_motion.py:phase_change_matrix()` also underlies the aggregate
   score, so both use identical lag selection and the 150 ms maximum actual lag.
@@ -459,7 +459,7 @@ transmitter -> radio channel/person -> receivers -> 2.4 GHz gateway -> USB host 
 
 ## Transport replay pilot
 
-- `notebooks/04_transport_simulation/` reuses the isolated pilot's pinned
+- `notebooks/trash/04_transport_simulation/` reuses the isolated pilot's pinned
   environment, decoder, clock mapper and small CNN. It reads raw sessions
   without modification. Four-slot cases add two virtual byte workloads, never
   extra CSI views. All BLE service and synthetic loss settings are assumptions.
@@ -606,16 +606,16 @@ short motion pattern associated with a fall.
 | --- | --- |
 | Project status and commands | `README.md` |
 | Session and CSV format | `docs/dataset-format.md` |
-| Dataset integrity analysis | `src/fall_detection/analysis/integrity.py` and `notebooks/01_data_exploration.ipynb` |
-| Phase sanity loading and plots | `src/fall_detection/analysis/phase_signals.py` and `notebooks/01_data_exploration.ipynb` |
-| Activity-phase motion comparisons | `src/fall_detection/analysis/phase_motion.py` and `notebooks/01_data_exploration.ipynb` |
-| Exploratory phase bursts | `src/fall_detection/analysis/phase_bursts.py` and section 5 of `notebooks/02_simple_eda.ipynb` |
-| Separate-subcarrier phase changes | `src/fall_detection/analysis/phase_motion.py` and section 6 of `notebooks/02_simple_eda.ipynb` |
+| Dataset integrity analysis | `src/fall_detection/analysis/integrity.py` and `notebooks/trash/01_data_exploration.ipynb` |
+| Phase sanity loading and plots | `src/fall_detection/analysis/phase_signals.py` and `notebooks/trash/01_data_exploration.ipynb` |
+| Activity-phase motion comparisons | `src/fall_detection/analysis/phase_motion.py` and `notebooks/trash/01_data_exploration.ipynb` |
+| Exploratory phase bursts | `src/fall_detection/analysis/phase_bursts.py` and section 5 of `notebooks/trash/02_simple_eda.ipynb` |
+| Separate-subcarrier phase changes | `src/fall_detection/analysis/phase_motion.py` and section 6 of `notebooks/trash/02_simple_eda.ipynb` |
 | Isolated CNN pilot | `notebooks/03_cnn_baseline/README.md` and its `results/` |
 | Collection protocols | `configs/collection/README.md` and JSON configs |
 | Radio profiles and receivers | `configs/radio/` |
 | Phase calibration | `src/fall_detection/radio/preprocessing/phase.py` |
 | Acquisition and CSI parsing | `src/fall_detection/radio/acquisition/` |
-| Synthetic transport replay and masked CNN comparison | `notebooks/04_transport_simulation/README.md` |
+| Synthetic transport replay and masked CNN comparison | `notebooks/trash/04_transport_simulation/README.md` |
 | Verified behavior | `tests/` |
 | Thesis prose | `draft/` |

@@ -21,8 +21,8 @@ Run from the repository root using the existing isolated CPU environment and
 its lockfile:
 
 ```bash
-uv run --project notebooks/shared_cnn --frozen python notebooks/05_four_rx_cnn/run.py
-uv run --project notebooks/shared_cnn --frozen python -m pytest -q notebooks/05_four_rx_cnn/tests
+uv run --project notebooks/shared_cnn --frozen python notebooks/trash/05_four_rx_cnn/run.py
+uv run --project notebooks/shared_cnn --frozen python -m pytest -q notebooks/trash/05_four_rx_cnn/tests
 ```
 
 The repository package is loaded directly from `src/` for canonical gateway
@@ -31,7 +31,7 @@ alongside the pinned NumPy/pandas/matplotlib/scikit-learn/PyTorch CPU environmen
 experiment manifest; the old pilot's recordings and outputs are unchanged.
 
 Use `--stage prepare`, `eda`, `train`, `evaluate`, or `report` to run one stage.
-Use `--output notebooks/05_four_rx_cnn/artifacts/<new-name>` for a new run;
+Use `--output notebooks/trash/05_four_rx_cnn/artifacts/<new-name>` for a new run;
 preparation and training overwrite files inside the selected output directory.
 All stages reject output paths overlapping the raw session. Evaluation rejects
 changed arrays, splits, configuration, modeling code and checkpoints.

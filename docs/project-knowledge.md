@@ -17,6 +17,9 @@ remain in their dedicated documents.
   **Open questions** until code, configuration, or experimental evidence
   resolves them.
 
+The primary research notebooks are in `notebooks/latest/`. Earlier CNN
+experiments and their helpers are under `notebooks/trash/`.
+
 ## System snapshot
 
 - Goal: detect human falls from Wi-Fi channel state information (CSI) for a
@@ -307,7 +310,7 @@ transmitter -> radio channel/person -> receivers -> 2.4 GHz gateway -> USB host 
 
 ## Archived two-receiver CNN pilot
 
-- Active four-receiver experiments use `notebooks/shared_cnn/` for shared
+- Active four-receiver experiments use `notebooks/trash/shared_cnn/` for shared
   helpers and the pinned CPU environment. Earlier selection manifests retain
   their original code paths; prepare and train again for a new evaluation.
 

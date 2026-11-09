@@ -1,0 +1,157 @@
+{
+  "windows": [
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": 0.0,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": 0.447158122,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": -0.458350543,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": -0.293448043,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": -0.004169483,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": -0.395007014,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": -0.443336904,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": 0.336534266,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": 0.012761237,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": 0.233453823,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": -0.34450655,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": 0.288909306,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": -0.225861939,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": 0.054096709,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": 0.166332494,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": 0.466083701,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": -0.105475443,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": 0.388320411,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": -0.151402845,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": -0.057681898,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "005/02",
+      "offset_seconds": 0.1038248,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "001/02",
+      "offset_seconds": 0.0,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    },
+    {
+      "attempt_id": "003/01",
+      "offset_seconds": 0.0,
+      "maximum_tensor_error": 0.0,
+      "maximum_score_error": 0.0
+    }
+  ],
+  "benchmark": {
+    "scalar_1_workers": {
+      "replay_call_median_ms": 13.144305004971102,
+      "native_window_median_ms": 6.890149
+    },
+    "auto_1_workers": {
+      "replay_call_median_ms": 12.48324500193121,
+      "native_window_median_ms": 6.111098
+    },
+    "auto_2_workers": {
+      "replay_call_median_ms": 10.528941995289642,
+      "native_window_median_ms": 4.131176
+    }
+  },
+  "scope": "Read-only real-window score parity and native timing; no live fall accuracy measurement. Native timing excludes packet feature preparation; replay timing includes it, both exclude disk and CNN inference."
+}

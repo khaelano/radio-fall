@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 
 FOLDER = Path(__file__).resolve().parent
-ROOT = FOLDER.parents[1]
+ROOT = FOLDER.parents[2]
 SHARED = FOLDER.parent / "shared_cnn"
 sys.path.insert(0, str(SHARED))
 sys.path.insert(0, str(ROOT / "src"))

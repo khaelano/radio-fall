@@ -1,5 +1,9 @@
 # Radio fall detection
 
+Live CSI processing uses a compiled Rust backend with native worker threads and
+runtime AVX2 acceleration. A Rust toolchain is required when installing from
+source; see [native processing](docs/rust-radio-pipeline.md).
+
 Wi-Fi channel-state-information (CSI) fall-detection research for a bachelor's
 thesis. This branch replaces live BLE with scheduled dual-band ESP-NOW uploads:
 
@@ -8,27 +12,33 @@ C5 transmitter -> 5 GHz sensing -> C5 receivers
                                      -> 2.4 GHz ESP-NOW -> C6 gateway -> USB -> laptop
 ```
 
-The starting configuration uses 80 sensing rounds/s and 50 ms round-robin upload
-slots. Normal collection requires four real C5 receivers. A dedicated C6 gateway
-and the transmitter remain USB-connected for data and timing/control respectively.
-Queues, capture timestamps, missingness masks and application acknowledgements are
-explicit. Hardware throughput and detection performance require qualification.
-Historical BLE/USB recordings and research reports remain available.
+The default setup uses four C5 receivers, 120 sensing rounds/s, and 125 ms
+round-robin uploads on 2.4 GHz HT20 MCS3. A companion C6 carries transmitter
+control and timing over UART and encrypted ESP-NOW to the laptop's USB gateway.
+The sensing C5 keeps its radio dedicated to 5 GHz sensing. USB control remains
+available with `--transmitter-link usb`.
+
+All operational radio settings are in [`configs/radio.json`](configs/radio.json):
+verified identities, sensing profile, upload policy and stable USB paths.
+The [configuration guide](docs/radio-configuration.md) explains the defaults and
+which edits require provisioning. The [relay procedure](docs/uart-transmitter-relay.md)
+records the five-minute hardware qualification and its limits. Historical
+BLE/USB recordings and research reports remain available.
 
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
-| `src/firmware/radio/` | ESP-IDF transmitter, receiver and gateway projects |
+| `src/firmware/radio/` | ESP-IDF transmitter, receiver, gateway and UART relay projects |
 | `src/fall_detection/` | Python package: acquisition, radio processing, collection, evaluation |
-| `configs/` | Radio profiles, receiver inventory, collection protocol and scenarios |
+| `configs/` | One radio settings file, collection protocols and scenarios |
 | `tests/` | Unit tests mirroring the package modules |
-| `docs/` | Procedures, notes, figures, presentations |
+| [`docs/`](docs/README.md) | Current guides, engineering reports, figures and presentations |
 | `draft/` | Thesis chapters |
 | `Resources/Papers/` | Literature library (PDFs plus Markdown conversions) |
 | `tools/` | Paper conversion, RAG index, draft builders |
 | `data/` | Local raw recordings and derived datasets; only directory guides are versioned |
-| `notebooks/` | Experiments and historical notebooks in `trash/` |
+| `notebooks/` | Current experiments and historical notebooks in `trash/` |
 
 ## Setup
 
@@ -38,36 +48,70 @@ uv sync --extra radio
 
 ## Quick start
 
-Follow the [gateway build, provisioning and qualification procedure](docs/espnow-gateway.md).
-Register actual identities in a schema-v2 inventory with a C6 `gateway` entry.
-The historical inventory is not a four-receiver gateway deployment.
+The current boards are provisioned and paired. With the gateway connected and
+all sensing boards powered, the checked-in configuration supplies the ports
+and radio settings:
 
 ```sh
-uv run csi-viewer --port <transmitter-usb> --gateway-port <gateway-usb> \
-  --receiver-config data/interim/gateway/inventory.json \
-  --radio-profile configs/radio/profiles/indonesia_5g_ch44_80hz.json
-
-uv run fall-collection --port <transmitter-usb> --gateway-port <gateway-usb> \
-  --receiver-config data/interim/gateway/inventory.json \
-  --radio-profile configs/radio/profiles/indonesia_5g_ch44_80hz.json \
-  --protocol configs/collection/fall_v1.json --output-dir data/raw/sessions
-
+uv run csi-viewer
+uv run fall-collection
+uv run csi-gateway-benchmark
 uv run fall-session-inspector --sessions-dir data/raw/sessions
 ```
+
+Use `--config /path/to/radio.json` for another setup. USB path or reference-link
+overrides are available for recovery, for example `csi-viewer --transmitter-link usb`.
+For new boards, follow the [gateway build and provisioning procedure](docs/espnow-gateway.md)
+and [relay pairing procedure](docs/uart-transmitter-relay.md).
+Use `uv run csi-radio discover` to inspect connected boards and
+`uv run csi-radio provision --dry-run` to validate the radio settings.
+The historical UDP interference experiment remains available through
+`uv run python -m fall_detection.radio.experiments.transport`.
 
 Both live applications use `espnow_gateway`; receiver IDs and model channels
 remain stable regardless of USB arrival order. Firmware protocol 3 is required.
 
+The separate experimental detector uses Rust preprocessing and an isolated
+three-seed CPU CNN scorer. With the exported four-receiver model already in
+this workspace, launch its GUI with:
+
+```sh
+uv sync --extra radio --extra detection
+.venv/bin/fall-detect --model data/models/phase_random20_v1
+```
+
+Add `--headless` for JSON output. The [live detector guide](docs/live-fall-detection.md)
+covers model export, read-only replay, timing, quality gating and benchmarks.
+The current default uses phase change without fitted normalization, trained on
+20 random shifts plus the central window per training attempt. See the
+[retraining report](notebooks/trash/06_phase_shifted/results/phase_random20_v1/REPORT.md).
+Live accuracy remains unqualified; the earlier amplitude bundle is preserved.
+
+Optional synchronized phone video is available through a DroidCam USB virtual
+webcam. Install with `uv sync --extra radio --extra video` and add
+`--video-device /dev/video2` using the actual DroidCam device. Each attempt saves
+an MP4 and frame timing sidecars, with no inference model. See
+[video recording](docs/video-recording.md) for setup and synchronization limits.
+
 The collector uses the same dashboard as `csi-viewer`, wrapped in a collection
-sidebar. The start dialog asks for session metadata and which scenario blocks
-this session covers; the full protocol expands to 576 trials, so a session
-usually selects only the blocks it can finish. The operator then sees the live
+sidebar. Startup first asks for a scenario protocol JSON, unless `--protocol`
+supplies one directly. The default `fall_simple.json` has 116 conditions and
+232 trials across nine transitions. The next dialog asks for session metadata
+and which scenario blocks this session covers; select the blocks you can finish. The operator then sees the live
 CSI plots, the scenario queue with per-trial progress, the current scenario and
 instruction, the phase countdown, and the collection controls in one window.
 Double-clicking any queued trial — or pressing **Details** on the current one —
 opens a read-only card with its instruction, phase timings, start and end
 direction, safety note, and scenario id.
 A second display shows the full-screen performer guidance.
+
+Both live apps share a gateway transport panel with one fixed row per receiver.
+It shows host-delivered records/s over the last second, the last reported radio
+state, data age, queue occupancy, expiry, dropped records and send errors.
+The header shows the requested/applied sensing and backhaul settings plus
+reference and gateway freshness. Configured sensing Hz, delivered records/s,
+plot refresh FPS and UI FPS are labeled separately. Tooltips retain counters
+and explain their limits; sequence gaps alone do not identify a cause.
 
 The separate session inspector scans recorded manifests, then loads CSI and
 timing files only when an attempt is selected. It provides searchable session
@@ -76,22 +120,24 @@ labels, inclusion, quality, and notes. Review edits are saved to
 `session_review.json`; acquisition manifests and raw CSV files remain
 unchanged. The inspector can also create a portable curated copy that retains
 and flags excluded attempts.
+On the **Signals** tab, recorded video plays beside the plots with a shared
+attempt-time cursor, scrubbing and frame stepping. Install the `video` extra for
+playback. Alignment uses saved host-clock timing; see
+[recorded video playback](docs/video-recording.md#recorded-session-playback).
 
-Two protocols are available. `fall_v1.json` samples all eight directions
-(cardinals plus diagonals) for 576 trials; `fall_simple.json` samples only
-front, left, right, and back for 160 trials. Pass either one with
+The default `fall_simple.json` uses front, right, back, and left, excluding
+backward seated falls. Trials run with a clear floor, chair only, chair and
+mattress, then mattress only; chair orientations are grouped across activities.
+The earlier eight-direction `fall_v1.json` remains available with 576 trials.
+Pass either one with
 `--protocol`; see [`configs/collection/README.md`](configs/collection/README.md).
 
 ## Band and channel
 
-Profiles live in `configs/radio/profiles/`:
-
-- `indonesia_2g_ch6_80hz.json` — 2.4 GHz, channel 6, 80 Hz
-- `indonesia_5g_ch44_80hz.json` — 5 GHz, channel 44, 80 Hz
-
-Copy one, change `profile_id`, `band`, and `channel`, and pass it to the
-provisioner and then the viewer or collector. The Indonesia country table is enforced: 2.4 GHz channels
-1–13 and non-DFS 5 GHz channels only. Bandwidth is fixed at 20 MHz.
+Edit the `sensing` object in `configs/radio.json`, then provision the C5 boards
+before recording with that profile. The current gateway path requires 5 GHz C5
+sensing; Indonesia non-DFS channels and 20 MHz bandwidth are validated. The
+sensing rate comes from this profile; there is no separate rate override.
 
 ## Recording format
 

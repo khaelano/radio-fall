@@ -94,6 +94,10 @@ static void observe(void)
         }
     }
 }
+bool gw_tx_running(void)
+{portENTER_CRITICAL(&lock);bool active=running;portEXIT_CRITICAL(&lock);return active;}
+void gw_tx_reference_failure(void)
+{portENTER_CRITICAL(&lock);running=false;++drops;portEXIT_CRITICAL(&lock);}
 bool gw_tx_snapshot(gw_config_t *c,uint32_t *b,uint32_t *g)
 {
     portENTER_CRITICAL(&lock);

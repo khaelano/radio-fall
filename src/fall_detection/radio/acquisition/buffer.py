@@ -7,11 +7,17 @@ from dataclasses import dataclass
 from math import nan
 from threading import Lock
 from typing import Optional
+from collections.abc import Callable
+import time
 
 from .protocol import CsiRecord
 
 
 DEFAULT_NOMINAL_RATE_HZ = 50
+
+
+class PreviewNotReady(Exception):
+    """The captured preview window still contains unprepared phase records."""
 
 
 @dataclass(frozen=True)
@@ -35,6 +41,8 @@ class BufferSnapshot:
     phase_amplitudes: tuple[tuple[float, ...], ...] = ()
     raw_phases: tuple[tuple[float, ...], ...] = ()
     calibrated_phases: tuple[tuple[float, ...], ...] = ()
+    mean_i: tuple[float, ...] = ()
+    mean_q: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -142,7 +150,9 @@ class RollingCsiBuffer:
                     # A sender reboot resets its microsecond counter without
                     # the large negative jump characteristic of uint32 wrap.
                     # Continue the monotonic plotting epoch at the next tick.
-                    self._timestamp_offset = self._last_timestamp_unwrapped + 1 - raw_timestamp
+                    self._timestamp_offset = (
+                        self._last_timestamp_unwrapped + 1 - raw_timestamp
+                    )
                 candidate = raw_timestamp + self._timestamp_offset
                 if self._last_timestamp_unwrapped is not None:
                     # Ignore small backwards jumps from reordered frames or a
@@ -158,10 +168,55 @@ class RollingCsiBuffer:
             self._records.append((record, candidate))
             cutoff = candidate - self._seconds * 1_000_000
             while self._records and (
-                self._records[0][1] < cutoff
-                or len(self._records) > self._max_records
+                self._records[0][1] < cutoff or len(self._records) > self._max_records
             ):
                 self._records.popleft()
+
+    def _window_entries(
+        self, seconds: float | None
+    ) -> tuple[tuple[tuple[CsiRecord, int], ...], int | None]:
+        with self._lock:
+            entries = tuple(self._records)
+            origin = self._time_origin_us
+        if entries and seconds is not None:
+            cutoff = entries[-1][1] - max(0.0, seconds) * 1_000_000
+            first_visible = next(
+                (
+                    index
+                    for index, (_, timestamp) in enumerate(entries)
+                    if timestamp >= cutoff
+                ),
+                len(entries) - 1,
+            )
+            entries = entries[first_visible:]
+        return entries, origin
+
+    def prepare_phase_views(
+        self,
+        *,
+        seconds: float,
+        max_records: int = 16,
+        budget_ns: int = 8_000_000,
+        clock_ns: Callable[[], int] = time.perf_counter_ns,
+    ) -> bool:
+        """Warm a bounded amount of preview work; return true when the window is ready.
+
+        Cold receiver switches must not calibrate a whole window in one GUI
+        callback. This only warms per-record caches; it never removes records
+        or changes the complete snapshots used by other callers.
+        """
+        if max_records < 1 or budget_ns < 1:
+            raise ValueError("preview preparation limits must be positive")
+        entries, _ = self._window_entries(seconds)
+        started, prepared = clock_ns(), 0
+        for record, _timestamp in entries:
+            if record.phase_views_ready:
+                continue
+            if prepared >= max_records or clock_ns() - started >= budget_ns:
+                return False
+            _ = record.channel_estimate_block
+            prepared += 1
+        return True
 
     def snapshot(
         self,
@@ -169,49 +224,50 @@ class RollingCsiBuffer:
         end: Optional[int] = None,
         *,
         seconds: Optional[float] = None,
+        include_raw_views: bool = True,
+        prepared_only: bool = False,
     ) -> BufferSnapshot:
-        """Return a subcarrier slice, optionally limited to recent seconds."""
+        """Return a subcarrier slice, optionally limited to recent seconds.
 
-        with self._lock:
-            entries = tuple(self._records)
-            origin = self._time_origin_us
+        Phase displays can omit full raw CSI matrices: calibrated LTF views
+        and the cached scalar I/Q means provide everything their plots need.
+        """
 
+        entries, origin = self._window_entries(seconds)
         if not entries:
             return BufferSnapshot((), (), None, None, 0)
 
-        if seconds is not None:
-            cutoff = entries[-1][1] - max(0.0, seconds) * 1_000_000
-            first_visible = next(
-                (
-                    index
-                    for index, (_record, timestamp) in enumerate(entries)
-                    if timestamp >= cutoff
-                ),
-                len(entries) - 1,
-            )
-            entries = entries[first_visible:]
-
         records = tuple(entry[0] for entry in entries)
+        # Check the exact immutable window used below. The acquisition thread
+        # can append a fresh burst after prepare_phase_views reported ready.
+        # Never calibrate that burst synchronously outside its GUI work budget.
+        if prepared_only and any(not record.phase_views_ready for record in records):
+            raise PreviewNotReady
 
-        maximum = max(len(record.csi) for record in records)
+        maximum = max(
+            getattr(record, "sample_count", None) or len(record.csi)
+            for record in records
+        )
         selected_end = maximum if end is None else max(start, min(end, maximum))
         selected_start = max(0, min(start, selected_end))
-        amplitudes = tuple(
-            tuple(record.amplitudes[selected_start:selected_end]) for record in records
-        )
-        phases = tuple(
-            tuple(record.phases[selected_start:selected_end]) for record in records
-        )
-        real = tuple(
-            tuple(record.real[selected_start:selected_end]) for record in records
-        )
-        imaginary = tuple(
-            tuple(record.imaginary[selected_start:selected_end]) for record in records
-        )
+        amplitudes = phases = real = imaginary = ()
+        if include_raw_views:
+            amplitudes = tuple(
+                tuple(record.amplitudes[selected_start:selected_end])
+                for record in records
+            )
+            phases = tuple(
+                tuple(record.phases[selected_start:selected_end]) for record in records
+            )
+            real = tuple(
+                tuple(record.real[selected_start:selected_end]) for record in records
+            )
+            imaginary = tuple(
+                tuple(record.imaginary[selected_start:selected_end])
+                for record in records
+            )
         phase_blocks = tuple(record.channel_estimate_block for record in records)
-        phase_block = next(
-            (block for block in phase_blocks if block is not None), None
-        )
+        phase_block = next((block for block in phase_blocks if block is not None), None)
         if phase_block is None:
             phase_subcarriers: tuple[int, ...] = ()
             phase_amplitudes: tuple[tuple[float, ...], ...] = ()
@@ -221,13 +277,9 @@ class RollingCsiBuffer:
             phase_width = len(phase_block.subcarrier_indices)
             phase_start = min(max(0, start), phase_width)
             phase_end = (
-                phase_width
-                if end is None
-                else min(phase_width, max(phase_start, end))
+                phase_width if end is None else min(phase_width, max(phase_start, end))
             )
-            phase_subcarriers = phase_block.subcarrier_indices[
-                phase_start:phase_end
-            ]
+            phase_subcarriers = phase_block.subcarrier_indices[phase_start:phase_end]
             row_width = phase_end - phase_start
             empty_phase = (nan,) * row_width
             phase_amplitudes = tuple(
@@ -275,6 +327,16 @@ class RollingCsiBuffer:
             phase_amplitudes=phase_amplitudes,
             raw_phases=raw_phases,
             calibrated_phases=calibrated_phases,
+            mean_i=(
+                tuple(record.mean_i for record in records)
+                if selected_start == 0 and selected_end == maximum
+                else ()
+            ),
+            mean_q=(
+                tuple(record.mean_q for record in records)
+                if selected_start == 0 and selected_end == maximum
+                else ()
+            ),
         )
 
     def monitor_snapshot(
@@ -311,8 +373,7 @@ class RollingCsiBuffer:
                 entries = entries[-1:]
             else:
                 entries = tuple(
-                    entries[index * last // divisor]
-                    for index in range(max_points)
+                    entries[index * last // divisor] for index in range(max_points)
                 )
 
         if origin is None:
@@ -320,8 +381,7 @@ class RollingCsiBuffer:
         records = tuple(record for record, _timestamp in entries)
         return RadioMonitorSnapshot(
             timestamps=tuple(
-                (timestamp - origin) / 1_000_000.0
-                for _record, timestamp in entries
+                (timestamp - origin) / 1_000_000.0 for _record, timestamp in entries
             ),
             mean_i=tuple(record.mean_i for record in records),
             mean_q=tuple(record.mean_q for record in records),

@@ -1,4 +1,4 @@
-"""USB transmitter commands, authoritative round logs and host clock mapping."""
+"""Transmitter commands, authoritative round logs and host clock mapping."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 import struct
 import time
 from collections import deque
+from queue import Empty, Full, Queue
 from threading import Event, Lock, Thread
 from typing import Any, Callable
 
@@ -24,10 +25,13 @@ CONTROL_TYPE, RESPONSE_TYPE, ROUND_TYPE = (
     TYPE_GATEWAY_ROUND,
 )
 ROUND = struct.Struct("!4sQIIQQIII3B")
+# At most 1 MiB of raw USB chunks. This absorbs scheduling/journal stalls,
+# while persistent consumer overload must still invalidate acquisition.
+USB_READ_QUEUE_CHUNKS = 256
 
 
 class TransmitterReference:
-    """Own one USB connection; never infer capture time from gateway arrival."""
+    """Own one reference stream; never infer capture time from gateway arrival."""
 
     def __init__(
         self,
@@ -40,6 +44,7 @@ class TransmitterReference:
         expected_sensing_phy: str | None = None,
         expected_sensing_version: int | None = None,
         expected_sensing_rate_hz: int | None = None,
+        minimum_clock_fit_span_us: int = 0,
     ) -> None:
         self.port = port
         self.mac = transmitter_mac
@@ -57,7 +62,9 @@ class TransmitterReference:
         self.expected_sensing_rate_hz = expected_sensing_rate_hz
         self.device_status = None
         self._status_ready = Event()
-        self.estimator = ClockSyncEstimator()
+        self.estimator = ClockSyncEstimator(
+            minimum_drift_span_us=minimum_clock_fit_span_us
+        )
         self.connection = None
         self._stop = Event()
         self._responses = deque()
@@ -65,6 +72,11 @@ class TransmitterReference:
         self._write_lock = Lock()
         self._command_lock = Lock()
         self._thread = Thread(target=self._read, name="csi-tx-reference", daemon=True)
+        self._usb_chunks: Queue[bytes] = Queue(maxsize=USB_READ_QUEUE_CHUNKS)
+        self._usb_thread = Thread(
+            target=self._drain_usb, name="csi-tx-usb-drain", daemon=True
+        )
+        self.usb_receive_queue_peak = 0
         self.last_round_time: float | None = None
         self.last_clock_time: float | None = None
         self.transmitter_boot_id: int | None = None
@@ -84,10 +96,11 @@ class TransmitterReference:
         self.connection = self.serial_factory(
             self.port, 921600, timeout=0.1, write_timeout=0.5, exclusive=True
         )
+        self._usb_thread.start()
         self._thread.start()
         self.connection.write(encode_serial_frame(5, b""))
         if not self._status_ready.wait(2):
-            raise TimeoutError("transmitter USB discovery timed out")
+            raise TimeoutError("transmitter reference discovery timed out")
         status = self.device_status
         if (
             status.get("protocol_version") != 3
@@ -110,7 +123,7 @@ class TransmitterReference:
             )
         ):
             raise RuntimeError(
-                "USB transmitter identity/profile mismatch; provision the selected profile first"
+                "transmitter identity/profile mismatch; provision the selected profile first"
             )
 
     def command(self, payload: bytes, timeout: float = 2.0) -> bytes:
@@ -141,7 +154,7 @@ class TransmitterReference:
             raise TimeoutError("transmitter command timed out")
 
     def sync(self, sync_id: int) -> None:
-        """Record one symmetric USB exchange and update its affine fit."""
+        """Record one symmetric reference exchange and update its affine fit."""
         t1 = time.monotonic_ns() // 1000
         response = self.command(struct.pack("!4sIQ", b"CGHC", sync_id, t1))
         t4 = time.monotonic_ns() // 1000
@@ -150,7 +163,7 @@ class TransmitterReference:
             self._drop_baseline = drops
         if drops != self._drop_baseline:
             self.log_complete = False
-            self._fail("transmitter USB log is incomplete")
+            self._fail("transmitter reference log is incomplete")
             raise RuntimeError(self.failure)
         self._check_boot(boot)
         sample = ClockSyncSample(identity, 0, boot, echoed, t2, t3, t4, 0, 0, self.mac)
@@ -172,7 +185,7 @@ class TransmitterReference:
 
     @property
     def ready(self) -> bool:
-        """Require a fresh USB reference and a fitted host/device clock."""
+        """Require a fresh reference and a fitted host/device clock."""
         return (
             not self.failure
             and self.log_complete
@@ -189,19 +202,49 @@ class TransmitterReference:
             self.estimator.estimate.receiver_to_transmitter(transmitter_us) * 1000
         )
 
+    @property
+    def usb_backlog_chunks(self) -> int:
+        """Return queued read chunks, independently of firmware record queues."""
+        return self._usb_chunks.qsize()
+
     def _fail(self, message: str) -> None:
+        if self.failure is not None:
+            return
         self.failure = message
         if self.failure_sink:
             self.failure_sink(message)
+
+    def _drain_usb(self) -> None:
+        """Drain USB independently of decoding, journals and radio bookkeeping."""
+        try:
+            while not self._stop.is_set() and not self.failure:
+                chunk = self.connection.read(
+                    max(1, min(4096, getattr(self.connection, "in_waiting", 1)))
+                )
+                if not chunk:
+                    continue
+                try:
+                    self._usb_chunks.put_nowait(chunk)
+                except Full:
+                    self.log_complete = False
+                    self._fail("transmitter USB receive queue overflow")
+                    return
+                self.usb_receive_queue_peak = max(
+                    self.usb_receive_queue_peak, self._usb_chunks.qsize()
+                )
+        except Exception as exc:
+            if not self._stop.is_set():
+                self._fail(f"transmitter reference lost: {exc}")
 
     def _read(self) -> None:
         decoder = SerialFrameStreamDecoder()
         last_errors = (0, 0)
         try:
-            while not self._stop.is_set():
-                chunk = self.connection.read(
-                    max(1, min(4096, getattr(self.connection, "in_waiting", 1)))
-                )
+            while not self._stop.is_set() and not self.failure:
+                try:
+                    chunk = self._usb_chunks.get(timeout=0.1)
+                except Empty:
+                    continue
                 decoded = decoder.feed(chunk)
                 errors = (decoder.malformed_frames, decoder.oversized_frames)
                 if errors != last_errors:
@@ -216,6 +259,8 @@ class TransmitterReference:
                     )
                     last_errors = errors
                 for frame in decoded:
+                    if self.failure or self._stop.is_set():
+                        return
                     if frame.type == 6:
                         self.device_status = json.loads(frame.payload)
                         self._status_ready.set()
@@ -264,6 +309,17 @@ class TransmitterReference:
         self._check_boot(boot)
         if seq != self._next_round:
             self.log_complete = False
+            self.event_sink(
+                "transmitter_round_rejected",
+                reason="sequence_gap",
+                expected_sequence=self._next_round,
+                received_sequence=seq,
+                run_id=run,
+                transmitter_boot_id=boot,
+                lifetime_log_drops=drops,
+                prior_run_log_drops=self._drop_baseline,
+                payload_hex=payload.hex(),
+            )
             self._fail("transmitter round log has an unexplained sequence gap")
             raise RuntimeError(self.failure)
         step = (result & 0x7FFFFFFF) if result & 0x80000000 else 1
@@ -275,7 +331,14 @@ class TransmitterReference:
             self._drop_baseline = drops
         if drops != self._drop_baseline:
             self.log_complete = False
-            self._fail("transmitter USB round log overflow")
+            self.event_sink(
+                "transmitter_log_loss",
+                sequence=seq,
+                lifetime_log_drops=drops,
+                prior_run_log_drops=self._drop_baseline,
+                payload_hex=payload.hex(),
+            )
+            self._fail("transmitter reference round log overflow")
         value = dict(
             run_id=run,
             transmitter_boot_id=boot,
@@ -300,3 +363,5 @@ class TransmitterReference:
             self.connection.close()
         if self._thread.is_alive():
             self._thread.join(timeout=2)
+        if self._usb_thread.is_alive():
+            self._usb_thread.join(timeout=2)

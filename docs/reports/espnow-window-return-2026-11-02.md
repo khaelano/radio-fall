@@ -144,4 +144,4 @@ response was not isolated. The reset occurred after recording and shutdown.
 To run either trial, provide its explicit policy with `--gateway-config` to
 `csi-gateway-benchmark --mode probe`, the viewer or collector, alongside the
 verified inventory/profile and both USB paths. Normal collection retains its
-four-physical-receiver requirement. See [the operating guide](espnow-gateway.md).
+four-physical-receiver requirement. See [the operating guide](../espnow-gateway.md).

@@ -48,9 +48,7 @@ class ClockSyncSample:
     def round_trip_us(self) -> int:
         """Return network round-trip time with receiver turnaround removed."""
 
-        return (self.tx_t4_us - self.tx_t1_us) - (
-            self.rx_t3_us - self.rx_t2_us
-        )
+        return (self.tx_t4_us - self.tx_t1_us) - (self.rx_t3_us - self.rx_t2_us)
 
     @property
     def receiver_minus_transmitter_us(self) -> float:
@@ -60,10 +58,7 @@ class ClockSyncSample:
         clock (host for USB, transmitter for the gateway path).
         """
 
-        return (
-            (self.rx_t2_us - self.tx_t1_us)
-            + (self.rx_t3_us - self.tx_t4_us)
-        ) / 2.0
+        return ((self.rx_t2_us - self.tx_t1_us) + (self.rx_t3_us - self.tx_t4_us)) / 2.0
 
     @property
     def transmitter_midpoint_us(self) -> float:
@@ -149,9 +144,14 @@ def decode_clock_sync_sample(data: bytes) -> ClockSyncSample:
 class ClockSyncEstimator:
     """Maintain a bounded, low-delay affine clock estimate."""
 
-    def __init__(self, max_samples: int = 32) -> None:
+    def __init__(
+        self, max_samples: int = 32, *, minimum_drift_span_us: int = 0
+    ) -> None:
         if max_samples < 2:
             raise ValueError("max_samples must be at least two")
+        if type(minimum_drift_span_us) is not int or minimum_drift_span_us < 0:
+            raise ValueError("minimum drift span must be a nonnegative integer")
+        self.minimum_drift_span_us = minimum_drift_span_us
         self._samples: deque[ClockSyncSample] = deque(maxlen=max_samples)
         self.estimate: ClockSyncEstimate | None = None
 
@@ -188,36 +188,33 @@ class ClockSyncEstimator:
         reference = selected[-1].transmitter_midpoint_us
         offsets = [sample.receiver_minus_transmitter_us for sample in selected]
         slope = 0.0
-        if len(selected) >= 3:
+        # A rapid preflight with high transport jitter can resemble enormous
+        # oscillator drift. Keep an offset-only fit until the selected low-delay
+        # observations span the configured baseline; retain measured uncertainty.
+        span = (
+            selected[-1].transmitter_midpoint_us - selected[0].transmitter_midpoint_us
+        )
+        if len(selected) >= 3 and span >= self.minimum_drift_span_us:
             xs = [sample.transmitter_midpoint_us - reference for sample in selected]
             mean_x = sum(xs) / len(xs)
             mean_offset = sum(offsets) / len(offsets)
             denominator = sum((value - mean_x) ** 2 for value in xs)
             if denominator > 0:
-                slope = sum(
-                    (x - mean_x) * (offset - mean_offset)
-                    for x, offset in zip(xs, offsets, strict=True)
-                ) / denominator
-        intercept = (
-            sum(offsets) / len(offsets)
-            - slope
-            * sum(
-                sample.transmitter_midpoint_us - reference
-                for sample in selected
-            )
-            / len(selected)
-        )
+                slope = (
+                    sum(
+                        (x - mean_x) * (offset - mean_offset)
+                        for x, offset in zip(xs, offsets, strict=True)
+                    )
+                    / denominator
+                )
+        intercept = sum(offsets) / len(offsets) - slope * sum(
+            sample.transmitter_midpoint_us - reference for sample in selected
+        ) / len(selected)
         residuals = [
-            offset
-            - (
-                intercept
-                + slope * (sample.transmitter_midpoint_us - reference)
-            )
+            offset - (intercept + slope * (sample.transmitter_midpoint_us - reference))
             for sample, offset in zip(selected, offsets, strict=True)
         ]
-        residual_rms = sqrt(
-            sum(value * value for value in residuals) / len(residuals)
-        )
+        residual_rms = sqrt(sum(value * value for value in residuals) / len(residuals))
         return ClockSyncEstimate(
             receiver_boot_id=selected[-1].receiver_boot_id,
             reference_transmitter_us=reference,

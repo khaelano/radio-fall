@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from fall_detection.collection.protocol import (
     ProtocolError,
+    load_protocol,
     protocol_from_mapping,
     select_blocks,
 )
@@ -119,3 +122,18 @@ def test_select_blocks_rejects_unknown_and_empty_selections():
         select_blocks(protocol, ["walk", "run"])
     with pytest.raises(ProtocolError, match="at least one"):
         select_blocks(protocol, [])
+
+
+def test_select_blocks_preserves_equipment_order_and_snapshot():
+    protocol = load_protocol(Path("configs/collection/fall_simple.json"))
+    wanted = ["sit-to-walk", "walk-to-sit", "sit-to-fall"]
+
+    selected = select_blocks(protocol, wanted)
+
+    expected = [t for t in protocol.trials if t.scenario.block_id in wanted]
+    assert [(t.scenario.id, t.repetition) for t in selected.trials] == [
+        (t.scenario.id, t.repetition) for t in expected
+    ]
+    assert [t.ordinal for t in selected.trials] == list(range(1, 89))
+    assert selected.source_hash != protocol.source_hash
+    assert protocol_from_mapping(selected.source) == selected

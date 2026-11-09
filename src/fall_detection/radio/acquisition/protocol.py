@@ -94,9 +94,7 @@ class CsiRecord:
         object.__setattr__(
             self,
             "_mean_q",
-            fsum(imaginary_values) / len(imaginary_values)
-            if imaginary_values
-            else nan,
+            fsum(imaginary_values) / len(imaginary_values) if imaginary_values else nan,
         )
         raw_csi = self.raw_csi or self.csi
         object.__setattr__(self, "raw_csi", tuple(raw_csi))
@@ -170,6 +168,11 @@ class CsiRecord:
         """Return the quadrature component for each subcarrier."""
 
         return self._derived_views()[3]
+
+    @property
+    def phase_views_ready(self) -> bool:
+        """Return whether LTF preparation has completed without triggering work."""
+        return self._ltf_blocks_cache is not None
 
     @property
     def ltf_blocks(self) -> tuple[LtfBlock, ...]:
@@ -274,7 +277,9 @@ def parse_csi_line(line: str) -> CsiRecord:
     except json.JSONDecodeError as exc:
         raise ValueError("CSI array is not valid JSON") from exc
 
-    if not isinstance(values, list) or not all(isinstance(value, int) for value in values):
+    if not isinstance(values, list) or not all(
+        isinstance(value, int) for value in values
+    ):
         raise ValueError("CSI data must be an integer array")
     if declared_length != len(values):
         raise ValueError(
@@ -326,6 +331,10 @@ def parse_csi_line(line: str) -> CsiRecord:
 
 def format_csi_record(record: CsiRecord) -> str:
     """Serialize a record using the existing Espressif CSV schema."""
+
+    native = getattr(record, "_native", None)
+    if native is not None:
+        return native.csv_line
 
     raw_csi = record.raw_csi or record.csi
     values: list[int] = []

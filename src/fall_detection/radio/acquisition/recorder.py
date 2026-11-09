@@ -25,15 +25,21 @@ CLOCK_SYNC_HEADER = (
 class CsiRecorder:
     """Append only valid CSI lines to a timestamped CSV file."""
 
-    def __init__(self, output_dir: Path) -> None:
+    def __init__(self, output_dir: Path, *, recording_io=None) -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         self.path = output_dir / f"csi_{stamp}.csv"
         self.timing_path = output_dir / f"radio_timing_{stamp}.csv"
-        self._file: TextIO = self.path.open("w", encoding="utf-8", buffering=1)
+        self._io = recording_io
+        self._file: TextIO = self._open(self.path)
         self._file.write(CSI_HEADER + "\n")
         self._timing_file: TextIO | None = None
         self._lock = Lock()
+
+    def _open(self, path: Path):
+        return self._io.open(path, "w") if self._io else path.open(
+            "w", encoding="utf-8", buffering=1
+        )
 
     def write(self, line: str) -> None:
         """Write one already-validated CSI line."""
@@ -52,9 +58,7 @@ class CsiRecorder:
         with self._lock:
             self._file.write(format_csi_record(record).rstrip("\r\n") + "\n")
             if self._timing_file is None:
-                self._timing_file = self.timing_path.open(
-                    "w", encoding="utf-8", buffering=1
-                )
+                self._timing_file = self._open(self.timing_path)
                 self._timing_file.write(TIMING_HEADER + "\n")
             tx_timestamp = "" if record.tx_timestamp_us is None else record.tx_timestamp_us
             rx_callback = (

@@ -28,7 +28,7 @@ Optional `CGMT` summaries measure API submission to MAC completion for uploads
 and ACK polls. They include failures, maximum failed-send duration, completions
 after cutoff and sender ownership at return. Summaries wait for MAC completion;
 an outstanding callback is not silently treated as success. Metrics do not
-constitute processor acceptance. See [the protocol](espnow-gateway.md) for the
+constitute processor acceptance. See [the protocol](../espnow-gateway.md) for the
 108-byte configuration and 72-/64-byte message layouts.
 
 ## Hardware and method

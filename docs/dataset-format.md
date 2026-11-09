@@ -22,6 +22,7 @@ written or read.
    - [3.1 Naming and ordering](#31-naming-and-ordering)
    - [3.2 `attempt.json`](#32-attemptjson)
    - [3.3 Receiver directories](#33-receiver-directories)
+   - [3.4 Optional video recording](#34-optional-video-recording)
 4. [CSV formats](#4-csv-formats)
    - [4.1 `csi.csv`](#41-csicsv)
    - [4.2 `radio_timing.csv`](#42-radio_timingcsv)
@@ -60,6 +61,9 @@ data/
 │   │           └── <NNN>_<scenario-id>/
 │   │               └── attempt_<NN>/
 │   │                   ├── attempt.json
+│   │                   ├── camera.mp4                 optional synchronized video
+│   │                   ├── camera_frames.csv          optional frame timing
+│   │                   ├── video.json                 optional video status/settings
 │   │                   └── receivers/
 │   │                       └── <receiver-id>/
 │   │                           ├── csi.csv
@@ -190,15 +194,20 @@ reading the data:
 | Key | Meaning |
 | --- | --- |
 | `receiver_ids` | Map of lowercase receiver MAC to receiver id. This map determines the `receivers/<receiver-id>/` directory names |
-| `radio_inventory` | Snapshot of the receiver/transmitter inventory (`schema_version` 1) |
+| `radio_inventory` | Snapshot of the inventory (schema 1 historically; schema 2 includes the C6 gateway) |
 | `radio_profile` | Snapshot of the active radio profile: band, channel, bandwidth, nominal rate, profile id |
 | `radio_profile_fingerprint` | Short fingerprint of the profile applied to the firmware |
 | `receiver_bindings` | Per receiver id: MAC, firmware target, USB port, applied profile fingerprint |
-| `receiver_config` | Path of the inventory used for the session |
+| `radio_config` | Path of the unified radio settings file; resolved snapshots above remain authoritative |
+| `receiver_config` | Historical split inventory input path; null for unified configuration |
 | `transport`, `nominal_rate_hz`, `port`, `listen_host`, `listen_port` | Acquisition settings |
 
-Older sessions can also carry `camera_*` or `scenario_*` keys from the removed
-camera comparator. They are historical metadata and do not affect the layout.
+`environment.video` is null for CSI-only sessions, or contains requested device,
+size/rate, codec, host observation timing policy and unknown phone pipeline
+latency. Actual source dimensions/rate and PyAV version are saved in each
+attempt's `video.json`. This optional schema-2 recording is separate from the
+removed camera comparator; older `camera_*` and `scenario_*` environment keys
+remain historical metadata.
 
 `ended_monotonic_ns` and the event log use the host monotonic clock, so they are
 only meaningful relative to the start of the same machine boot. To map an event
@@ -220,6 +229,7 @@ Top-level fields:
 | `title` | Human-readable protocol title |
 | `defaults` | Default `countdown_seconds`, `action_seconds`, `recovery_seconds` |
 | `blocks` | Ordered blocks, each with `id`, `title`, and `scenarios` |
+| `trial_order` | Optional `declared` (default) or `equipment` execution order |
 | `scenario_manifests` | Optional relative paths of the source manifests |
 | `resolved_manifest_sources` | Optional array of `{path, source}` for reproducibility |
 
@@ -235,8 +245,13 @@ Each scenario contains:
 | `countdown_seconds`, `action_seconds`, `recovery_seconds` | Per-scenario timing, if it overrides the defaults |
 | `attributes` | Free-form metadata; typically `family_id`, `start_direction`, `end_direction`, `direction_frame`, `manifest_path`, `safety_note` |
 
-The protocol is expanded deterministically: blocks in written order, scenarios in
-written order, then repetitions `1..n`. The expansion produces the
+The protocol is expanded deterministically. With the default `declared` order,
+blocks and scenarios follow written order, then repetitions `1..n`. With
+`equipment` order, scenarios are grouped across blocks by equipment stage,
+chair orientation, and start/end direction, then repetitions `1..n`. Equipment
+and resolved chair orientation are stored in scenario `attributes`. See the
+[collection configuration](../configs/collection/README.md) for the setup order.
+The expansion produces the
 `trial_ordinal` used by attempt directories and `attempt.json`. Use
 `fall_detection.collection.protocol.load_protocol()` to get the expanded
 `protocol.trials` rather than reimplementing the loop.
@@ -247,7 +262,9 @@ different hashes, which is deliberate: they represent different trial queues.
 
 ### 2.3 `events.jsonl`
 
-One JSON object per line, appended and flushed as events happen. Every event has:
+One JSON object per line, appended in event order. The live collector can batch
+physical writes through its recording service (currently five seconds); event
+timestamps retain their original observation time. Every event has:
 
 | Field | Meaning |
 | --- | --- |
@@ -443,6 +460,48 @@ attempt_01/receivers/rx-1/
 - The receiver MAC is in `radio_timing.csv` and `usb_clock_sync.csv`; the CSI
   `mac` column is the **transmitter/source** MAC, not the receiver.
 
+### 3.4 Optional video recording
+
+Enabled-video attempts add three files at the attempt root. This is an
+additive extension of artifact schema 2; existing CSI-only sessions are valid.
+`attempt.json.video` names the three relative paths. No schema-1 camera
+comparator data or inference output is reintroduced.
+
+| File | Contents |
+| --- | --- |
+| `camera.mp4` | H.264 video with variable presentation timestamps; no audio |
+| `camera_frames.csv` | One row per submitted video frame, indexed in presentation order |
+| `video.json` | Video schema version 1, lifecycle status, requested/negotiated settings and timestamp coverage |
+
+Frame timing columns are:
+
+| Column | Meaning |
+| --- | --- |
+| `frame_index` | Zero-based index within this clip |
+| `presentation_pts` | Microseconds from attempt start to host read completion, rounded down |
+| `time_base_num`, `time_base_den` | Encoder time base, `1/1000000` |
+| `host_read_started_monotonic_ns` | Host time immediately before obtaining the decoded frame |
+| `host_read_completed_monotonic_ns` | Host observation time used for presentation alignment |
+| `source_pts` | Original decoder PTS; empty when unavailable |
+| `source_time_base_num`, `source_time_base_den` | Original decoder time base; empty when unavailable |
+
+`video.json.status` progresses through `queued`, `recording` and `complete`,
+or becomes `failed`. `frames` counts submitted frames. The sidecar stores
+`attempt_started_monotonic_ns`, `ended_monotonic_ns`, and the first/last frame
+observation timestamps. `configuration` contains requested output/device
+settings, timing policy and an unknown `phone_pipeline_latency_ns` (null).
+`source` records the camera's negotiated dimensions/rate and PyAV version.
+A complete clip must be finalized, nonempty, and have no observations at or
+after the attempt end. `complete` does not guarantee uninterrupted camera
+exposure or power-loss durability. Failure metadata and partial files remain
+available for diagnosis and cannot satisfy video acceptance.
+
+Match video to CSI using host monotonic timestamps from this CSV and each
+receiver's mapped capture times in `gateway_timing.jsonl`. Do not align by
+video frame number, assumed frame rate or USB arrival. Source PTS are evidence,
+not an established exposure clock. DroidCam buffering is unmeasured; see
+[video recording](video-recording.md) for synchronization limits and validation.
+
 ## 4. CSV formats
 
 All CSVs are UTF-8, comma-separated, with a header row and `\n` line endings.
@@ -616,6 +675,13 @@ review fields, and the curated-export action. It requires the `radio` extra
 ```sh
 uv sync --extra radio
 ```
+
+For attempts with recorded camera artifacts, add the `video` extra and use the
+**Signals** tab to play video alongside CSI. Playback, scrubbing, frame stepping
+and plot cursors share seconds from attempt start, using saved host-clock frame
+observations and capture timing. Missing or invalid video timing is shown
+explicitly; raw files remain unchanged. See
+[recorded-session playback](video-recording.md#recorded-session-playback).
 
 ### 5.2 Python API
 
@@ -887,6 +953,60 @@ Related documentation:
 - [`src/fall_detection/session_inspector/`](../src/fall_detection/session_inspector/) — manifest reader, CSV loader, review sidecar, exporter
 - [`src/fall_detection/radio/acquisition/protocol.py`](../src/fall_detection/radio/acquisition/protocol.py) — exact `CSI_DATA` parser and formatter
 
+## Derived session Parquet export
+
+`fall_detection.analysis.session_parquet.load_parquet_session(raw, destination)`
+builds a versioned analysis export outside the raw data tree. The exploration
+notebook uses `data/interim/parquet/<session-id>/`. Install the Parquet reader
+with `uv sync --extra analysis`.
+
+| File | Rows and purpose |
+| --- | --- |
+| `session.json` | Export schema, source manifest/protocol hash, source fingerprint, packet counts, and representation settings |
+| `attempts.parquet` | One row per attempt, including retries, status, effective/original labels, review revision, directions, timestamps, and receiver IDs |
+| `phases.parquet` | One row per observed collection-cue interval, including intervals containing no CSI |
+| `packets.parquet` | One row per CSI record, with scenario/attempt/receiver/review fields, phase, raw metadata, timing, and typed I/Q arrays |
+
+`phase` is `preparation`, `action`, or `resting`, mapped respectively from the
+original `collection_phase` values `countdown`, `action`, and `recovery`.
+`annotation_source = collection_cue` distinguishes these instructions from
+manually annotated movement boundaries. Assignment uses half-open host-clock
+intervals `[start_ns, end_ns)` and mapped capture times; rows outside intervals
+remain `unassigned`. Missing phases are not fabricated. Invalid phase ordering
+or bounds reject the export. These groups do not average, resample, interpolate,
+or combine receivers' packets.
+
+`csi_i` and `csi_q` are numeric lists in original raw slot order, corresponding
+to the real and imaginary components. They preserve invalid slots and raw
+values. Interpret them using the recorded layout fields (`sig_mode`,
+`bandwidth`, `stbc`, `first_word`, and `len`); raw slot positions are not a
+physical-subcarrier axis. `phase_signal_from_packets()` uses the same physical
+layout decoding and masks as `load_phase_signal()` for plotting.
+
+The packet table retains non-sensing and driver-invalid records for auditing;
+`is_sensing` marks the standard transmitter/HE20/MCS0 filter, while
+`driver_valid` records `rx_state == 0`. `source_row`, sequence, receiver, and
+run/boot identities preserve attribution through capture-time sorting.
+`capture_time_ns`, `time_source`, `clock_uncertainty_us`, and host-receive timing
+remain distinct. Wireless recordings require validated capture sidecars; USB
+fallbacks retain their explicit time-source description.
+
+The export streams one receiver recording at a time into Zstandard-compressed
+packet row groups. `ParquetSession.read_packets(filters=..., columns=...)`
+supports filtering and column selection before loading. Its optional
+`arrow_backed=True` keeps a full-session pandas DataFrame in Arrow-backed
+columns. Frequent label/review fields are already on packets, so ordinary
+scenario/phase queries require no joins. Attempt distributions should use the
+attempt table so empty recordings still count once.
+
+All attempts are retained; analysis selects accepted attempts without an
+explicit review exclusion. Source file paths, sizes, modification times, and
+exporter code form a cache fingerprint. Changes to review, phase events, or
+recording inputs rebuild the export. The manifest is published only after a
+successful build; this cache check is not a cryptographic raw-data integrity
+audit. Active sessions are rejected. Video files and full transport journals
+are excluded, so this derived export does not replace the raw session bundle.
+
 ## Optional BLE transport sidecars
 
 BLE sessions retain schema-2 attempt CSVs and add independently versioned
@@ -897,6 +1017,15 @@ finalized availability bins. See [BLE transport files and wire contract](ble-tra
 USB-only sessions do not require these sidecars.
 
 ## Scheduled ESP-NOW gateway sidecars
+
+The transmitter reference may use `usb`, the older experimental `ble` path, or
+the dedicated `espnow_uart` companion path. The transport manifest records
+`transmitter_link`; collection also snapshots it in the session environment.
+All three retain the original C5 round timestamps and the same CSI row schema.
+Relay mode adds `relay_*` diagnostics to gateway status events, and records a
+ten-second minimum baseline for reference-clock drift fitting. See the
+[UART relay procedure](uart-transmitter-relay.md) for failure handling and
+qualification limits. Gateway USB arrival is never a sensing timestamp.
 
 Gateway sessions use `environment.transport = espnow_gateway` and snapshot the
 ordered inventory, sensing profile and gateway policy. Attempt CSV formats are
@@ -911,11 +1040,38 @@ messages, conservative channel intervals and immutable 50 Hz availability bins.
 See [gateway contracts and qualification](espnow-gateway.md). Host acceptance is
 file-buffer acceptance; it does not guarantee persistence through power failure.
 
+Automatic live recovery adds another `transport/gateway/<run-id>/` segment;
+it does not append a reboot to the old clock/run domain. The previous journal
+records `run_interrupted`; the new manifest's optional `recovery` object and
+`run_resuming`/`run_recovered` events link `previous_run_id` and the interruption
+`reason`. Collection records `radio_interrupted` and marks an active attempt
+invalid. Raw partial files remain available, and no synthetic CSI fills the gap.
+See [automatic recovery](automatic-radio-recovery.md).
+
+Buffered gateway acquisition records `host_usb_buffer` limits in the manifest
+and periodic/final `gateway_host_buffer` occupancy, queue-wait and group counters
+in `events.jsonl`. USB arrival times retain the host read-completion timestamp
+for the read completing each frame; they are not replaced by later processing
+times. Record `available_ns` still follows validation and recorder acceptance,
+so delivery latency includes buffer residence. Gateway status events also retain
+`usb_read_ns`. Historical direct-reader timestamps are preserved as recorded.
+These optional fields do not change CSI rows or finalized availability masks.
+
+Native processing runs additionally snapshot `host_processing` in session and
+gateway manifests: backend/version, selected I/Q kernel and phase algorithm.
+Record events may include `native_processing_completed_ns` alongside the
+original USB `arrival_ns` and application `available_ns`. Rust buffer diagnostics
+separate raw queue/preparation time from completed-frame application wait;
+their 200 ms guard applies to native preparation. Recording writer ownership
+and the separate handoff bounds are documented in
+[native processing](rust-radio-pipeline.md). All fields are additive; historical
+recordings remain readable without them.
+
 Optional CGCF-v2 policies add an eight-batch window and early-return grace to the
 manifest/fingerprint without changing CSI rows. `CGQE` events 9/10 distinguish
 early-return decisions from return-channel API completion; `CGPR` identifies
 resumed sensing probes. First sensing-frame recovery remains in receiver status.
-See [window/return protocol details](espnow-window-return-2026-11-02.md).
+See [window/return protocol details](reports/espnow-window-return-2026-11-02.md).
 
 CGCF-v3 manifests also pin minimum revisit time, send-completion guard, bitmap
 ACK polling and MAC timing collection. Raw `CGPQ`/`CGPB` requests/replies stay
@@ -925,7 +1081,7 @@ report per-grant MAC durations, failures, late completions and sender ownership
 at return. They do not establish host acceptance or capture recovery. The
 original CSI/envelope encoding and immutable availability-bin rules are unchanged.
 See [transport details](espnow-gateway.md) and
-[cadence trial report](espnow-cadence-2026-11-02.md).
+[cadence trial report](reports/espnow-cadence-2026-11-02.md).
 
 CGCF-v4 retains the v3 wire layout and fingerprints its bounded application retry
 budget (0–3). Existing v1–v3 budgets remain limited to one retry. Retention trials
@@ -934,7 +1090,7 @@ transport metric is unchanged. Preserve each manifest's grace when interpreting
 mask counts, because masks from different grace settings are not a controlled
 comparison of transport delivery. Fault-injection experiments additionally
 journal ACK hold/release events; host acceptance can precede transmission of its
-ACK to the gateway. See [retention trials](espnow-retention-2026-11-02.md).
+ACK to the gateway. See [retention trials](reports/espnow-retention-2026-11-02.md).
 
 CGCF-v5 adds `application_acknowledgements` to the manifest and fingerprint.
 When false, byte 103 bit 2 is set, application retries must be zero, and bitmap
@@ -944,14 +1100,14 @@ without sending `CGAK`; `host_acceptance_ack` remains specific to acknowledged
 runs. `CGQE` code 11 records local buffer release after MAC send completion,
 including failed MAC sends. It does not establish gateway or host receipt.
 Lost diagnostic events remain flagged in receiver status; absence of an event
-is not evidence of delivery or loss. See [ACK-less trials](espnow-ackless-2026-11-02.md).
+is not evidence of delivery or loss. See [ACK-less trials](reports/espnow-ackless-2026-11-02.md).
 
 Timing-only four-receiver simulations stay separate from acquisition journals.
 Their authorization phases and potential sensing coverage do not count as real
 receiver records, readiness, clock evidence or missingness masks. A hardware
 probe with only one powered receiver records only that receiver even when its
 revisit interval approximates a four-receiver cycle. See
-[bulk/timing experiment boundaries](espnow-bulk-timing-2026-11-02.md).
+[bulk/timing experiment boundaries](reports/espnow-bulk-timing-2026-11-02.md).
 
 CGCF-v6 retains complete CSI/envelope encoding and fingerprints the negotiated
 HT20 long-GI MCS0–3 backhaul PHY. Byte 103 bits 3–4 carry its MCS index. Extended
@@ -962,7 +1118,7 @@ status distinguish event-worker and CPU-policy treatments; CPU policy is not a
 CGCF field. Benchmark reports include `target_records_s` (default 50, explicit
 80 for throughput trials). The availability grid remains 50 Hz and its finalized
 bins are never revised by late records. See
-[higher-throughput experiments](espnow-throughput-2026-11-02.md).
+[higher-throughput experiments](reports/espnow-throughput-2026-11-02.md).
 
 CGCF-v7 additionally permits an explicit record capacity up to 96; older versions
 retain their 64-slot limit. Queue occupancy/peak fields retain their existing
@@ -972,3 +1128,12 @@ The experimental 96-slot pool is fingerprinted separately and does not increase
 the 64-record submission allowance, 750 ms retention or one-second target.
 Role-specific control ingress storage does not truncate any CSI bytes or alter
 the gateway's full-envelope journal format.
+
+## Radio configuration input
+
+Live commands load `configs/radio.json` (or `--config <file>`). The session
+`environment.radio_config` field records its source path; the resolved
+`radio_inventory`, `radio_profile`, `gateway_transport` and their fingerprints
+remain the authoritative snapshots. Connection paths are host metadata and do
+not alter on-air fingerprints. Historical sessions may instead identify split
+inputs in `receiver_config`; their contents and schemas remain unchanged.

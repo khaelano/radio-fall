@@ -8,15 +8,18 @@ from typing import Any
 
 import numpy as np
 
+from ..acquisition.availability import AvailabilitySnapshot
+from ..acquisition.buffer import PreviewNotReady
+from .gaps import CsiGapPanel
 from .rendering import (
     DASHBOARD_TRACE_COUNTS,
     DEFAULT_DASHBOARD_SUBCARRIERS,
     DEFAULT_INSPECT_SUBCARRIER,
     VALID_SUBCARRIERS,
     PreparedCsiFrame,
+    CsiFrameCache,
     RenderGate,
     phase_column,
-    prepare_frame,
     representative_subcarriers,
 )
 from .state import HISTORY_SECONDS, LiveState
@@ -57,7 +60,7 @@ def qt_modules() -> tuple[Any, Any, Any]:
 
 
 class CsiDashboardPanel:
-    """Controls plus both dashboard views, shared by every CSI application.
+    """Controls and dashboard views, shared by every CSI application.
 
     The panel owns the plotting widgets and the render gate.  Hosts drive it by
     calling :meth:`refresh` from a timer; it reads the buffers held by the
@@ -74,6 +77,8 @@ class CsiDashboardPanel:
         window_seconds: float = DEFAULT_VIEW_SECONDS,
         receivers: Sequence[str] | None = None,
         on_receiver_changed: Callable[[str], None] | None = None,
+        can_render: Callable[[], bool] | None = None,
+        gap_snapshot: Callable[[float, int], AvailabilitySnapshot | None] | None = None,
     ) -> None:
         QtCore, QtWidgets, pg = qt_modules()
         self._QtCore = QtCore
@@ -83,8 +88,10 @@ class CsiDashboardPanel:
         self.state = state
         self.fps = fps
         self.on_receiver_changed = on_receiver_changed
+        self.can_render = can_render or (lambda: True)
         self.measured_fps = 0.0
         self.phase_gap_count = 0
+        self._frame_cache = CsiFrameCache()
 
         self.widget = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(self.widget)
@@ -101,9 +108,7 @@ class CsiDashboardPanel:
         self.inspect_combo = QtWidgets.QComboBox()
         for subcarrier in VALID_SUBCARRIERS:
             self.inspect_combo.addItem(f"{subcarrier:+d}", subcarrier)
-        self.inspect_combo.setCurrentIndex(
-            VALID_SUBCARRIERS.index(inspect_subcarrier)
-        )
+        self.inspect_combo.setCurrentIndex(VALID_SUBCARRIERS.index(inspect_subcarrier))
 
         self.window_spin = QtWidgets.QDoubleSpinBox()
         self.window_spin.setRange(1.0, HISTORY_SECONDS)
@@ -120,9 +125,7 @@ class CsiDashboardPanel:
         if receivers:
             self.receiver_combo = QtWidgets.QComboBox()
             self.set_receivers(receivers, state.selected_receiver_id)
-            self.receiver_combo.currentIndexChanged.connect(
-                self._receiver_changed
-            )
+            self.receiver_combo.currentIndexChanged.connect(self._receiver_changed)
             self.controls.addWidget(QtWidgets.QLabel("receiver"))
             self.controls.addWidget(self.receiver_combo)
         self.controls.addWidget(QtWidgets.QLabel("dashboard traces"))
@@ -133,6 +136,8 @@ class CsiDashboardPanel:
         self.controls.addWidget(self.window_spin)
         self.controls.addWidget(QtWidgets.QLabel("phase"))
         self.controls.addWidget(self.phase_mode_combo)
+        self.preview_status = QtWidgets.QLabel("")
+        self.controls.addWidget(self.preview_status)
         self.controls.addStretch()
         layout.addLayout(self.controls)
 
@@ -194,12 +199,8 @@ class CsiDashboardPanel:
         self.phase_detail_plot.setYRange(-32.0, 31.0, padding=0)
         self.phase_detail_plot.setLimits(xMin=-HISTORY_SECONDS, xMax=0.0)
         self.phase_detail_plot.getViewBox().setMouseEnabled(x=False, y=False)
-        self.phase_detail_plot.enableAutoRange(
-            axis=pg.ViewBox.XAxis, enable=False
-        )
-        self.phase_detail_plot.enableAutoRange(
-            axis=pg.ViewBox.YAxis, enable=False
-        )
+        self.phase_detail_plot.enableAutoRange(axis=pg.ViewBox.XAxis, enable=False)
+        self.phase_detail_plot.enableAutoRange(axis=pg.ViewBox.YAxis, enable=False)
         self.phase_detail_plot.showGrid(x=True, y=False, alpha=0.15)
         self.phase_image = pg.ImageItem(axisOrder="row-major")
         self.phase_image.setColorMap(pg.colormap.get("CET-C7"))
@@ -234,6 +235,12 @@ class CsiDashboardPanel:
         phase_detail_layout.setContentsMargins(0, 0, 0, 0)
         phase_detail_layout.addWidget(self.phase_detail_canvas)
         self.tabs.addTab(phase_detail_tab, "Phase by subcarrier")
+        self.gaps = CsiGapPanel(
+            QtCore, QtWidgets, pg,
+            receivers=receivers or (), snapshot=gap_snapshot,
+        )
+        self.tabs.addTab(self.gaps.widget, "CSI gaps")
+        self._gap_config_version = -1
         layout.addWidget(self.tabs, 1)
 
         self._render_gate = RenderGate(view_count=2)
@@ -246,9 +253,7 @@ class CsiDashboardPanel:
         self.trace_count_combo.currentIndexChanged.connect(
             lambda _index: self.mark_dirty()
         )
-        self.inspect_combo.currentIndexChanged.connect(
-            lambda _index: self.mark_dirty()
-        )
+        self.inspect_combo.currentIndexChanged.connect(lambda _index: self.mark_dirty())
         self.phase_mode_combo.currentIndexChanged.connect(
             lambda _index: self.mark_dirty()
         )
@@ -295,30 +300,49 @@ class CsiDashboardPanel:
     def refresh(self) -> bool:
         """Render the active view when its data or controls changed."""
 
+        if not self.can_render():
+            self.preview_status.setText("Preview paused")
+            return False
+
         active_tab = self.tabs.currentIndex()
-        latest_sequence = self.state.buffer.last_sequence
+        if active_tab == 2:
+            self.preview_status.setText("")
+            rendered = self.gaps.refresh(
+                self.window_seconds,
+                force=self._gap_config_version != self._config_version,
+            )
+            if rendered:
+                self._gap_config_version = self._config_version
+                self._record_frame()
+            return rendered
+        buffer = self.state.buffer
+        revision = buffer.received_records
         if not self._render_gate.needs_render(
-            active_tab, latest_sequence, self._config_version
+            active_tab, revision, self._config_version
         ):
             return False
 
-        snapshot = self.state.buffer.snapshot(
-            0, None, seconds=self.window_seconds
-        )
-        frame = prepare_frame(
-            snapshot,
-            phase_mode=self.phase_mode,
-            phase_mode_change=PHASE_MODE_CHANGE,
-            phase_mode_raw=PHASE_MODE_RAW,
-            window_seconds=self.window_seconds,
-        )
+        if not buffer.prepare_phase_views(seconds=self.window_seconds):
+            self.preview_status.setText("Preparing preview…")
+            return False
+        self.preview_status.setText("")
+        try:
+            frame = self._frame_cache.prepare(
+                buffer,
+                phase_mode=self.phase_mode,
+                phase_mode_change=PHASE_MODE_CHANGE,
+                phase_mode_raw=PHASE_MODE_RAW,
+                window_seconds=self.window_seconds,
+                prepared_only=True,
+            )
+        except PreviewNotReady:
+            self.preview_status.setText("Preparing preview…")
+            return False
         if active_tab == 0:
             self._update_dashboard(frame)
         else:
             self._update_detail(frame)
-        self._render_gate.mark_rendered(
-            active_tab, frame.sequence, self._config_version
-        )
+        self._render_gate.mark_rendered(active_tab, revision, self._config_version)
         self._record_frame()
         return True
 
@@ -355,6 +379,15 @@ class CsiDashboardPanel:
             return
         if self.on_receiver_changed is not None:
             self.on_receiver_changed(str(receiver_id))
+        for curve in (
+            *self.amplitude_curves,
+            *self.phase_curves,
+            *self.iq_curves,
+            *self.radio_curves,
+        ):
+            curve.clear()
+        self.phase_trace_curve.clear()
+        self.phase_image.setVisible(False)
         self.mark_dirty()
 
     def _set_time_range(self, seconds: float) -> None:
@@ -420,12 +453,8 @@ class CsiDashboardPanel:
                 skipFiniteCheck=False,
             )
 
-        self.iq_curves[0].setData(
-            frame.timestamps, frame.mean_i, skipFiniteCheck=False
-        )
-        self.iq_curves[1].setData(
-            frame.timestamps, frame.mean_q, skipFiniteCheck=False
-        )
+        self.iq_curves[0].setData(frame.timestamps, frame.mean_i, skipFiniteCheck=False)
+        self.iq_curves[1].setData(frame.timestamps, frame.mean_q, skipFiniteCheck=False)
         self.radio_curves[0].setData(
             frame.timestamps, frame.rssi, skipFiniteCheck=False
         )
@@ -444,9 +473,7 @@ class CsiDashboardPanel:
         if not frame.timestamps.size or not frame.subcarriers:
             self.phase_image.setVisible(False)
             self.phase_trace_curve.setData([], [])
-            self.phase_detail_plot.setTitle(
-                "Phase heatmap — waiting for HT-LTF data"
-            )
+            self.phase_detail_plot.setTitle("Phase heatmap — waiting for HT-LTF data")
             return
 
         self.phase_image.setVisible(True)

@@ -3,8 +3,24 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from dataclasses import dataclass
+from math import ceil
 from threading import RLock
 from typing import Callable
+
+
+AVAILABILITY_HISTORY_SECONDS = 10
+
+
+@dataclass(frozen=True)
+class AvailabilitySnapshot:
+    """Capture-time bins; None denotes pre-run or no longer retained history."""
+
+    receivers: tuple[str, ...]
+    first_bin_start_ns: int
+    width_ns: int
+    grace_ns: int
+    packet_counts: tuple[tuple[int | None, ...], ...]
 
 
 class AvailabilityGrid:
@@ -29,6 +45,9 @@ class AvailabilityGrid:
         self._arrivals = {r: deque() for r in receivers}
         self._latest = {r: None for r in receivers}
         self._lock = RLock()
+        self._history: deque[tuple[int, tuple[int, ...]]] = deque(
+            maxlen=ceil(AVAILABILITY_HISTORY_SECONDS * 1e9 / self.width_ns) + 1
+        )
         self.timely = defaultdict(int)
         self.late = defaultdict(int)
 
@@ -92,10 +111,54 @@ class AvailabilityGrid:
                         if latest is None
                         else max(0, (end - latest) / 1_000_000),
                     )
+                self._history.append(
+                    (
+                        index,
+                        tuple(
+                            row["receivers"][r]["packet_count"]
+                            for r in self.receivers
+                        ),
+                    )
+                )
                 self.next_bin += 1
                 self.emit(row)
                 rows.append(row)
         return rows
+
+    def snapshot(
+        self, *, now_ns: int, seconds: float = AVAILABILITY_HISTORY_SECONDS
+    ) -> AvailabilitySnapshot:
+        """Copy recent finalized/pending counts without advancing acquisition.
+
+        Late arrivals never repair a finalized bin. Retain at most ten seconds;
+        pending bins are empty until a packet arrives within their deadline.
+        """
+        if not 0 < seconds <= AVAILABILITY_HISTORY_SECONDS:
+            raise ValueError("availability window must be between zero and ten seconds")
+        last = (now_ns - self.start_ns) // self.width_ns
+        first = (now_ns - self.start_ns - round(seconds * 1e9)) // self.width_ns
+        with self._lock:
+            history = dict(self._history)
+            pending = dict(self._counts)
+            next_bin = self.next_bin
+        rows = []
+        for row, receiver in enumerate(self.receivers):
+            values = []
+            for index in range(first, last + 1):
+                if index < 0 or (index < next_bin and index not in history):
+                    values.append(None)
+                elif index in history:
+                    values.append(history[index][row])
+                else:
+                    values.append(pending.get((receiver, index), 0))
+            rows.append(tuple(values))
+        return AvailabilitySnapshot(
+            self.receivers,
+            self.start_ns + first * self.width_ns,
+            self.width_ns,
+            self.grace_ns,
+            tuple(rows),
+        )
 
 
 class RoundReceipts:

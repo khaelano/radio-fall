@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "setuptools-rust>=1.11"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -15,22 +15,30 @@ dependencies = [
 
 [project.optional-dependencies]
 analysis = [
+    "polars>=1.0",
     "matplotlib>=3.8",
+    "pyarrow>=18",
+    "scikit-learn>=1.5",
 ]
 radio = [
     "pyserial>=3.5",
     "PySide6>=6.6",
     "pyqtgraph>=0.13",
 ]
+video = [
+    "av>=14",
+]
+detection = [
+    "torch==2.14.1",
+]
 
 [project.scripts]
 csi-viewer = "fall_detection.radio.visualization.app:main"
-csi-radio-discover = "fall_detection.radio.provisioning:discover"
-csi-radio-provision = "fall_detection.radio.provisioning:provision"
+csi-radio = "fall_detection.radio.provisioning:main"
 csi-gateway-benchmark = "fall_detection.radio.experiments.gateway:main"
-csi-experiment = "fall_detection.radio.experiments.transport:main"
 fall-collection = "fall_detection.collection.app:main"
 fall-session-inspector = "fall_detection.session_inspector.app:main"
+fall-detect = "fall_detection.detection.app:main"
 
 [dependency-groups]
 dev = [
@@ -40,6 +48,32 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.uv]
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "setup.py" },
+    { file = "setup.cfg" },
+    { dir = "src" },
+    { file = "MANIFEST.in" },
+    { file = "src/native/radio_core/Cargo.toml" },
+    { file = "src/native/radio_core/Cargo.lock" },
+    { file = "src/native/radio_core/src/*.rs" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["fall_detection*"]
+
+[[tool.setuptools-rust.ext-modules]]
+target = "fall_detection._radio_native"
+path = "src/native/radio_core/Cargo.toml"
+binding = "PyO3"
+debug = false

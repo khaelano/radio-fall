@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass, replace
 from io import StringIO
+import json
 from math import atan2, hypot
 from pathlib import Path
 from typing import Callable, Iterable
@@ -27,6 +28,20 @@ from .models import RecordedAttempt
 
 CancellationCallback = Callable[[], bool]
 MAX_PLOT_RECORDS = 800
+
+
+def timed_phase_image(times: np.ndarray, phase: np.ndarray) -> np.ndarray:
+    """Place the latest phase sample in each uniform display cell; retain gaps."""
+    image = np.full((phase.shape[1], len(times)), np.nan, dtype=phase.dtype)
+    if not len(times):
+        return image
+    duration = max(1e-6, float(times[-1] - times[0]))
+    bins = np.clip(
+        ((times - times[0]) / duration * len(times)).astype(int), 0, len(times) - 1
+    )
+    for row, index in enumerate(bins):
+        image[:, index] = phase[row]
+    return image
 
 
 class DataLoadCancelled(RuntimeError):
@@ -65,6 +80,8 @@ class AttemptData:
     snapshot: BufferSnapshot | None = None
     prepared_frame: PreparedCsiFrame | None = None
     warnings: tuple[str, ...] = ()
+    signal_times: tuple[float, ...] | None = None
+    time_source: str = "receiver elapsed; not aligned to video"
 
     @property
     def record_count(self) -> int:
@@ -406,7 +423,14 @@ def load_attempt_data(
     _check_cancelled(cancelled)
     clock = load_table(files.clock_sync, "Clock sync", cancelled=cancelled)
     _check_cancelled(cancelled)
-    warnings = tuple(dict.fromkeys((*csi.warnings, *timing.warnings, *clock.warnings)))
+    signal_times, time_source, clock_warnings = _attempt_times(
+        attempt, receiver_id, records, record_row_indices, csi, timing, clock
+    )
+    warnings = tuple(
+        dict.fromkeys(
+            (*csi.warnings, *timing.warnings, *clock.warnings, *clock_warnings)
+        )
+    )
     result = AttemptData(
         attempt_key=attempt.key,
         receiver_id=receiver_id,
@@ -417,12 +441,128 @@ def load_attempt_data(
         record_row_indices=record_row_indices,
         total_record_count=len(records),
         warnings=warnings,
+        signal_times=signal_times,
+        time_source=time_source,
     )
     return (
         prepare_attempt_signals(result, cancelled=cancelled)
         if prepare_signals
         else result
     )
+
+
+def _attempt_times(attempt, receiver_id, records, row_indices, csi, timing, clock):
+    """Align derived signal plots; never change exact saved tables or raw order."""
+    fallback = (None, "receiver elapsed; not aligned to video", ())
+    origin = attempt.metadata.get("started_monotonic_ns")
+    if not isinstance(origin, int) or not records:
+        return fallback
+    directory = attempt.path / "receivers" / receiver_id
+    sidecar = next(
+        (
+            directory / name
+            for name in ["gateway_timing.jsonl", "ble_timing.jsonl"]
+            if (directory / name).is_file()
+        ),
+        None,
+    )
+    try:
+        if sidecar is not None:
+            rows = [
+                json.loads(line)
+                for line in sidecar.read_text().splitlines()
+                if line.strip()
+            ]
+            if len(rows) != csi.row_count:
+                raise ValueError("CSI/capture timing row counts differ")
+            values = []
+            for record, index in zip(records, row_indices, strict=True):
+                row = rows[index]
+                captured = row["capture_host_monotonic_ns"]
+                if (
+                    row["sequence"] != record.sequence
+                    or row["rx_radio_timestamp_us"] != record.timestamp_us
+                    or row.get("schema_version") != 1
+                    or not isinstance(captured, int)
+                    or isinstance(captured, bool)
+                ):
+                    raise ValueError("CSI/capture timing identities or clocks differ")
+                values.append((captured - origin) / 1e9)
+            return tuple(values), "capture → host clock; seconds from attempt start", ()
+        if timing.row_count != csi.row_count:
+            return fallback
+        rows = [dict(zip(timing.headers, row, strict=True)) for row in timing.rows]
+        selected = [rows[index] for index in row_indices]
+        if any(
+            int(row["sequence"]) != record.sequence
+            for row, record in zip(selected, records, strict=True)
+        ):
+            raise ValueError("CSI/radio timing sequences differ")
+        # Only USB clock exchanges use the host as reference. Gateway exchanges
+        # must never be interpreted as receiver-to-host mappings.
+        sync = [dict(zip(clock.headers, row, strict=True)) for row in clock.rows]
+        if sync and all(
+            int(row["rx_radio_t2_us"]) == int(row["tx_radio_t4_us"]) == 0
+            for row in sync
+        ):
+            from ..radio.acquisition.clock_sync import (
+                ClockSyncEstimator,
+                ClockSyncSample,
+            )
+
+            if len({row["receiver_boot_id"] for row in sync}) != 1:
+                raise ValueError("USB clock timing mixes receiver boots")
+            estimator = ClockSyncEstimator()
+            for row in sorted(
+                sync, key=lambda row: int(row["host_receive_monotonic_ns"])
+            ):
+                fields = {
+                    key: int(row[key])
+                    for key in [
+                        "sync_id",
+                        "sensing_sequence",
+                        "receiver_boot_id",
+                        "tx_t1_us",
+                        "rx_t2_us",
+                        "rx_t3_us",
+                        "tx_t4_us",
+                        "rx_radio_t2_us",
+                        "tx_radio_t4_us",
+                    ]
+                }
+                sample = ClockSyncSample(**fields, receiver_mac=row["receiver_mac"])
+                if (
+                    sample.round_trip_us < 0
+                    or sample.tx_t4_us < sample.tx_t1_us
+                    or sample.rx_t3_us < sample.rx_t2_us
+                ):
+                    raise ValueError("Invalid USB clock-sync exchange")
+                estimator.add(sample)
+            estimate = estimator.estimate
+            return (
+                tuple(
+                    (
+                        estimate.receiver_to_transmitter(
+                            int(row["rx_callback_timestamp_us"])
+                        )
+                        - origin / 1000
+                    )
+                    / 1e6
+                    for row in selected
+                ),
+                "USB callback → host clock; seconds from attempt start",
+                (),
+            )
+        return (
+            tuple(
+                (int(row["host_receive_monotonic_ns"]) - origin) / 1e9
+                for row in selected
+            ),
+            "host receipt time (not sensing time); seconds from attempt start",
+            (),
+        )
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return None, fallback[1], (f"Video/CSI alignment unavailable: {exc}",)
 
 
 def load_attempt_data_for_ui(
@@ -480,7 +620,16 @@ def prepare_attempt_signals(
     if data.prepared_frame is not None and data.snapshot is not None:
         return data
     _check_cancelled(cancelled)
-    snapshot = _snapshot(data.records, cancelled=cancelled)
+    records = data.records
+    times = data.signal_times
+    if times is not None:
+        indices = np.argsort(times, kind="stable")
+        indices = indices[list(downsample_indices(len(indices), MAX_PLOT_RECORDS))]
+        records = tuple(records[index] for index in indices)
+        times = tuple(times[index] for index in indices)
+    snapshot = _snapshot(records, cancelled=cancelled)
+    if times is not None:
+        snapshot = replace(snapshot, timestamps=times)
     _check_cancelled(cancelled)
     prepared = prepare_frame(
         snapshot,
@@ -489,6 +638,10 @@ def prepare_attempt_signals(
         phase_mode_raw="raw",
         window_seconds=3.0,
     )
+    # The shared live renderer rebases its last packet to zero. Offline aligned
+    # plots instead share attempt-start zero with video, across every receiver.
+    if times is not None:
+        prepared = replace(prepared, timestamps=np.asarray(times, dtype=np.float64))
     _check_cancelled(cancelled)
     return replace(data, snapshot=snapshot, prepared_frame=prepared)
 

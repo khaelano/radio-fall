@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
+import json
 from pathlib import Path
 import time
 from threading import RLock
@@ -12,11 +13,12 @@ from typing import Any, Callable, Protocol
 
 from ..radio.acquisition.clock_sync import ClockSyncEstimate, ClockSyncSample
 from ..radio.acquisition.protocol import CsiRecord
+from ..radio.acquisition.recording_io import RecordingIO
 from ..radio.acquisition.telemetry import (
     BackhaulTelemetrySnapshot,
     telemetry_delta,
 )
-from .capture import SessionArtifactStore, SessionMetadata, TrialCapture
+from .capture import SessionArtifactStore, SessionMetadata, TrialCapture, _write_json
 from .protocol import CollectionProtocol, Trial
 
 
@@ -53,12 +55,19 @@ class HealthSnapshot:
     clock_sync_ready: bool = True
     radio_detail: str = "waiting for radio"
     storage_detail: str = "ready"
+    video_ready: bool = True
+    video_detail: str = "video disabled"
 
     @property
     def ready(self) -> bool:
         """Return whether a new trial can safely be started."""
 
-        return self.radio_live and self.storage_ready and self.clock_sync_ready
+        return (
+            self.radio_live
+            and self.storage_ready
+            and self.clock_sync_ready
+            and self.video_ready
+        )
 
 
 @dataclass(frozen=True)
@@ -101,6 +110,14 @@ class CaptureSink(Protocol):
     ) -> None: ...
 
 
+class AttemptVideoRecorder(Protocol):
+    """Nonblocking attempt markers; camera/encoding I/O belongs to an adapter."""
+
+    def begin_attempt(self, path: Path, start_ns: int) -> dict[str, Any]: ...
+    def end_attempt(self, path: Path, end_ns: int) -> None: ...
+    def result(self, path: Path) -> dict[str, Any] | None: ...
+
+
 class SessionController:
     """Own protocol progression, quality gates, and trial artifact lifecycle.
 
@@ -122,6 +139,8 @@ class SessionController:
         telemetry_provider: Callable[[], BackhaulTelemetrySnapshot | None]
         | None = None,
         manual_confirmation_required: bool = False,
+        video_recorder: AttemptVideoRecorder | None = None,
+        recording_io: RecordingIO | None = None,
     ) -> None:
         self.protocol = protocol
         self.output_dir = output_dir
@@ -131,6 +150,8 @@ class SessionController:
         self._environment = environment or {}
         self._telemetry_provider = telemetry_provider
         self._manual_confirmation_required = manual_confirmation_required
+        self._video = video_recorder
+        self._recording_io = recording_io
         self._lock = RLock()
         self._subscribers: list[Callable[[SessionSnapshot], None]] = []
         self._store: SessionArtifactStore | None = None
@@ -163,6 +184,12 @@ class SessionController:
             return self._state
 
     @property
+    def health(self) -> HealthSnapshot:
+        """Return current health, including interruptions from acquisition threads."""
+        with self._lock:
+            return self._health
+
+    @property
     def capture_sink(self) -> CaptureSink:
         """Return the adapter callback seam."""
 
@@ -179,6 +206,8 @@ class SessionController:
         """Close deferred writers after the transport has finished draining."""
         with self._lock:
             self._expire_draining_locked(self._monotonic_ns(), force=True)
+        if self._recording_io:
+            self._recording_io.flush()
 
     def _expire_draining_locked(self, now_ns: int, *, force: bool = False) -> None:
         remaining = []
@@ -230,6 +259,7 @@ class SessionController:
                         metadata,
                         session_id,
                         self._environment,
+                        recording_io=self._recording_io,
                     )
                     break
                 except FileExistsError:
@@ -262,6 +292,51 @@ class SessionController:
                 self._end_session_locked("operator ended session")
             else:
                 raise ValueError(f"unsupported command: {command}")
+            return self._notify_locked()
+
+    def resume_session(self, root: Path) -> SessionSnapshot:
+        """Resume the saved queue under a new radio epoch and new attempt files."""
+        with self._lock:
+            if self._state is not SessionState.SETUP:
+                raise RuntimeError("session has already started")
+            store, saved = SessionArtifactStore.reopen(root, self._environment, self._recording_io)
+            try:
+                if self.protocol.source_hash != saved.protocol.source_hash:
+                    raise ValueError("resume must use the saved session protocol")
+                now = self._monotonic_ns()
+                for path in saved.abandoned:
+                    original = path.read_bytes()
+                    backup = path.with_name("attempt.before-resume.json")
+                    if backup.exists():
+                        if backup.read_bytes() != original:
+                            raise ValueError("inconsistent interrupted attempt backup")
+                    else:
+                        with backup.open("xb") as stream:
+                            stream.write(original)
+                    value = json.loads(original)
+                    value.update(status="invalid",
+                                 interruption_reason="collector restarted before attempt resolution",
+                                 invalidated_on_resume_monotonic_ns=now)
+                    _write_json(path, value)
+                    store.event("attempt_invalidated_on_resume", now,
+                                trial_ordinal=value["trial_ordinal"], path=str(path.relative_to(store.root)))
+                for ordinal in saved.recovered_resolutions:
+                    store.event("trial_resolved", now, trial_ordinal=ordinal,
+                                attempt=saved.attempt_numbers.get(ordinal, 0),
+                                disposition="accepted", recovered_from_attempt=True)
+                store.mark_resumed(now, self._environment)
+            except BaseException:
+                store._event_file.close()
+                raise
+            self._store, self._session_id = store, store.session_id
+            self._trial_index = saved.trial_index
+            self._attempt_numbers = dict(saved.attempt_numbers)
+            self._health = replace(self._health, radio_live=False, clock_sync_ready=False)
+            self._state = SessionState.READY
+            self._message = (
+                f"resumed at trial {saved.trial_index + 1}; "
+                "previous recordings retained; wait for inputs before starting"
+            )
             return self._notify_locked()
 
     def tick(self, now: float | None = None) -> SessionSnapshot:
@@ -309,17 +384,31 @@ class SessionController:
                 self._abort_locked("input health lost: " + self._health_detail(health))
         return self._notify_locked()
 
+    def interrupt_radio(self, reason: str) -> SessionSnapshot:
+        """Preserve a radio interruption and invalidate an active attempt immediately."""
+        with self._lock:
+            self.record_event("radio_interrupted", reason=reason)
+            return self.update_health(
+                replace(
+                    self._health,
+                    radio_live=False,
+                    clock_sync_ready=False,
+                    radio_detail=reason,
+                )
+            )
+
     def _health_ready_locked(self, health: HealthSnapshot | None = None) -> bool:
-        """Return whether radio, storage, and clock are all ready."""
+        """Require radio, storage, clock and any enabled video input."""
 
         value = health or self._health
-        return value.radio_live and value.storage_ready and value.clock_sync_ready
+        return value.ready
 
     @staticmethod
     def _health_detail(health: HealthSnapshot) -> str:
         for ready, detail in (
             (health.radio_live, health.radio_detail),
             (health.storage_ready, health.storage_detail),
+            (health.video_ready, health.video_detail),
         ):
             if not ready:
                 return detail
@@ -383,7 +472,9 @@ class SessionController:
             self._complete_locked("all protocol trials are complete")
             return
         if not self._health_ready_locked():
-            raise RuntimeError("radio, storage, and clock health must be ready")
+            raise RuntimeError(
+                "radio, storage, clock and enabled video health must be ready"
+            )
         assert self._store is not None
         now = self._clock()
         trial = self._current_trial
@@ -404,6 +495,22 @@ class SessionController:
                 )
             },
         )
+        if self._video is not None:
+            try:
+                video = self._video.begin_attempt(
+                    self._capture.path, self._capture_start_ns
+                )
+                self._capture.update_status("recording", video=video)
+            except Exception as exc:
+                self._capture.finish(
+                    "invalid",
+                    ended_monotonic_ns=self._monotonic_ns(),
+                    interruption_reason=f"video start failed: {exc}",
+                )
+                self._last_capture, self._capture = self._capture, None
+                self._state, self._attempt_status = SessionState.REVIEW, "invalid"
+                self._message = f"video start failed: {exc}; retry or skip this attempt"
+                return
         self._attempt_telemetry_start = telemetry_start
         self._attempt_status = "recording"
         self._action_confirmed = False
@@ -493,6 +600,18 @@ class SessionController:
             raise RuntimeError("accept is only available during review")
         if self._attempt_status == "invalid":
             raise RuntimeError("an invalid attempt cannot be accepted")
+        if self._recording_io and self._last_capture and not self._last_capture.writes_complete:
+            raise RuntimeError("recording is still saving; wait before accepting")
+        if self._video is not None and self._last_capture is not None:
+            result = self._video.result(self._last_capture.path)
+            if result is None:
+                raise RuntimeError("video is still finalizing; wait before accepting")
+            if result.get("status") != "complete" or not result.get("frames", 0):
+                self._last_capture.update_status(
+                    "invalid", interruption_reason="video recording failed"
+                )
+                self._attempt_status = "invalid"
+                raise RuntimeError("video recording failed; retry or skip this attempt")
         self._finish_capture_locked("accepted", self._clock())
         self._advance_locked("accepted")
 
@@ -601,7 +720,10 @@ class SessionController:
                 self._last_capture is not None
                 and self._attempt_status == "pending_review"
             ):
-                if self._environment.get("transport") not in {"ble", "espnow_gateway"}:
+                if self._video is None and self._environment.get("transport") not in {
+                    "ble",
+                    "espnow_gateway",
+                }:
                     updates["ended_monotonic_ns"] = self._monotonic_ns()
                 self._last_capture.update_status(status, **updates)
             self._attempt_status = status
@@ -620,12 +742,23 @@ class SessionController:
                 telemetry_delta(self._attempt_telemetry_start, telemetry_end),
             )
         ended_ns = self._monotonic_ns()
+        if self._video is not None:
+            try:
+                self._video.end_attempt(capture.path, ended_ns)
+            except Exception as exc:
+                status = "invalid"
+                updates["interruption_reason"] = f"video end failed: {exc}"
         deferred = self._environment.get("transport") in {"ble", "espnow_gateway"}
         capture.finish(
             status, defer_close=deferred, ended_monotonic_ns=ended_ns, **updates
         )
         if deferred:
-            drain_ms = self._environment.get("gateway_transport" if self._environment.get("transport") == "espnow_gateway" else "ble_transport", {}).get("drain_ms", 1000)
+            drain_ms = self._environment.get(
+                "gateway_transport"
+                if self._environment.get("transport") == "espnow_gateway"
+                else "ble_transport",
+                {},
+            ).get("drain_ms", 1000)
             self._draining_captures.append(
                 (
                     capture,

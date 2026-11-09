@@ -1,5 +1,10 @@
 # Scheduled dual-band ESP-NOW gateway
 
+The default [UART transmitter relay](uart-transmitter-relay.md) adds a dedicated
+C6 between the sensing C5 and this USB gateway. Its encrypted ESP-NOW reference
+preserves the receiver upload protocol and the C5 sensing channel. Select
+`--transmitter-link usb` for USB reference recovery.
+
 The live transport on `codex/espnow-gateway` uses an ESP32-C5 transmitter and
 C5 receivers for 5 GHz HE20 sensing. Each receiver temporarily switches to
 2.4 GHz to upload complete batches to a dedicated ESP32-C6 gateway. The gateway
@@ -11,26 +16,19 @@ measurements do not qualify this transport.
 
 Normal collection requires four actual C5 receivers. A switching probe can use
 one to four registered receivers and is never labeled four-receiver qualification.
-Use `configs/radio/gateway_inventory.json` for the verified four-C5 roster and
-XIAO C6 gateway. This schema-v2 inventory contains the `transmitter`, ordered
-`receivers`, and a `gateway` object with `id`, `role: gateway`,
-`target: esp32c6`, and its discovered MAC. `configs/radio/receivers.json` retains
-the user's sensing-only roster in the legacy schema. Sensing entries must target `esp32c5`.
-All IDs and MACs must be unique. Do not substitute guessed or virtual devices.
+The single [`configs/radio.json`](../configs/radio.json) contains the verified
+four-C5 roster, XIAO C6 gateway, sensing profile, transport policy and USB paths.
+All IDs and MACs must be unique. Current defaults use 120 Hz sensing on 5 GHz
+channel 44 and CGCF-v7 backhaul on channel 11: HT20 MCS3, 125 ms slots, a 5 ms
+departure guard, 10 ms return reserve, 96-record queues, 750 ms retention,
+four outstanding batches, 64 records per slot, and no application ACKs/retries.
+Policy and ordered identities retain their original fingerprints. Reference
+traffic separately uses MCS0. See [configuration details](radio-configuration.md)
+and the [measured relay results and limits](uart-transmitter-relay.md#verification).
 
-Use `configs/radio/profiles/indonesia_5g_ch44_80hz.json` and
-`configs/radio/espnow_transport.json`. The policy fixes channel 6 and HT20 MCS0
-long-GI backhaul, 50 ms slots, a 5 ms departure guard, a 10 ms return reserve,
-64 record slots, 500 ms retention, four outstanding batches, one retry and
-16 records per slot. Policy and ordered physical identities are fingerprinted.
-These timing margins are initial engineering settings, not measured guarantees.
-Eight-batch and early-return trial policies are available separately. Early
-return shortened blank periods but regressed latency and had inconsistent
-throughput, so the four-batch/deadline-return default remains. See
-[window and return trials](espnow-window-return-2026-11-02.md).
-The first hardware probe is recorded in
-[espnow-hardware-probe-2026-11-01.md](espnow-hardware-probe-2026-11-01.md):
-single-receiver delivery works, but the rate and queue-stability checks failed.
+Older reports below describe historical policies and filenames. Their presets
+were removed from the live configuration directory; recorded manifests preserve
+the settings actually used. They do not override the current configuration.
 
 Build with ESP-IDF 6.1. Use absolute build/config paths to isolate targets:
 
@@ -57,22 +55,20 @@ Provision the same complete sensing inventory/profile on the C5 transmitter and
 receivers. Connect sensing boards one at a time and use:
 
 ```sh
-uv run csi-radio-discover --json
-uv run csi-radio-provision --sequential \
-  --receiver-config configs/radio/gateway_inventory.json \
-  --radio-profile configs/radio/profiles/indonesia_5g_ch44_80hz.json
+uv run csi-radio discover --json
+uv run csi-radio provision --sequential
 ```
 
 The C6 gateway does not store a sensing profile. Its identity is verified and its
 channel, sender registry, run and transmitter boot are configured over USB at
-startup. Keep both transmitter and gateway USB data links connected. Receiver
+startup. With the default relay, only the gateway needs laptop USB data. Receiver
 USB is for provisioning only; receivers need power during capture.
 After changing the sensing receiver roster, explicitly provision the transmitter
 with the complete new inventory as well. Its stored peer list is checked against
 the run configuration. The sensing-profile fingerprint covers radio settings and
 transmitter identity, so an unchanged fingerprint does not prove the receiver
 list is current. The transport fingerprint includes the ordered roster.
-See [the four-receiver hardware report](espnow-four-receivers-2026-11-02.md).
+See [the four-receiver hardware report](reports/espnow-four-receivers-2026-11-02.md).
 
 ## Scheduling and deadlines
 
@@ -107,9 +103,9 @@ expired while still on 5 GHz. Pending return notices retry once per sensing roun
 until the next grant is observed; ordinary health status remains at 100 ms.
 Without a valid return, new departures stop; sensing continues. A future grant
 is announced at least two sensing rounds ahead. This look-ahead and handoff delays can
-make the cycle longer than the nominal four times 50 ms; use actual journals.
+make the cycle longer than the nominal four times the configured slot duration; use actual journals.
 No receiver silently extends a grant. The transmitter stops RF after its
-three-second USB control lease expires.
+three-second host-control lease expires.
 `CGDF` events record departures deferred for missing readiness or return evidence.
 On host reconnection, a new run filters stale-run events and establishes a
 baseline for lifetime drop counters. Any additional drop during that run still
@@ -131,17 +127,17 @@ in 5 ms units into byte 101, and the send-completion guard in milliseconds into
 byte 102. Byte 103 enables bitmap ACK polling (bit 0) and MAC completion metrics
 (bit 1); other bits are rejected. The revisit range is 0–1000 ms and the send
 guard range is 1–20 ms. These options require compatible firmware on all roles.
-The default v1 policy and historical v1/v2 fingerprints remain unchanged.
+Historical v1/v2 fingerprints remain unchanged.
 Version 4 retains the v3 layout and permits up to three application retries
 (at most four submissions including the initial send). Versions 1–3 keep the
 one-retry limit and reject larger budgets. Failed MAC results alone never free
 a batch. Retries still obey the record lifetime, ACK timeout, slot allowance
 and send cutoff; they can span later authorized turns without extending a slot.
-The default policy remains v1 with one retry.
+Legacy v1 policies allow one retry; the current file selects v7 ACK-less delivery.
 A `CGWY` v1 envelope has a 40-byte header, an unchanged `CSIB` payload and CRC32.
 The full envelope is at most 1400 bytes, including overhead; unusually wide CSI
 therefore forces a smaller batch. There is no fragmentation in this transport.
-The versioned policy implies HT20 MCS0/LGI; do not use ESP-NOW's default PHY rate.
+The policy explicitly selects its PHY; do not use ESP-NOW's default PHY rate.
 
 `CGAK` is a 34-byte application acceptance ACK. MAC completion does not release
 receiver records. The gateway caches host ACKs; the receiver polls a specific
@@ -189,7 +185,7 @@ All roles must support CGCF-v5. USB preflight checks transmitter and gateway
 capabilities before starting sensing; receivers establish readiness only after
 accepting the configuration over 5 GHz. Older receivers cannot accept v5 and
 prevent acquisition readiness. Existing v1–v4 policies/fingerprints retain their
-ACK behavior. See [ACK-less implementation and measurements](espnow-ackless-2026-11-02.md).
+ACK behavior. See [ACK-less implementation and measurements](reports/espnow-ackless-2026-11-02.md).
 
 Each run adds `transport/gateway/<run-id>/manifest.json`, `envelopes.bin`,
 `events.jsonl` and `availability.jsonl`. Attempts add `gateway_timing.jsonl` next
@@ -220,6 +216,68 @@ return. One bounded aggregate is emitted after return and MAC completion;
 missing callbacks do not produce false completion evidence. These measurements
 are distinct from gateway and host application acceptance.
 
+## Live diagnostics
+
+The viewer and collector share the same gateway transport panel. A stable row
+per inventory receiver reports link freshness, last reported state, host
+records/s over the trailing second, last data age, receiver queue occupancy,
+expiry, drops and send errors. The plotted receiver's row is bold. Native
+CGST reports supply firmware counters; missing values display `pending`.
+
+The rate counts unique records after successful host ingestion/recorder
+acceptance; duplicates and rejected batches do not increase it. Configured
+sensing Hz is per receiver, while the all-receiver rate is a sum. Plot refresh
+and UI FPS describe rendering, independently of sensing and delivery rates.
+These short GUI windows do not replace the qualification measurement.
+
+Plot timers are display targets. Both applications defer expensive plot frames
+while more than 16 reference or gateway USB chunks await processing, then
+render current data after acquisition catches up. Controls and status updates
+continue. The independent USB drain queue is bounded at 256 chunks of at most
+4096 bytes; persistent overload still fails acquisition explicitly. Nested CSI
+decoding is reused after validation, and phase views use cached scalar I/Q means.
+The host journals rejected reference rounds as `transmitter_round_rejected`
+with expected/received sequences and raw bytes, and counter changes as
+`transmitter_log_loss`. Strict sequence/CRC/boot checks remain active. See the
+[viewer overload diagnosis](reports/usb-reference-overload-2026-11-03.md) for the visible
+five-minute retest and the separate gateway USB forwarding loss still observed.
+
+Gateway USB now has its own read thread and bounded RAM FIFO: 256 KiB / 256
+chunks, 4 KiB read requests with a 5 ms timeout, and 200 ms maximum queued age.
+The worker takes up to four available chunks per group without waiting for a
+full group. Every complete envelope retains its validation, storage and ACK
+boundary. Arrival timestamps come from the read completing the frame, while
+acceptance timestamps include subsequent queueing and recording. Overflow or
+stale queued work fails acquisition explicitly. `gateway_host_buffer` events
+record occupancy, high-water marks, queue wait and consumed groups; manifests
+pin the host limits. See the [buffering measurements](reports/gateway-usb-buffer-2026-11-03.md)
+for zero observed USB forwarding errors in the bulk-read trial, its passing
+rate/latency checks and separate receiver queue criterion failure.
+
+Receiver state is the last 5 GHz control report, not proof of its current
+channel. Receiver link status becomes stale after 2.5 s without a fresh control
+report; old counters remain visible with report age in tooltips. A short
+planned upload does not by itself mark a receiver offline. Last data age means
+time since host delivery, not sensing-to-host latency.
+
+`Dropped` combines receiver queue evictions/rejections, capture ingress rejection
+and I/O ingress drops. `Expired` is the separate record-lifetime counter.
+It can include receiver-side copies of records already stored on the laptop;
+it is not a unique missing-record count. A receiver ACK-less completion race
+inflated that counter until the upload-admission ownership fix. See the
+[retention investigation](reports/receiver-expiry-2026-11-03.md) for deployment status
+and the distinction between owned-copy and unsent expiry.
+`Send errors` combines firmware submission errors and MAC failures, including
+control traffic; it is not a count of unaccepted host batches. Detailed tooltips
+also show captured/delivered counts, queue peak, sequence/transport/batch gaps,
+diagnostic event loss, gateway envelope counters, USB errors and clock-fit
+uncertainty. Sequence gaps alone still do not establish a cause.
+
+The header distinguishes requested settings from a configured gateway and
+shows sensing/backhaul channels, PHY, slot size, queue capacity and ACK mode.
+The `transport` section of `configs/radio.json` explicitly selects these
+settings independently of the sensing profile.
+
 ## Optimization direction
 
 An optional event-driven upload worker and a gateway ACK-activity-window
@@ -227,14 +285,14 @@ experiment are implemented behind build settings. They leave protocol versions,
 record encoding and normal defaults unchanged. The mixed four-radio screens
 improved rx-1 delivery with the worker but did not qualify throughput; fewer
 gateway ACK failures alone did not improve delivered rate. See
-[burst/ACK measurements and limits](espnow-burst-ack-2026-11-02.md).
+[burst/ACK measurements and limits](reports/espnow-burst-ack-2026-11-02.md).
 
 Larger 80/100/125 ms windows and higher per-turn record limits are separate,
 explicit experiments requested to amortize switching overhead. A paced
 single-receiver comparison improved delivery but stayed below 50 records/s;
 four-radio results are not inferred. A timing-only model displays one-owner
 grants and lost-return suspension without generating CSI. See
-[bulk-window results and model assumptions](espnow-bulk-timing-2026-11-02.md).
+[bulk-window results and model assumptions](reports/espnow-bulk-timing-2026-11-02.md).
 
 Decision (1 November 2026): retain the current gateway/2.4 GHz host-acceptance
 ACK path and prioritize small, measured changes. Earlier next-grant announcement,
@@ -242,7 +300,7 @@ bounded ACK polls and faster return-notice retry are implemented; switching
 reserves and qualification criteria remain intact. A callback-based send-wait
 experiment was reverted after a regressive screen. The matched single-receiver
 pair improved delivery/median latency but did not shorten observed blank periods
-or pass qualification. See [the incremental test report](espnow-incremental-2026-11-01.md).
+or pass qualification. See [the incremental test report](reports/espnow-incremental-2026-11-01.md).
 
 Deferred fallback: route processor acceptance ACKs through transmitter USB and
 then 5 GHz sensing/control packets, allowing receivers to await acceptance on
@@ -256,27 +314,17 @@ single-receiver probe alone does not establish that ceiling.
 
 ```sh
 uv sync --extra radio
-uv run csi-viewer --port <transmitter-usb> --gateway-port <gateway-usb> \
-  --receiver-config data/interim/gateway/inventory.json \
-  --radio-profile configs/radio/profiles/indonesia_5g_ch44_80hz.json
-
-uv run fall-collection --port <transmitter-usb> --gateway-port <gateway-usb> \
-  --receiver-config data/interim/gateway/inventory.json \
-  --radio-profile configs/radio/profiles/indonesia_5g_ch44_80hz.json
-
-uv run csi-gateway-benchmark --mode qualify \
-  --port <transmitter-usb> --gateway-port <gateway-usb> \
-  --receiver-config data/interim/gateway/inventory.json \
-  --radio-profile configs/radio/profiles/indonesia_5g_ch44_80hz.json \
-  --warmup 30 --seconds 300
+uv run csi-viewer
+uv run fall-collection
+uv run csi-gateway-benchmark
 ```
 
 Start with `--mode probe --warmup 5 --seconds 30` and a verified one-receiver
 inventory to measure switching and byte integrity. Verify recovery within the
-50 ms slot, actual send completion, ACK/expiry behavior and post-return CSI before
+configured slot, actual send completion, ACK/expiry behavior and post-return CSI before
 attempting full qualification. Do not change settings automatically if it fails.
 
-Four-receiver qualification requires at least 50 valid timely records/s per
+Four-receiver qualification defaults to at least 80 valid timely records/s per
 receiver over the entire 300 s measurement and at least 99% of all delivered
 records below one second. Delay includes clock uncertainty conservatively.
 Report one-second counts and longest gaps, not only the mean. Queue stability
@@ -299,5 +347,5 @@ interlock and timing guards are retained. A sustained paced single receiver
 exceeded the 80-record/s average target with stable queues in ACK-less mode;
 acknowledged mode failed queue growth. Four-receiver qualification and complete
 timing evidence remain open. Defaults and original applications were restored.
-See [the full throughput report](espnow-throughput-2026-11-02.md) before deploying
+See [the full throughput report](reports/espnow-throughput-2026-11-02.md) before deploying
 experimental settings to the four registered receivers.

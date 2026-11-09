@@ -139,15 +139,11 @@ def test_phase_change_ignores_always_nan_null_subcarrier():
     """Null/DC tones stay NaN but must not trigger an all-NaN median warning."""
 
     timestamps = np.array([0.0, 0.1, 0.2, 0.8])
-    phases = np.array(
-        [[0.4, np.nan], [0.5, np.nan], [0.6, np.nan], [1.0, np.nan]]
-    )
+    phases = np.array([[0.4, np.nan], [0.5, np.nan], [0.6, np.nan], [1.0, np.nan]])
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        changed = phase_change_from_baseline(
-            phases, timestamps, window_seconds=2.0
-        )
+        changed = phase_change_from_baseline(phases, timestamps, window_seconds=2.0)
 
     assert not [item for item in caught if "All-NaN" in str(item.message)]
     assert isclose(changed[2, 0], 0.1, abs_tol=1e-9)
@@ -158,15 +154,80 @@ def test_phase_change_all_nan_baseline_window_stays_nan_without_warning():
     """An unusable baseline window yields NaN phase change, not a warning."""
 
     timestamps = np.array([0.0, 0.1, 1.0])
-    phases = np.array(
-        [[np.nan, np.nan], [np.nan, np.nan], [1.0, 2.0]]
-    )
+    phases = np.array([[np.nan, np.nan], [np.nan, np.nan], [1.0, 2.0]])
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        changed = phase_change_from_baseline(
-            phases, timestamps, window_seconds=2.0
-        )
+        changed = phase_change_from_baseline(phases, timestamps, window_seconds=2.0)
 
     assert not [item for item in caught if "All-NaN" in str(item.message)]
     assert np.isnan(changed).all()
+
+
+def test_ltf_phase_preparation_avoids_per_tone_numpy_scalar_calls(monkeypatch):
+    from fall_detection.radio.preprocessing.phase import LtfBlock
+
+    original = np.angle
+    scalar_calls = []
+
+    def angle(values, *args, **kwargs):
+        if np.ndim(values) == 0:
+            scalar_calls.append(values)
+        return original(values, *args, **kwargs)
+
+    csi = _synthetic_he20()
+    expected = np.angle(np.asarray(csi))
+    monkeypatch.setattr(np, "angle", angle)
+    block = LtfBlock("HE-LTF", csi, HE20_SLOT_INDICES, HE20_VALID_SUBCARRIERS)
+    mask = np.asarray([index in HE20_VALID_SUBCARRIERS for index in HE20_SLOT_INDICES])
+    np.testing.assert_allclose(
+        np.asarray(block.raw_phases)[mask], expected[mask], atol=1e-15
+    )
+    assert np.isnan(np.asarray(block.raw_phases)[~mask]).all()
+    assert scalar_calls == [], "preview must not dispatch a NumPy operation per tone"
+
+
+def test_ltf_vector_views_match_scalar_reference_for_masked_and_nonfinite_samples():
+    from cmath import phase
+    from math import isfinite
+    from fall_detection.radio.preprocessing.phase import LtfBlock
+
+    csi = (
+        complex(4, 0),
+        complex(3, 0),
+        complex(0, 4),
+        complex(-4, -0.0),
+        complex(float("nan"), 0),
+        complex(float("inf"), 1),
+        complex(20, -10),
+    )
+    indices = tuple(range(len(csi)))
+    invalid = (False, False, True, False, False, False, False)
+    valid = frozenset(range(6))
+    expected_amplitudes, expected_phases = [], []
+    for index, value in enumerate(csi):
+        amplitude = abs(value)
+        usable = (
+            not invalid[index]
+            and isfinite(value.real)
+            and isfinite(value.imag)
+            and amplitude > 0
+            and amplitude >= 4
+            and index in valid
+        )
+        expected_amplitudes.append(amplitude if isfinite(amplitude) else float("nan"))
+        expected_phases.append(phase(value) if usable else float("nan"))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        block = LtfBlock("test", csi, indices, valid, invalid)
+    np.testing.assert_allclose(block.amplitudes, expected_amplitudes, equal_nan=True)
+    np.testing.assert_allclose(
+        block.raw_phases, expected_phases, atol=1e-15, equal_nan=True
+    )
+
+
+def test_empty_ltf_views_remain_empty():
+    from fall_detection.radio.preprocessing.phase import LtfBlock
+
+    block = LtfBlock("empty", (), (), frozenset())
+    assert block.amplitudes == block.raw_phases == block.calibrated_phases == ()

@@ -38,10 +38,10 @@ class PhaseSignal:
     skipped_layout_rows: int
 
 
-def load_phase_signal(
+def load_capture_packets(
     session_dir: str | Path, attempt_id: str, receiver_id: str
-) -> PhaseSignal:
-    """Load and calibrate sensing-link CSI for one attempt and receiver.
+) -> pd.DataFrame:
+    """Load all CSI rows with validated timing and recording identifiers.
 
     Uses the canonical LTF decoder and its amplitude/physical-slot masks.
     BLE captures use their validated mapped enqueue-time sidecar. USB receiver
@@ -55,8 +55,9 @@ def load_phase_signal(
         receiver_id: Receiver directory identifier such as ``"rx-1"``.
 
     Returns:
-        Phase matrices in ascending physical subcarrier order and seconds
-        relative to the attempt's recorded start.
+        Packet rows, including non-sensing packets, on the host event clock.
+        Raw CSV payloads and flags remain unchanged. Capture time is distinct
+        from delivery time; ``time_source`` identifies any USB fallback.
 
     Raises:
         ValueError: Identity, CSV alignment, payload, or timeline is invalid,
@@ -86,15 +87,18 @@ def load_phase_signal(
     receiver = directory / "receivers" / receiver_id
     csi = pd.read_csv(receiver / "csi.csv")
     timing = pd.read_csv(receiver / "radio_timing.csv")
+    csi["source_row"] = np.arange(len(csi), dtype=np.int64)
     if len(csi) != len(timing) or not np.array_equal(csi["id"], timing["sequence"]):
         raise ValueError("CSI and radio timing rows do not align by sequence")
     if not np.array_equal(csi["local_timestamp"], timing["rx_radio_timestamp_us"]):
         raise ValueError("CSI and radio timing receiver timestamps do not align")
+    if csi.empty:
+        return csi
     ble_path = receiver / "gateway_timing.jsonl"
     if not ble_path.is_file():
         ble_path = receiver / "ble_timing.jsonl"
     if ble_path.is_file():
-        ble = pd.read_json(ble_path, lines=True)
+        ble = pd.read_json(ble_path, lines=True, dtype={"run_id": str})
         if (
             len(ble) != len(timing)
             or not ble["schema_version"].eq(1).all()
@@ -108,6 +112,9 @@ def load_phase_signal(
             raise ValueError("BLE attempt mixes transmitter epochs")
         timing["capture_host_monotonic_ns"] = ble["capture_host_monotonic_ns"]
         timing["capture_clock_uncertainty_us"] = ble["clock_uncertainty_us"]
+        for name in ("run_id", "transmitter_boot_id", "receiver_boot_id"):
+            if name in ble:
+                timing[name] = ble[name].astype(str)
         # Transport delivery can reorder records. Sort derived views only.
         order = timing["capture_host_monotonic_ns"].sort_values(kind="stable").index
         csi, timing = csi.loc[order], timing.loc[order]
@@ -122,25 +129,105 @@ def load_phase_signal(
     )
     if not transmitter:
         raise ValueError("Session radio inventory must specify a transmitter MAC")
-    selected = (
-        csi["type"].eq("CSI_DATA")
-        & csi["mac"].str.lower().eq(transmitter)
-        & csi["sig_mode"].eq(4)
-        & csi["mcs"].eq(0)
-        & csi["bandwidth"].eq(0)
-    )
-    csi, timing = csi.loc[selected], timing.loc[selected]
-    if csi.empty:
-        raise ValueError(f"No sensing-link CSI in {attempt_id}/{receiver_id}")
     origin = int(attempt["started_monotonic_ns"])
     times, time_source, uncertainty = _event_times(
         timing, receiver / "usb_clock_sync.csv", origin
     )
+    rate = environment.get("nominal_rate_hz") or environment.get(
+        "radio_profile", {}
+    ).get("nominal_rate_hz")
+    if rate is None or float(rate) <= 0:
+        raise ValueError("A positive nominal sampling rate is required")
+    packets = csi.reset_index(drop=True).copy()
+    for name in timing:
+        if name not in packets:
+            packets[name] = timing[name].to_numpy()
+    packets["capture_time_ns"] = (
+        timing["capture_host_monotonic_ns"].to_numpy(dtype=np.int64)
+        if "capture_host_monotonic_ns" in timing
+        else origin + np.rint(times * 1e9).astype(np.int64)
+    )
+    packets["time_seconds"] = times
+    packets["time_source"] = time_source
+    packets["clock_uncertainty_us"] = (
+        timing["capture_clock_uncertainty_us"].to_numpy()
+        if "capture_clock_uncertainty_us" in timing
+        else uncertainty
+    )
+    packets["attempt_id"] = attempt_id
+    packets["receiver_id"] = receiver_id
+    packets["attempt_started_monotonic_ns"] = origin
+    packets["attempt_ended_monotonic_ns"] = int(attempt["ended_monotonic_ns"])
+    packets["nominal_rate_hz"] = float(rate)
+    packets["is_sensing"] = (
+        packets["type"].eq("CSI_DATA")
+        & packets["mac"].str.lower().eq(transmitter)
+        & packets["sig_mode"].eq(4)
+        & packets["mcs"].eq(0)
+        & packets["bandwidth"].eq(0)
+    )
+    return packets
+
+
+def load_phase_signal(
+    session_dir: str | Path, attempt_id: str, receiver_id: str
+) -> PhaseSignal:
+    """Load and calibrate sensing-link CSI using validated capture timing.
+
+    Args:
+        session_dir: Schema-2 raw session directory.
+        attempt_id: Trial/attempt identifier such as ``001/01``.
+        receiver_id: Receiver directory identifier such as ``rx-1``.
+
+    Returns:
+        Canonically decoded phase matrices on the recorded event timeline.
+    """
+    return phase_signal_from_packets(
+        load_capture_packets(session_dir, attempt_id, receiver_id)
+    )
+
+
+def phase_signal_from_packets(packets: pd.DataFrame) -> PhaseSignal:
+    """Decode one attempt/receiver packet DataFrame without reading raw files.
+
+    Args:
+        packets: Rows from ``load_capture_packets`` or the session Parquet
+            export. I/Q arrays retain raw slot order and invalid-slot flags.
+
+    Returns:
+        Sensing-link matrices using the same masks and calibration as CSV input.
+
+    Raises:
+        ValueError: Multiple recordings, invalid payloads, or no sensing rows.
+    """
+    if packets.empty or any(
+        packets[name].nunique(dropna=False) != 1
+        for name in ("attempt_id", "receiver_id", "attempt_started_monotonic_ns")
+    ):
+        raise ValueError("Expected one nonempty attempt/receiver recording")
+    csi = packets.loc[packets["is_sensing"]]
+    first = packets.iloc[0]
+    attempt_id, receiver_id = first["attempt_id"], first["receiver_id"]
+    origin = int(first["attempt_started_monotonic_ns"])
+    if csi.empty:
+        raise ValueError(f"No sensing-link CSI in {attempt_id}/{receiver_id}")
+    times = csi["time_seconds"].to_numpy(dtype=float)
+    time_source = str(first["time_source"])
+    bounds = pd.to_numeric(csi["clock_uncertainty_us"], errors="coerce")
+    uncertainty = float(bounds.max()) if bounds.notna().all() else None
+    return _decode_phase_rows(csi, times, origin, first, uncertainty, time_source)
+
+
+def _decode_phase_rows(csi, times, origin, first, uncertainty, time_source):
+    attempt_id, receiver_id = first["attempt_id"], first["receiver_id"]
     values, raw, calibrated, slopes, offsets, retained = [], [], [], [], [], []
     subcarriers = None
     skipped = 0
     for position, row in enumerate(csi.itertuples(index=False)):
-        payload = np.asarray(json.loads(row.data), dtype=np.float64)
+        if hasattr(row, "data"):
+            payload = np.asarray(json.loads(row.data), dtype=np.float64)
+        else:
+            payload = np.column_stack((row.csi_q, row.csi_i)).ravel()
         if payload.ndim != 1 or payload.size != int(row.len) or payload.size % 2:
             raise ValueError(f"Invalid CSI payload length in packet {row.id}")
         complex_values = payload[1::2] + 1j * payload[0::2]
@@ -183,11 +270,6 @@ def load_phase_signal(
         raise ValueError(
             "Mapped packet times run backwards; inspect clock/timing integrity"
         )
-    rate = environment.get("nominal_rate_hz") or environment.get(
-        "radio_profile", {}
-    ).get("nominal_rate_hz")
-    if rate is None or float(rate) <= 0:
-        raise ValueError("A positive nominal sampling rate is required")
     return PhaseSignal(
         attempt_id,
         receiver_id,
@@ -199,8 +281,8 @@ def load_phase_signal(
         np.asarray(slopes),
         np.asarray(offsets),
         origin,
-        int(attempt["ended_monotonic_ns"]),
-        float(rate),
+        int(first["attempt_ended_monotonic_ns"]),
+        float(first["nominal_rate_hz"]),
         time_source,
         uncertainty,
         skipped,

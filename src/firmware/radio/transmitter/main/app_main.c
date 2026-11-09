@@ -28,6 +28,8 @@
 #include "radio_diagnostics.h"
 #include "gateway_transmitter.h"
 #include "gateway_io.h"
+#include "wireless_link.h"
+#include "uart_reference.h"
 
 #include "serial_frame.h"
 
@@ -60,7 +62,16 @@ static volatile bool s_radio_active;
 static int8_t s_tx_power_quarter_dbm = -1;
 static uint8_t s_radio_mac[6];
 static SemaphoreHandle_t s_control_write_mutex;
+static SemaphoreHandle_t s_control_mutex;
+static bool s_reply_wireless;
+static volatile bool s_active_wireless;
+static bool s_reply_uart;
+static volatile bool s_active_uart;
 static bool usb_control_write(uint8_t type, const uint8_t *payload, size_t length);
+static bool transmitter_output(uint8_t type,const uint8_t *p,size_t n)
+{return s_active_uart?uart_ref_send(type,p,n):(s_active_wireless?wl_send(type,p,n):usb_control_write(type,p,n));}
+static bool control_reply(uint8_t type,const uint8_t *p,size_t n)
+{return s_reply_uart?uart_ref_send(type,p,n):(s_reply_wireless?wl_send(type,p,n):usb_control_write(type,p,n));}
 
 static void stats_add(uint32_t *counter, uint32_t amount)
 {
@@ -83,6 +94,7 @@ static void transmitter_stats_task(void *arg)
     (void)arg;
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(1000));
+        if(s_active_uart&&!gw_tx_running())continue;
         const transmitter_stats_t stats = stats_snapshot();
         /* ROM printing can reach USB even with the secondary console disabled.
          * Every writer on the transmitter reference link must use the framing mutex. */
@@ -97,7 +109,7 @@ static void transmitter_stats_task(void *arg)
             stats.asynchronous_successes,
             stats.asynchronous_failures);
         if (length > 0 && (size_t)length < sizeof(line)) {
-            usb_control_write(CSI_SERIAL_TYPE_TRANSMITTER_STATS,
+            transmitter_output(CSI_SERIAL_TYPE_TRANSMITTER_STATS,
                               (const uint8_t *)line, (size_t)length);
         }
     }
@@ -163,7 +175,7 @@ static bool usb_control_write(uint8_t type, const uint8_t *payload, size_t lengt
 static void usb_status(void)
 {
     /* usb_status() is called only by the USB control task. */
-    static char payload[768];
+    static char payload[1400];
     const char *target =
 #if CONFIG_IDF_TARGET_ESP32C5
         "esp32c5";
@@ -187,7 +199,8 @@ static void usb_status(void)
         "\"radio_mac\":\"" MACSTR "\",\"mac_failures\":%" PRIu32 ","
         "\"sensing_phy\":\"%s\","
         "\"board\":\"%s\",\"antenna\":\"%s\","
-        "\"sensing_version\":4,"
+        "\"sensing_version\":4,\"wireless_version\":2,\"wireless_paired\":%s,\"wireless_ready\":%s,\"wireless_fault\":%s,\"wireless_failure_reason\":\"%s\",\"wireless_debug\":\"%s\",\"free_heap_bytes\":%lu,\"minimum_free_heap_bytes\":%lu,"
+        "\"uart_reference\":%s,\"uart_fault\":%s,\"uart_errors\":%lu,"
         "\"peer_retry_backoff_ms\":%u,\"rx_control_drops\":%" PRIu32 ","
         "\"tx\":{\"attempts\":%lu,\"imm_err\":%lu,\"ok\":%lu,\"fail\":%lu}}",
         target, MAC2STR(s_transmitter_mac), (unsigned)CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ, s_profile.profile_id,
@@ -197,24 +210,71 @@ static void usb_status(void)
         MAC2STR(s_radio_mac), busy_skips,
         s_sensing_phy,
         csi_board_name(), csi_board_antenna(),
+        wl_paired()?"true":"false",wl_ready()?"true":"false",wl_faulted()?"true":"false",wl_failure_reason(),wl_debug(),
+        (unsigned long)esp_get_free_heap_size(),(unsigned long)esp_get_minimum_free_heap_size(),
+        uart_ref_enabled()?"true":"false",uart_ref_faulted()?"true":"false",(unsigned long)uart_ref_errors(),
         0U, backoff_skips,
         (unsigned long)tx_stats.attempts,
         (unsigned long)tx_stats.immediate_errors,
         (unsigned long)tx_stats.asynchronous_successes,
         (unsigned long)tx_stats.asynchronous_failures);
     if (length > 0 && (size_t)length < sizeof(payload))
-        usb_control_write(CSI_SERIAL_TYPE_DEVICE_STATUS, (const uint8_t *)payload, (size_t)length);
+        control_reply(CSI_SERIAL_TYPE_DEVICE_STATUS, (const uint8_t *)payload, (size_t)length);
 }
 
 static void espnow_init(void);
+static void delayed_restart(void *delay)
+{vTaskDelay(pdMS_TO_TICKS((uintptr_t)delay));esp_restart();}
 
 /* Profile changes restart the scheduler and reload the fixed inventory. */
 static void apply_staged_profile(void)
 {
-    usb_control_write(CSI_SERIAL_TYPE_PROFILE_COMMIT_ACK, (const uint8_t *)"ok", 2);
-    vTaskDelay(pdMS_TO_TICKS(50));
-    esp_restart();
+    control_reply(CSI_SERIAL_TYPE_PROFILE_COMMIT_ACK, (const uint8_t *)"ok", 2);
+    if(xTaskCreate(delayed_restart,"csi_restart",2048,(void *)(uintptr_t)(s_reply_wireless?750:(s_reply_uart?250:50)),4,NULL)!=pdPASS)abort();
 }
+
+static void control_request(uint8_t type,const uint8_t *payload,size_t size,bool wireless,bool uart)
+{
+    if(xSemaphoreTake(s_control_mutex,pdMS_TO_TICKS(100))!=pdTRUE)return;
+    s_reply_wireless=wireless;
+    s_reply_uart=uart;
+    /* Discovery remains available for USB recovery. A second transport cannot
+     * refresh a running lease, replace its configuration, or take ownership. */
+    if(gw_tx_running()&&type!=CSI_SERIAL_TYPE_DISCOVER_REQUEST&&
+       (wireless!=s_active_wireless||uart!=s_active_uart)){
+        control_reply(GW_RESPONSE,(const uint8_t *)"error",5);
+        xSemaphoreGive(s_control_mutex);return;
+    }
+    if(type==WL_USB_PAIR&&!wireless&&!uart){
+        bool ok=wl_pair(payload,size);control_reply(WL_USB_PAIR_ACK,(const uint8_t *)(ok?"ok":"error"),ok?2:5);
+        if(ok){vTaskDelay(pdMS_TO_TICKS(100));esp_restart();}
+    }else if(type==CSI_SERIAL_TYPE_DISCOVER_REQUEST){usb_status();}
+    else if(type==GW_CONTROL){
+        uint8_t response[64];size_t n=gw_tx_control(payload,size,response);
+        if(size==GW_CONFIG_SIZE&&n==2&&!memcmp(response,"ok",2)){
+            s_active_wireless=wireless;s_active_uart=uart;
+        }
+        if(n==2&&!memcmp(response,"ok",2)){
+            wl_session_active(gw_tx_running());
+            uart_ref_session_active(s_active_uart&&gw_tx_running());
+        }
+        control_reply(GW_RESPONSE,response,n);
+    }else if(type==CSI_SERIAL_TYPE_PROFILE_STAGE){
+        csi_radio_profile_t staged;
+        bool valid=!gw_tx_running()&&csi_radio_profile_from_json(payload,size,&staged)&&csi_radio_profile_validate(&staged,CONFIG_SOC_WIFI_SUPPORT_5G);
+        if(valid){s_staged_profile=staged;s_profile_staged=true;}
+        control_reply(CSI_SERIAL_TYPE_PROFILE_STAGE_ACK,(const uint8_t *)(valid?"ok":"error"),valid?2:5);
+    }else if(type==CSI_SERIAL_TYPE_PROFILE_COMMIT){
+        if(!gw_tx_running()&&s_profile_staged&&csi_radio_profile_save(&s_staged_profile)){
+            s_profile_staged=false;apply_staged_profile();
+        }else control_reply(CSI_SERIAL_TYPE_PROFILE_COMMIT_ACK,(const uint8_t *)"error",5);
+    }
+    xSemaphoreGive(s_control_mutex);
+}
+static void wireless_request(uint8_t type,const uint8_t *p,size_t n,void *context)
+{(void)context;if(type)control_request(type,p,n,true,false);}
+static void uart_request(uint8_t type,const uint8_t *p,size_t n,void *context)
+{(void)context;if(type)control_request(type,p,n,false,true);}
 
 static void usb_control_task(void *arg)
 {
@@ -239,10 +299,6 @@ static void usb_control_task(void *arg)
         if (raw_length < CSI_SERIAL_HEADER_SIZE + CSI_SERIAL_CRC_SIZE ||
             memcmp(raw, CSI_SERIAL_MAGIC, 4) != 0 || raw[4] != CSI_SERIAL_VERSION) continue;
         const uint16_t payload_length = ((uint16_t)raw[6] << 8) | raw[7];
-        if (raw[5] == CSI_SERIAL_TYPE_DISCOVER_REQUEST) {
-            usb_status();
-            continue;
-        }
         if (payload_length > CSI_SERIAL_MAX_PAYLOAD ||
             raw_length != CSI_SERIAL_HEADER_SIZE + payload_length + CSI_SERIAL_CRC_SIZE ||
             csi_serial_crc32(raw, CSI_SERIAL_HEADER_SIZE + payload_length) !=
@@ -250,37 +306,7 @@ static void usb_control_task(void *arg)
                  (uint32_t)raw[9 + payload_length] << 16 |
                  (uint32_t)raw[10 + payload_length] << 8 |
                  raw[11 + payload_length])) continue;
-        if (raw[5] == GW_CONTROL) {
-            uint8_t response[64];
-            size_t response_length = gw_tx_control(raw + CSI_SERIAL_HEADER_SIZE, payload_length, response);
-            usb_control_write(GW_RESPONSE, response, response_length);
-            continue;
-        }
-        if (raw[5] == CSI_SERIAL_TYPE_PROFILE_STAGE) {
-            csi_radio_profile_t staged;
-            const bool valid = csi_radio_profile_from_json(
-                raw + CSI_SERIAL_HEADER_SIZE, payload_length, &staged) &&
-                csi_radio_profile_validate(&staged,
-#if CONFIG_SOC_WIFI_SUPPORT_5G
-                                           true
-#else
-                                           false
-#endif
-                                           );
-            if (valid) {
-                s_staged_profile = staged;
-                s_profile_staged = true;
-                usb_control_write(CSI_SERIAL_TYPE_PROFILE_STAGE_ACK, (const uint8_t *)"ok", 2);
-            } else usb_control_write(CSI_SERIAL_TYPE_PROFILE_STAGE_ACK, (const uint8_t *)"error", 5);
-        } else if (raw[5] == CSI_SERIAL_TYPE_PROFILE_COMMIT) {
-            if (s_profile_staged && csi_radio_profile_save(&s_staged_profile)) {
-                s_profile_staged = false;
-                apply_staged_profile();
-                usb_control_write(CSI_SERIAL_TYPE_PROFILE_COMMIT_ACK, (const uint8_t *)"ok", 2);
-            } else {
-                usb_control_write(CSI_SERIAL_TYPE_PROFILE_COMMIT_ACK, (const uint8_t *)"error", 5);
-            }
-        }
+        control_request(raw[5],raw+CSI_SERIAL_HEADER_SIZE,payload_length,false,false);
     }
 }
 
@@ -288,7 +314,10 @@ static void usb_control_init(void)
 {
     s_control_write_mutex = xSemaphoreCreateMutex();
     if (!s_control_write_mutex) abort();
-    gw_tx_init(&s_profile, usb_control_write);
+    s_control_mutex=xSemaphoreCreateMutex();if(!s_control_mutex)abort();
+    gw_tx_init(&s_profile, transmitter_output);
+    wl_init(0,s_transmitter_mac,wireless_request,NULL);
+    uart_ref_init(uart_request,NULL);
     if (!usb_serial_jtag_is_driver_installed()) {
         usb_serial_jtag_driver_config_t config = {
             .tx_buffer_size = CSI_SERIAL_MAX_FRAME_SIZE * 4,
@@ -359,7 +388,10 @@ static void transmitter_task(void *arg)
     uint64_t deadline = 0;
     for (;;) {
         gw_config_t config; uint32_t boot, generation;
+        if(s_active_uart&&uart_ref_faulted()&&gw_tx_running())gw_tx_reference_failure();
         if (!gw_tx_snapshot(&config, &boot, &generation)) {
+            wl_session_active(false);
+            uart_ref_session_active(false);
             if (s_radio_active) {
                 ESP_ERROR_CHECK(esp_now_deinit());
                 ESP_ERROR_CHECK(esp_wifi_stop());

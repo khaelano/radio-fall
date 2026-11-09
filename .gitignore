@@ -27,6 +27,11 @@ src/*.egg-info/
 # Codex local build and validation artifacts
 .codex-build/
 .codex-finalizer/
+.jupyter-agent-bridge/
+
+# Rust build output (Cargo.lock is retained for reproducible native builds)
+**/target/
+src/fall_detection/_radio_native*.so
 
 # Re-include files ignored by the global gitignore (/home/khaelano/.gitignore)
 !AGENTS.md

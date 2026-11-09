@@ -1,10 +1,10 @@
 """Complete ESP-NOW/USB envelopes and host acceptance acknowledgements."""
 
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import struct
 import zlib
-from .wire import decode_csi_packet
+from .wire import DecodedCsiPacket, decode_csi_packet
 
 HEADER = struct.Struct("!4sBBHQIII6sHI")
 ACK_HEADER = struct.Struct("!4sQIII6s")
@@ -33,9 +33,30 @@ class GatewayBatch:
     batch_id: int
     receiver_mac: str
     payload: bytes
+    _decoded_packet: DecodedCsiPacket | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _encoded: bytes | None = field(default=None, init=False, repr=False, compare=False)
+
+    @property
+    def decoded_packet(self) -> DecodedCsiPacket:
+        """Return the validated immutable payload without repeating decoding."""
+        if self._decoded_packet is None:
+            packet = decode_csi_packet(self.payload)
+            if (
+                packet.boot_id != self.receiver_boot_id
+                or packet.batch_sequence != self.batch_id
+                or not packet.records
+                or any(r.receiver_mac != self.receiver_mac for r in packet.records)
+            ):
+                raise ValueError("gateway and nested CSI identities disagree")
+            object.__setattr__(self, "_decoded_packet", packet)
+        return self._decoded_packet
 
     def encode(self) -> bytes:
         """Encode without fragmentation; maximum includes the entire envelope."""
+        if self._encoded is not None:
+            return self._encoded
         from ..espnow_config import mac_bytes
 
         p = (
@@ -72,16 +93,11 @@ class GatewayBatch:
         if len(data) != size + length + 4:
             raise ValueError("invalid payload length")
         payload = data[size:-4]
-        packet = decode_csi_packet(payload)
         receiver = ":".join(f"{b:02x}" for b in mac)
-        if (
-            packet.boot_id != rx
-            or packet.batch_sequence != batch
-            or not packet.records
-            or any(r.receiver_mac != receiver for r in packet.records)
-        ):
-            raise ValueError("gateway and nested CSI identities disagree")
-        return cls(run, tx, rx, batch, receiver, payload)
+        decoded = cls(run, tx, rx, batch, receiver, payload)
+        _ = decoded.decoded_packet
+        object.__setattr__(decoded, "_encoded", data)
+        return decoded
 
     @property
     def identity(self) -> tuple:

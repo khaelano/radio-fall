@@ -1,22 +1,23 @@
 {
   "schema_version": 1,
   "family_id": "stand-to-fall",
-  "title": "Stand to fall",
+  "title": "df · Stand to fall",
   "activity_label": "stand_to_fall",
-  "instruction_template": "Start standing facing {start_direction}, then perform a {end_direction} fall.",
+  "instruction_template": "Mattress only. Start standing facing {start_direction}, then perform a {end_direction} fall.",
   "start_directions": [
     "front",
-    "left",
     "right",
-    "back"
+    "back",
+    "left"
   ],
   "end_directions": [
     "front",
-    "left",
     "right",
-    "back"
+    "back",
+    "left"
   ],
   "repetitions": 2,
   "direction_frame": "participant_relative",
-  "safety_note": "Use the crash mat and a spotter; perform only a practiced, controlled fall."
+  "safety_note": "Use the crash mat and a spotter; perform only a practiced, controlled fall.",
+  "equipment": "mattress"
 }

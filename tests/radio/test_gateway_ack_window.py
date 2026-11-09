@@ -40,6 +40,9 @@ static inline int csi_board_init(void){return 0;}
 static inline int nvs_flash_init(void){return 0;}
 static inline int esp_read_mac(uint8_t *m,int type){(void)m;(void)type;return 0;}
 static inline uint32_t esp_random(void){return 1;}
+static inline void esp_restart(void){}
+static inline uint32_t esp_get_free_heap_size(void){return 50000;}
+static inline uint32_t esp_get_minimum_free_heap_size(void){return 45000;}
 static inline int usb_serial_jtag_driver_install(const usb_serial_jtag_driver_config_t *c){(void)c;return 0;}
 static inline int esp_netif_init(void){return 0;}
 static inline int esp_event_loop_create_default(void){return 0;}
@@ -67,6 +70,7 @@ static inline int xTaskCreate(void (*f)(void *),const char *n,int s,void *a,int 
         "esp_netif.h",
         "esp_mac.h",
         "esp_random.h",
+        "esp_system.h",
         "nvs_flash.h",
         "freertos/task.h",
     ]:
@@ -78,7 +82,17 @@ static inline int xTaskCreate(void (*f)(void *),const char *n,int s,void *a,int 
         + str(root / "src/firmware/radio/gateway/main/app_main.c")
         + '"\n'
         + r"""
-static bool sender_idle=true;static uint8_t last_sent[1400];static unsigned last_size;
+static bool sender_idle=true,usb_accept=true;static uint8_t last_sent[1400];static unsigned last_size;
+void wl_init(uint8_t r,const uint8_t m[6],wl_emit_t e,void *c){(void)r;(void)m;(void)e;(void)c;}
+bool wl_pair(const uint8_t *p,size_t n){(void)p;(void)n;return false;}
+bool wl_send(uint8_t t,const uint8_t *p,size_t n){(void)t;(void)p;(void)n;return false;}
+bool wl_paired(void){return false;}bool wl_ready(void){return false;}bool wl_faulted(void){return false;}
+const char *wl_failure_reason(void){return "disabled";}
+const char *wl_debug(void){return "disabled";}
+uint32_t wl_drops(void){return 0;}uint32_t wl_peer_changes(void){return 0;}
+void wl_session_active(bool a){(void)a;}
+void wl_host_failure(void){}
+void wl_expect_peer_restart(void){}
 void gw_io_init(void){}
 QueueHandle_t gw_incoming(void){return (void *)1;}
 uint32_t gw_io_drops(void){return 0;}
@@ -87,9 +101,12 @@ bool gw_send_idle(void){return sender_idle;}
 void gw_peer(const uint8_t *m,bool h){(void)m;(void)h;}
 bool gw_peer_set_mcs(const uint8_t *m,uint8_t rate){(void)m;return rate<=3;}
 bool gw_send(const uint8_t *m,const void *p,size_t n,uint32_t w){(void)m;(void)w;if(!sender_idle)return false;++sends;memcpy(last_sent,p,n);last_size=n;return true;}
-bool gw_usb_write(uint8_t t,const uint8_t *p,size_t n){(void)t;(void)p;(void)n;return true;}
+bool gw_usb_write(uint8_t t,const uint8_t *p,size_t n){(void)t;(void)p;(void)n;return usb_accept;}
 bool gw_usb_read(uint8_t *t,uint8_t *p,size_t *n){(void)t;(void)p;(void)n;return false;}
 int main(int argc,char **argv){
+ usb_accept=false;relay_used=4;assert(relay_flush());
+ configured=true;relay_used=4;assert(!relay_flush());
+ configured=false;usb_accept=true;
  (void)argc;uint8_t raw[108];for(unsigned i=0;i<108;++i){unsigned b;sscanf(argv[1]+2*i,"%2x",&b);raw[i]=b;}
  assert(gw_config_decode(raw,108,&configuration));configured=true;transmitter_boot=11;last_rx_boot[0]=21;
  gw_message_t m={.size=GW_ACK_SIZE};m.source[0]=GW_ACK;memcpy(m.data,"CGAK",4);
@@ -127,6 +144,7 @@ int main(int argc,char **argv){
             "-I",
             str(root / "src/firmware/radio/common/include"),
             str(source),
+            str(root / "src/firmware/radio/common/reference_relay.c"),
             "-o",
             str(exe),
         ],

@@ -15,7 +15,8 @@ pytest.importorskip("pyqtgraph")
 
 from PySide6 import QtCore, QtWidgets
 
-from fall_detection.collection.app import _MetadataDialog, _OperatorWindow
+from fall_detection.collection.views.dialogs import MetadataDialog
+from fall_detection.collection.views.operator import OperatorWindow
 from fall_detection.collection.capture import SessionMetadata
 from fall_detection.collection.controller import (
     HealthSnapshot,
@@ -52,10 +53,10 @@ def _session(tmp_path, block_ids):
     return protocol, controller, snapshot
 
 
-def _window(qt_app, protocol, commands=None):
+def _window(qt_app, protocol, commands=None, *, video_enabled=False):
     state = LiveState(50)
     panel = CsiDashboardPanel(state, fps=24)
-    window = _OperatorWindow(
+    window = OperatorWindow(
         QtCore,
         QtWidgets,
         protocol=protocol,
@@ -64,8 +65,47 @@ def _window(qt_app, protocol, commands=None):
         on_command=(
             commands.append if commands is not None else (lambda command: None)
         ),
+        video_enabled=video_enabled,
     )
     return window
+
+
+def test_operator_window_camera_preview_preserves_aspect_and_clears_on_loss(
+    qt_app, tmp_path,
+):
+    from fall_detection.collection.video import VideoPreviewFrame
+
+    protocol, _controller, _snapshot = _session(tmp_path, ["walk-to-fall"])
+    window = _window(qt_app, protocol, video_enabled=True)
+    window.window.show()
+    qt_app.processEvents()
+    preview = window.camera_preview
+    assert preview.image.text() == "Waiting for camera frames"
+    image = VideoPreviewFrame(64, 48, bytes([255, 0, 0]) * (64 * 48), 100)
+    preview.apply(image, ready=True, detail="video ready")
+    pixmap = preview.image.pixmap()
+    assert not pixmap.isNull()
+    assert pixmap.width() / pixmap.height() == pytest.approx(4 / 3, abs=0.02)
+    assert pixmap.toImage().pixelColor(0, 0).red() == 255
+    preview.apply(None, ready=True, detail="video ready")
+    assert preview.image.pixmap().cacheKey() == pixmap.cacheKey()
+    window.window.resize(1300, 900)
+    qt_app.processEvents()
+    pixmap = preview.image.pixmap()
+    assert pixmap.width() <= preview.image.width()
+    assert pixmap.height() <= preview.image.height()
+    preview.apply(None, ready=False, detail="camera worker stopped")
+    assert preview.image.pixmap().isNull()
+    assert preview.image.text() == "Camera unavailable"
+    assert "camera worker stopped" in preview.status.text()
+    window.window.close()
+
+
+def test_operator_window_omits_preview_without_video(qt_app, tmp_path):
+    protocol, _controller, _snapshot = _session(tmp_path, ["walk-to-fall"])
+    window = _window(qt_app, protocol)
+    assert window.camera_preview is None
+    window.window.close()
 
 
 def _apply(window, snapshot: SessionSnapshot) -> None:
@@ -92,6 +132,29 @@ def test_operator_window_shows_state_scenario_and_queue(qt_app, tmp_path):
     assert window.trial_list.item(0).text().startswith("▶")
     assert window.buttons[OperatorCommand.START_TRIAL].isEnabled()
     assert not window.buttons[OperatorCommand.ACCEPT].isEnabled()
+
+
+def test_operator_window_shows_equipment_grouped_queue_and_setup(qt_app, tmp_path):
+    protocol = select_blocks(
+        load_protocol(PROTOCOL_PATH.with_name("fall_simple.json")),
+        ["walk-to-sit", "sit-to-walk"],
+    )
+    controller = SessionController(protocol, tmp_path, environment=RECEIVER_ENV)
+    controller.start_session(SessionMetadata(participant_id="p01"))
+    snapshot = controller.update_health(HealthSnapshot(radio_live=True))
+    window = _window(qt_app, protocol)
+
+    _apply(window, snapshot)
+    window.show_current_details()
+
+    assert window.trial_list.count() == 64
+    assert window.setup_label.text() == "Setup: chair · chair facing front"
+    assert not window.setup_label.isHidden()
+    assert "chair facing front" in window._detail_windows[0].setup_label.text()
+    for row, trial in enumerate(protocol.trials):
+        assert trial.scenario.title in window.trial_list.item(row).text()
+    window.window.close()
+    controller.dispatch(OperatorCommand.END_SESSION)
 
 
 def test_operator_window_queue_filter_narrows_to_one_block(qt_app, tmp_path):
@@ -177,7 +240,7 @@ def test_operator_window_renders_the_complete_state(qt_app, tmp_path):
 def test_metadata_dialog_defaults_to_every_block(qt_app):
     protocol = load_protocol(PROTOCOL_PATH)
 
-    dialog = _MetadataDialog(QtWidgets, protocol)
+    dialog = MetadataDialog(QtWidgets, protocol)
 
     assert dialog.block_ids() == tuple(block[0] for block in protocol.blocks)
     assert "576 trials" in dialog.total_label.text()

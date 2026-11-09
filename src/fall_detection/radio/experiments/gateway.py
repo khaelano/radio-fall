@@ -11,8 +11,7 @@ import numpy as np
 
 from ..acquisition.gateway_reader import GatewayReceiverManager
 from ..acquisition.clock_sync import ClockSyncEstimate
-from ..espnow_config import EspnowTransportConfig
-from ..profile import load_inventory_and_profile
+from ..settings import add_config_argument, resolve_settings
 
 
 def evaluate(
@@ -289,7 +288,7 @@ def evaluate(
     )
     if not qualification:
         result["note"] = (
-            "A single-receiver probe does not establish four-receiver performance."
+            "A probe does not establish sustained four-receiver qualification."
         )
     return result
 
@@ -302,14 +301,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--mode", choices=("qualify", "probe"), default="qualify")
     parser.add_argument("--port", help="verified C5 transmitter USB path")
+    parser.add_argument(
+        "--transmitter-link", choices=("usb", "ble", "espnow_uart")
+    )
     parser.add_argument("--gateway-port", help="verified C6 gateway USB path")
-    parser.add_argument("--receiver-config", type=Path)
-    parser.add_argument("--radio-profile", type=Path)
-    parser.add_argument("--gateway-config", type=Path)
+    add_config_argument(parser)
     parser.add_argument(
         "--output-dir", type=Path, default=Path("data/experiments/gateway")
     )
-    parser.add_argument("--target-records-s", type=int, choices=(50, 80), default=50)
+    parser.add_argument("--target-records-s", type=int, choices=(50, 80), default=80)
     parser.add_argument("--warmup", type=float, default=30)
     parser.add_argument("--seconds", type=float, default=300)
     args = parser.parse_args(argv)
@@ -322,21 +322,24 @@ def main(argv: list[str] | None = None) -> int:
         )
     root = args.analyze
     if root is None:
-        if not all(
-            (args.receiver_config, args.radio_profile, args.port, args.gateway_port)
-        ):
-            parser.error(
-                "inventory, profile, transmitter port and gateway port are required"
+        try:
+            settings = resolve_settings(args)
+            settings.transport.validate(
+                settings.inventory, settings.profile, require_four=qualification
             )
-        inventory, profile, _ = load_inventory_and_profile(
-            args.receiver_config, args.radio_profile
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
+        if not args.gateway_port or (args.transmitter_link == "usb" and not args.port):
+            parser.error("gateway port is required; USB reference also requires --port")
+        inventory, profile, config = (
+            settings.inventory, settings.profile, settings.transport
         )
-        config = EspnowTransportConfig.load(args.gateway_config)
         manager = GatewayReceiverManager(
             inventory,
             profile,
             args.output_dir,
             transmitter_port=args.port,
+            transmitter_link=args.transmitter_link,
             gateway_port=args.gateway_port,
             config=config,
             require_four=qualification,

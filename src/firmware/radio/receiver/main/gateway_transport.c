@@ -279,6 +279,14 @@ static void retire_unconfirmed_send(void)
     queue_event(11,b->id,b->count,b->attempts);
     b->used=false;unconfirmed_send=NULL;
 }
+static bool upload_sender_ready(void)
+{
+    /* A callback can arrive after the loop-entry retirement check. Retire its
+     * owner here before permitting a new send to replace unconfirmed_send. If
+     * completion arrives during this check, keep the owner until the next turn. */
+    retire_unconfirmed_send();
+    return !unconfirmed_send&&gw_send_idle();
+}
 static void worker(void *arg)
 {
     (void)arg;static gw_message_t message;static capture_t capture;
@@ -337,7 +345,7 @@ static void worker(void *arg)
             now=now_us(); /* Retuning may have consumed part of the upload budget. */
             if(now>=hard_return){state=GW_RETURN;}
             else if(hard_return-now>(uint64_t)config.send_guard_ms*1000&&submitted<config.allowance&&
-                    ((!CONFIG_CSI_GATEWAY_EVENT_UPLOAD&&config.application_ack)||gw_send_idle())){
+                    ((!CONFIG_CSI_GATEWAY_EVENT_UPLOAD&&config.application_ack)||upload_sender_ready())){
                 /* Retrieve acceptance of earlier turns before consuming retry
                  * bandwidth. Rotate to prevent an unreceived batch starving ACKs. */
                 int poll=gw_poll_next(&pending_polls,poll_eligible(),config.outstanding,&poll_cursor);

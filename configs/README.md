@@ -1,10 +1,14 @@
 # Configuration
 
-Keep versioned settings separate from implementations:
+The operational radio setup lives in one file:
 
-- `collection/` contains synchronized session and recording settings.
-- `radio/` contains CSI acquisition and radio-model settings.
-- `experiments/` contains named evaluation conditions.
+- [`radio.json`](radio.json) contains the verified hardware inventory, stable
+  USB paths, sensing profile, upload policy and reference link. All live radio
+  commands load it by default; `--config` selects another setup.
+- `collection/` contains activity protocols and scenario definitions, selected
+  per collection session with `--protocol`.
+- `experiments/` is reserved for named evaluation conditions.
 
-Do not place machine-specific paths, credentials, or participant identifiers
-in committed configuration files.
+See the [configuration guide](../docs/radio-configuration.md). The checked-in
+by-id USB paths identify the current boards; override connection paths on another
+host. Keep credentials, pairing keys and participant identifiers out of these files.

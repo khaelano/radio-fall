@@ -6,6 +6,9 @@
 #error "Gateway firmware requires ESP32-C6"
 #endif
 #include "gateway_io.h"
+#include "wireless_link.h"
+#include "reference_relay.h"
+#include "esp_system.h"
 #include "radio_board.h"
 #include "esp_event.h"
 #include "esp_netif.h"
@@ -29,11 +32,61 @@ static QueueHandle_t commands;
 static uint8_t cache[128][GW_ACK_SIZE];static unsigned cache_next;
 static uint32_t last_rx_boot[4];
 static uint64_t last_seen[4];
+static uint8_t relay_usb[WL_PAYLOAD+1];
+static size_t relay_used=1;
+static uint32_t relay_peer_queued,relay_peer_peak,relay_peer_retries,relay_uart_errors;
+static bool relay_flush(void)
+{
+    if(relay_used==1)return true;
+    relay_usb[0]=0;
+    bool ok=gw_usb_write(WL_USB_RESPONSE,relay_usb,relay_used);
+    relay_used=1;
+    if(!ok){
+        ++usb_errors;
+        if(configured)rr_fail("host_usb_failure");
+    }
+    /* Idle notifications can outlive the setup client. A missing laptop must
+     * not poison the next handshake; active recordings still fail closed. */
+    return ok||!configured;
+}
+static bool relay_received(uint8_t type,const uint8_t *p,size_t n,void *context)
+{
+    (void)context;
+    if(type==RR_STATS_TYPE){
+        if(n!=RR_STATS_SIZE||memcmp(p,"CRST",4))return false;
+        relay_peer_queued=wl_u32(p+4);relay_peer_peak=wl_u32(p+8);
+        relay_peer_retries=wl_u32(p+12);relay_uart_errors=wl_u32(p+16);
+        return true;
+    }
+    if(n+4>sizeof(relay_usb))return false;
+    if(relay_used+n+3>sizeof(relay_usb)&&!relay_flush())return false;
+    relay_usb[relay_used++]=type;wl_w16(relay_usb+relay_used,n);relay_used+=2;
+    memcpy(relay_usb+relay_used,p,n);relay_used+=n;
+    return true;
+}
+static void wireless_received(uint8_t type,const uint8_t *p,size_t n,void *context)
+{
+    (void)context;static uint8_t framed[WL_PAYLOAD+1];static size_t used=1;static bool expect_restart;
+    if(type){
+        if(n+4>sizeof(framed)){wl_host_failure();return;}
+        if(used+n+3>sizeof(framed))wireless_received(0,NULL,0,context);
+        if(wl_faulted())return;
+        framed[used++]=type;wl_w16(framed+used,n);used+=2;memcpy(framed+used,p,n);used+=n;
+        if(type==CSI_SERIAL_TYPE_PROFILE_COMMIT_ACK&&n==2&&!memcmp(p,"ok",2))expect_restart=true;
+    }else if(used>1){
+        framed[0]=0; /* Batched typed frames, one USB write per BLE packet. */
+        if(!gw_usb_write(WL_USB_RESPONSE,framed,used)){++usb_errors;if(configured)wl_host_failure();}
+        else if(expect_restart)wl_expect_peer_restart();
+        expect_restart=false;
+        used=1;
+    }
+}
 static void status(void)
 {
-    char p[1024];int n=snprintf(p,sizeof(p),
+    char p[1400];int n=snprintf(p,sizeof(p),
         "{\"role\":\"gateway\",\"target\":\"esp32c6\",\"mac\":\"" MACSTR "\","
         "\"protocol_version\":3,\"transport_config_max_version\":7,\"firmware_version\":\"3\",\"csi_transport\":\"espnow_gateway\","
+        "\"wireless_version\":2,\"wireless_paired\":%s,\"wireless_ready\":%s,\"wireless_fault\":%s,\"wireless_failure_reason\":\"%s\",\"wireless_debug\":\"%s\",\"wireless_drops\":%lu,\"wireless_peer_changes\":%lu,\"free_heap_bytes\":%lu,\"minimum_free_heap_bytes\":%lu,"
         "\"cpu_max_mhz\":%u,\"backhaul_mcs\":%u,\"ready\":true,\"boot_id\":%lu,\"configured\":%s,\"run_id\":\"%llu\",\"channel\":%u,"
         "\"transport_fingerprint\":\"%.16s\",\"received\":%lu,\"forwarded\":%lu,"
         "\"usb_errors\":%lu,\"rejected\":%lu,\"queued\":%u,"
@@ -41,13 +94,34 @@ static void status(void)
         "\"ack_max_age_ms\":%u,\"ack_skipped_age\":%lu,\"ack_skipped_busy\":%lu,\"ack_submit_errors\":%lu,"
         "\"ack_age_samples\":%lu,\"ack_age_max_us\":%lu,\"ack_age_total_us\":%llu,"
         "\"ack_age_le_2ms\":%lu,\"ack_age_le_5ms\":%lu,\"ack_age_le_10ms\":%lu}",
-        MAC2STR(mac),(unsigned)CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,(unsigned)configuration.backhaul_mcs,(unsigned long)boot,configured?"true":"false",(unsigned long long)configuration.run,configuration.channel,
+        MAC2STR(mac),wl_paired()?"true":"false",wl_ready()?"true":"false",wl_faulted()?"true":"false",wl_failure_reason(),wl_debug(),(unsigned long)wl_drops(),(unsigned long)wl_peer_changes(),(unsigned long)esp_get_free_heap_size(),(unsigned long)esp_get_minimum_free_heap_size(),(unsigned)CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,(unsigned)configuration.backhaul_mcs,(unsigned long)boot,configured?"true":"false",(unsigned long long)configuration.run,configuration.channel,
         configured?(char *)configuration.wire+84:"",(unsigned long)received,(unsigned long)forwarded,
         (unsigned long)usb_errors,(unsigned long)(rejected+gw_io_drops()),(unsigned)uxQueueMessagesWaiting(gw_incoming()),
         (unsigned long)host_acks,(unsigned long)ack_submissions,(unsigned long)polls,(unsigned long)gw_io_mac_failures(),
         (unsigned)CONFIG_CSI_GATEWAY_ACK_MAX_AGE_MS,(unsigned long)ack_skipped_age,(unsigned long)ack_skipped_busy,(unsigned long)ack_submit_errors,
         (unsigned long)ack_age_samples,(unsigned long)ack_age_max_us,(unsigned long long)ack_age_total_us,
         (unsigned long)ack_age_le_2ms,(unsigned long)ack_age_le_5ms,(unsigned long)ack_age_le_10ms);
+    if(n>0&&n<sizeof(p)&&rr_enabled()){
+        /* Relay images do not enable BLE; omit that disabled transport's
+         * verbose debug fields to keep discovery within the 1400-byte frame. */
+        char *start=strstr(p,"\"wireless_version\"");
+        char *end=strstr(p,"\"free_heap_bytes\"");
+        if(start&&end&&end>start){memmove(start,end,strlen(end)+1);n=strlen(p);}
+        int extra=snprintf(p+n-1,sizeof(p)-(n-1),
+            ",\"relay_version\":1,\"relay_recovery_version\":1,\"relay_transport\":\"espnow_uart\","
+            "\"relay_paired\":%s,\"relay_ready\":%s,\"relay_fault\":%s,"
+            "\"relay_failure_reason\":\"%s\",\"relay_drops\":%lu,"
+            "\"relay_peer_changes\":%lu,\"relay_retries\":%lu,\"relay_queued_bytes\":%u,"
+            "\"relay_peer_queued_bytes\":%lu,\"relay_peer_queue_peak\":%lu,"
+            "\"relay_peer_retries\":%lu,\"relay_uart_errors\":%lu}",
+            rr_paired()?"true":"false",rr_ready()?"true":"false",rr_faulted()?"true":"false",
+            rr_failure_reason(),(unsigned long)rr_drops(),(unsigned long)rr_peer_changes(),
+            (unsigned long)rr_retries(),(unsigned)rr_queued_bytes(),
+            (unsigned long)relay_peer_queued,(unsigned long)relay_peer_peak,
+            (unsigned long)relay_peer_retries,(unsigned long)relay_uart_errors);
+        if(extra<0||extra>=sizeof(p)-(n-1))return;
+        n=n-1+extra;
+    }
     if(n>0&&n<sizeof(p))gw_usb_write(CSI_SERIAL_TYPE_DEVICE_STATUS,(uint8_t *)p,n);
 }
 static void usb_reader(void *arg)
@@ -63,6 +137,21 @@ static void usb_reader(void *arg)
 static void command(const gw_message_t *m)
 {
     if(m->source[0]==CSI_SERIAL_TYPE_DISCOVER_REQUEST){status();return;}
+    if(m->source[0]==RR_USB_RECOVER){
+        bool ok=rr_enabled()&&rr_paired()&&!configured&&m->size==4&&!memcmp(m->data,"CRRC",4);
+        gw_usb_write(GW_RESPONSE,(const uint8_t *)(ok?"ok":"error"),ok?2:5);
+        if(ok){vTaskDelay(pdMS_TO_TICKS(100));esp_restart();}return;
+    }
+    if(m->source[0]==WL_USB_PAIR){
+        bool ok=!configured&&(rr_enabled()?rr_pair(m->data,m->size):wl_pair(m->data,m->size));
+        gw_usb_write(WL_USB_PAIR_ACK,(const uint8_t *)(ok?"ok":"error"),ok?2:5);
+        if(ok){vTaskDelay(pdMS_TO_TICKS(100));esp_restart();}return;
+    }
+    if(m->source[0]==WL_USB_REQUEST){
+        if(m->size<1||!(rr_enabled()?rr_send(m->data[0],m->data+1,m->size-1):wl_send(m->data[0],m->data+1,m->size-1))){
+            const uint8_t error[]={GW_RESPONSE,'e','r','r','o','r'};gw_usb_write(WL_USB_RESPONSE,error,sizeof(error));
+        }return;
+    }
     if(m->source[0]==GW_ACK&&configured&&!configuration.application_ack){++rejected;return;}
     if(m->source[0]==GW_ACK&&configured&&gw_check(m->data,m->size,"CGAK",GW_ACK_SIZE)){
         int index=gw_slot(&configuration,m->data+24);
@@ -93,7 +182,8 @@ static void command(const gw_message_t *m)
     if(m->source[0]!=GW_CONTROL)return;
     bool ok=false;gw_config_t next;
     if(gw_config_decode(m->data,m->size,&next)&&!memcmp(next.wire+32,mac,6)){
-        if(!configured||!memcmp(configuration.wire,next.wire,GW_CONFIG_SIZE)){
+        if((!rr_paired()||next.channel==rr_channel())&&
+           (!configured||!memcmp(configuration.wire,next.wire,GW_CONFIG_SIZE))){
             configuration=next;
             ESP_ERROR_CHECK(esp_wifi_set_channel(next.channel,WIFI_SECOND_CHAN_NONE));
             for(unsigned i=0;i<next.count;++i){
@@ -108,10 +198,13 @@ static void command(const gw_message_t *m)
     }else if(m->size==12&&!memcmp(m->data,"CGSP",4)&&csi_clock_read_u64(m->data+4)==configuration.run){
         configured=false;transmitter_boot=0;memset(cache,0,sizeof(cache));ok=true;
     }
+    wl_session_active(configured);
+    rr_session_active(configured);
     gw_usb_write(GW_RESPONSE,(const uint8_t *)(ok?"ok":"error"),ok?2:5);
 }
 static void radio(const gw_message_t *m)
 {
+    if(rr_receive(m->source,m->data,m->size)){relay_flush();return;}
     if(!configured||!transmitter_boot)return;
     int index=gw_slot(&configuration,m->source);if(index<0){++rejected;return;}
     if(gw_envelope_valid(m->data,m->size)){
@@ -148,11 +241,14 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_wifi_set_bandwidth(WIFI_IF_STA,WIFI_BW20));ESP_ERROR_CHECK(esp_wifi_set_country_code("ID",true));
     ESP_ERROR_CHECK(esp_wifi_set_channel(6,WIFI_SECOND_CHAN_NONE));ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
     gw_io_init();commands=xQueueCreate(16,sizeof(gw_message_t));
+    wl_init(1,mac,wireless_received,NULL);
+    rr_init(1,mac,relay_received,NULL);
     if(!commands||xTaskCreate(usb_reader,"gateway_usb",6144,NULL,5,NULL)!=pdPASS)abort();
     static gw_message_t message;uint64_t last_status=0;
     for(;;){
         while(xQueueReceive(commands,&message,0))command(&message);
         if(xQueueReceive(gw_incoming(),&message,pdMS_TO_TICKS(1)))radio(&message);
+        rr_poll();
         if((uint64_t)esp_timer_get_time()-last_status>1000000){status();last_status=esp_timer_get_time();}
     }
 }

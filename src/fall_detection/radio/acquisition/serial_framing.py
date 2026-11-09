@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import struct
 import zlib
+from .native import core as _core
 
 
 MAGIC = b"CSIS"
@@ -29,8 +30,13 @@ TYPE_GATEWAY_ROUND = 22
 TYPE_GATEWAY_EVENT = 23
 TYPE_GATEWAY_ENVELOPE = 24
 TYPE_GATEWAY_ACK = 25
+TYPE_WIRELESS_REQUEST = 26
+TYPE_WIRELESS_RESPONSE = 27
+TYPE_WIRELESS_PAIR = 28
+TYPE_WIRELESS_PAIR_ACK = 29
+TYPE_RELAY_RECOVER = 31
 KNOWN_TYPES = {
-    20, 21, 22, 23, 24, 25,
+    20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
     TYPE_CSI_PACKET,
     TYPE_TRANSMITTER_STATS,
     TYPE_GATEWAY_STATS,
@@ -45,6 +51,7 @@ KNOWN_TYPES = {
     TYPE_BLE_CONTROL,
     TYPE_BLE_RESPONSE,
     TYPE_BLE_ROUND,
+    TYPE_RELAY_RECOVER,
 }
 MAX_PAYLOAD = 1400
 HEADER = struct.Struct("!4sBBH")
@@ -118,6 +125,8 @@ def encode_serial_frame(frame_type: int, payload: bytes) -> bytes:
         raise SerialFrameError("unknown serial frame type")
     if len(payload) > MAX_PAYLOAD:
         raise SerialFrameError("serial frame payload exceeds 1400 bytes")
+    if _core is not None and hasattr(_core, "encode_frame"):
+        return _core.encode_frame(frame_type, payload)
     header = HEADER.pack(MAGIC, VERSION, frame_type, len(payload))
     body = header + payload
     raw = body + CRC.pack(zlib.crc32(body) & 0xFFFFFFFF)
@@ -153,6 +162,7 @@ class SerialFrameStreamDecoder:
     """Incrementally recover COBS frames from an arbitrary serial byte stream."""
 
     def __init__(self) -> None:
+        self._native = _core.FrameDecoder() if _core is not None else None
         self._pending = bytearray()
         self._synchronized = False
         self._dropping = False
@@ -161,6 +171,12 @@ class SerialFrameStreamDecoder:
 
     def feed(self, data: bytes) -> list[SerialFrame]:
         """Consume bytes and return every complete valid frame."""
+
+        if self._native is not None:
+            values = self._native.feed(data)
+            self.malformed_frames = self._native.malformed_frames
+            self.oversized_frames = self._native.oversized_frames
+            return [SerialFrame(kind, payload) for kind, payload in values]
 
         frames: list[SerialFrame] = []
         for value in data:

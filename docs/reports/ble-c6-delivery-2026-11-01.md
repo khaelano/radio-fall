@@ -7,7 +7,7 @@ a fall detector. The user's priority is live detection, with delayed processing
 acceptable if necessary. Consequently, the report includes total delivery and
 alternative bounded-lag inputs, not only the original 100 ms grace metric.
 
-The implementation contract is [BLE delivery policy](ble-delivery-policy.md).
+The implementation contract is [BLE delivery policy](../ble-delivery-policy.md).
 Normal collection settings remain unchanged. The 100 ms grace is an experimental
 input-finalization setting, not a proven detector requirement; neither 50 delivered
 records/s nor 50 available bins/s is an established detector acceptance threshold.
@@ -38,7 +38,7 @@ guarantee delivery by 100 ms; host input bins use mapped transmitter enqueue tim
 Local ignored artifacts live in `data/experiments/ble/c6-delivery-20261101/`:
 
 - `screen/analysis.json`: five-second warm-ups and 30-second measurements.
-- [`confirmation/analysis.json`](../data/experiments/ble/c6-delivery-20261101/confirmation/analysis.json):
+- [`confirmation/analysis.json`](../../data/experiments/ble/c6-delivery-20261101/confirmation/analysis.json):
   30-second warm-ups and 300-second measurements for the paired baseline/candidate.
 - Per-condition configurations, exact commands, console logs, raw envelope
   journals, transmitter rounds, clocks, receipt status, immutable input bins, and

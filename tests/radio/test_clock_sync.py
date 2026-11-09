@@ -127,3 +127,37 @@ def test_clock_sync_estimator_resets_after_transmitter_reboot():
     estimator.add(sample(midpoint_us=1_000_000, sync_id=0))
 
     assert len(estimator.samples) == 1
+
+
+def test_clock_sync_wireless_startup_does_not_extrapolate_queue_jitter():
+    """70 ms exchanges over 0.5 s cannot resolve crystal drift."""
+    estimator = ClockSyncEstimator(minimum_drift_span_us=10_000_000)
+    for index in range(6):
+        midpoint = 1_000_000 + index * 90_000
+        offset = 5_000 - index * 5_000
+        estimator.add(
+            ClockSyncSample(
+                index,
+                0,
+                7,
+                midpoint - 35_000,
+                midpoint + offset,
+                midpoint + offset,
+                midpoint + 35_000,
+                0,
+                0,
+                "1a:00:00:00:00:00",
+            )
+        )
+    assert estimator.estimate.drift_ppm == 0
+    assert (
+        abs(estimator.estimate.receiver_to_transmitter(20_000_000) - 20_000_000)
+        < 35_000
+    )
+    # Once low-delay observations span enough time, the affine fit is enabled.
+    estimator = ClockSyncEstimator(minimum_drift_span_us=10_000_000)
+    for index, midpoint in enumerate((1_000_000, 11_000_000, 21_000_000)):
+        estimator.add(
+            sample(midpoint, 5_000 + midpoint * 10 / 1_000_000, sync_id=index)
+        )
+    assert estimator.estimate.drift_ppm == pytest.approx(10)

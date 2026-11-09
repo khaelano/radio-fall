@@ -1,22 +1,23 @@
 {
   "schema_version": 1,
   "family_id": "walk-to-fall",
-  "title": "Walk to fall",
+  "title": "wf · Walk to fall",
   "activity_label": "walk_to_fall",
-  "instruction_template": "Walk toward {start_direction}, then perform a {end_direction} fall.",
+  "instruction_template": "Mattress only. Walk toward {start_direction}, then perform a {end_direction} fall.",
   "start_directions": [
     "front",
-    "left",
     "right",
-    "back"
+    "back",
+    "left"
   ],
   "end_directions": [
     "front",
-    "left",
     "right",
-    "back"
+    "back",
+    "left"
   ],
   "repetitions": 2,
   "direction_frame": "participant_relative",
-  "safety_note": "Use the crash mat and a spotter; stop immediately if the performer loses confidence."
+  "safety_note": "Use the crash mat and a spotter; stop immediately if the performer loses confidence.",
+  "equipment": "mattress"
 }

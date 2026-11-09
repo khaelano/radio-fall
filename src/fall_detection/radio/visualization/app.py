@@ -4,49 +4,32 @@ from __future__ import annotations
 
 import argparse
 import sys
-import time
 from pathlib import Path
 
-from ..acquisition.gateway_reader import GatewayReceiverManager
-from ..acquisition.buffer import DEFAULT_NOMINAL_RATE_HZ
-from ..espnow_config import EspnowTransportConfig
-from ..profile import RadioProfileError, load_inventory_and_profile
+from contextlib import ExitStack
+
+from ..live import LiveRadio, add_live_arguments
 from .dashboard import (
     DASHBOARD_TRACE_COUNTS,
     DEFAULT_DASHBOARD_SUBCARRIERS,
     DEFAULT_INSPECT_SUBCARRIER,
     DEFAULT_VIEW_SECONDS,
     VALID_SUBCARRIERS,
-    CsiDashboardPanel,
 )
-from .state import LiveState
-
-GUI_FPS_CHOICES = (16, 24)
-GUI_FPS_DEFAULT = 24
-
-
-def frame_interval_ms(fps: int) -> int:
-    """Whole-millisecond timer interval for a constant render rate."""
-
-    return max(1, int(1000 / fps + 0.5))
-
+from .state import LiveState as LiveState
+from .live import LiveDashboard
+from .pacing import (
+    FPS_CHOICES as GUI_FPS_CHOICES,
+    FPS_DEFAULT as GUI_FPS_DEFAULT,
+    frame_interval_ms,
+)
 
 GUI_INTERVAL_MS = frame_interval_ms(GUI_FPS_DEFAULT)
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Display live Espressif CSI data.")
-    parser.add_argument(
-        "--transport",
-        choices=("espnow_gateway",),
-        default="espnow_gateway",
-        help="CSI over ESP-NOW gateway; USB carries transmitter control and timing only",
-    )
-    parser.add_argument("--gateway-port", help="Native USB C6 gateway port")
-    parser.add_argument("--port", help="Native USB transmitter control port")
-    parser.add_argument("--gateway-config", type=Path, help="ESP-NOW gateway transport policy JSON")
-    parser.add_argument("--receiver-config", type=Path)
-    parser.add_argument("--radio-profile", type=Path)
+    add_live_arguments(parser)
     parser.add_argument(
         "--receiver-id",
         help="receiver inventory ID to preview when multiple ESP-NOW gateway receivers are configured",
@@ -59,12 +42,7 @@ def _parser() -> argparse.ArgumentParser:
         default=GUI_FPS_DEFAULT,
         help="constant UI refresh rate in frames per second",
     )
-    parser.add_argument(
-        "--nominal-rate-hz",
-        type=int,
-        default=DEFAULT_NOMINAL_RATE_HZ,
-        help="configured sensing transmission rate used for history sizing",
-    )
+
     parser.add_argument(
         "--dashboard-subcarriers",
         type=int,
@@ -85,89 +63,37 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     """Run the live GUI."""
 
-    args = _parser().parse_args(argv)
-    if bool(args.receiver_config) != bool(args.radio_profile):
-        _parser().error(
-            "--receiver-config and --radio-profile must be provided together"
-        )
-    inventory = profile = None
-    profile_fingerprint = None
-    if args.receiver_config is not None:
-        try:
-            inventory, profile, profile_fingerprint = load_inventory_and_profile(
-                args.receiver_config, args.radio_profile
-            )
-        except RadioProfileError as exc:
-            _parser().error(str(exc))
-    profile_mode = inventory is not None
-    if not profile_mode:
-        _parser().error(
-            "--receiver-config and --radio-profile are required for csi-viewer"
-        )
-    gateway_config = None
-    if args.transport == "espnow_gateway":
-        if not args.port or not args.gateway_port:
-            _parser().error("--transport espnow_gateway requires --port and --gateway-port")
-        try:
-            gateway_config = EspnowTransportConfig.load(args.gateway_config)
-        except (OSError, ValueError) as exc:
-            _parser().error(str(exc))
-    if args.receiver_id is not None and not profile_mode:
-        _parser().error("--receiver-id requires --receiver-config and --radio-profile")
-    if args.receiver_id is not None:
-        receiver_ids = {receiver.id for receiver in inventory.receivers}
-        if args.receiver_id not in receiver_ids:
-            _parser().error(
-                "--receiver-id must match one of the configured receivers: "
-                + ", ".join(sorted(receiver_ids))
-            )
-    if args.nominal_rate_hz < 1:
-        _parser().error("--nominal-rate-hz must be at least 1")
+    parser = _parser()
+    args = parser.parse_args(argv)
+    try:
+        radio = LiveRadio(args)
+    except (OSError, RuntimeError, ValueError) as exc:
+        parser.error(str(exc))
     try:
         from PySide6 import QtCore, QtWidgets
     except ImportError as exc:
-        print("Install processor dependencies with: uv sync", file=sys.stderr)
+        print(
+            "Install viewer dependencies with: uv sync --extra radio", file=sys.stderr
+        )
         print(f"Missing GUI dependency: {exc}", file=sys.stderr)
         return 2
 
-    app = QtWidgets.QApplication(sys.argv)
-    state = LiveState(profile.nominal_rate_hz if profile_mode else args.nominal_rate_hz)
-    receiver_bindings = ()
-    if args.transport == "espnow_gateway":
-        reader = GatewayReceiverManager(
-            inventory,
-            profile,
-            args.output_dir,
-            transmitter_port=args.port,
-            gateway_port=args.gateway_port,
-            config=gateway_config,
-            on_status=state.set_status,
-        )
-        try:
-            receiver_bindings = reader.bind()
-        except (RuntimeError, ValueError) as exc:
-            print(f"Unable to prepare ESP-NOW gateway receivers: {exc}", file=sys.stderr)
-            return 2
-        state.configure_receivers(
-            {key: value.buffer for key, value in reader.readers.items()},
-            args.receiver_id,
-        )
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    profile = radio.settings.profile
     window = QtWidgets.QMainWindow()
     window.setWindowTitle(
-        "Espressif CSI live viewer"
-        if not profile_mode
-        else f"CSI viewer — {profile.profile_id} ({profile.band} ch {profile.channel})"
+        f"CSI viewer — {profile.profile_id} ({profile.band} ch {profile.channel})"
     )
     central = QtWidgets.QWidget()
     layout = QtWidgets.QVBoxLayout(central)
-    panel = CsiDashboardPanel(
-        state,
+    dashboard = LiveDashboard(
+        radio,
         fps=args.fps,
         dashboard_subcarriers=args.dashboard_subcarriers,
         inspect_subcarrier=args.inspect_subcarrier,
         window_seconds=DEFAULT_VIEW_SECONDS,
-        receivers=[binding.receiver_id for binding in receiver_bindings] or None,
     )
+    panel = dashboard.panel
     layout.addWidget(panel.widget)
     window.setCentralWidget(central)
     status_label = QtWidgets.QLabel("starting")
@@ -176,78 +102,32 @@ def main(argv: list[str] | None = None) -> int:
         QtWidgets.QSizePolicy.Policy.Ignored,
         QtWidgets.QSizePolicy.Policy.Preferred,
     )
-    metrics_label = QtWidgets.QLabel(
-        "seq — | rec 0 | bad 0 | sense 0 | record 0 | batch 0 | drops 0/0/0 | age —"
-    )
+    metrics_label = QtWidgets.QLabel("Delivered records/s: waiting")
     status_bar = QtWidgets.QStatusBar()
     status_bar.addWidget(status_label, 1)
     status_bar.addPermanentWidget(metrics_label)
     window.setStatusBar(status_bar)
-    window.resize(800, 680)
+    window.resize(1040, 820)
 
     def update_status() -> None:
-        message, connected = state.get_status()
-        selected_reader = reader
-        if profile_mode:
-            selected_reader = reader.readers[state.selected_receiver_id]
-            connected = (
-                selected_reader.connected and not selected_reader.profile_mismatch
-            )
-            message = f"{state.selected_receiver_id}: {message}"
-        status = message if connected else f"offline: {message}"
-        status_label.setText(status if len(status) <= 42 else f"{status[:41]}…")
-        status_label.setToolTip(
-            status
-            + ("\n" + reader.diagnostic_text() if args.transport == "espnow_gateway" else "")
-        )
-        sequence = state.buffer.last_sequence
-        if selected_reader.last_valid_time is None:
-            age = "—"
-        else:
-            age = f"{max(0.0, time.monotonic() - selected_reader.last_valid_time):.1f}s"
-        record_missing = getattr(selected_reader, "transport_missing", 0)
-        batch_missing = getattr(selected_reader, "batch_missing", 0)
-        receiver_stats = getattr(selected_reader, "receiver_stats", None)
-        sensing_missing = (
-            receiver_stats.sensing_missing if receiver_stats is not None else "—"
-        )
-        queue_drops = receiver_stats.queue_drops if receiver_stats is not None else "—"
-        ip_drops = (
-            receiver_stats.unavailable_ip_drops if receiver_stats is not None else "—"
-        )
-        send_errors = receiver_stats.send_errors if receiver_stats is not None else "—"
-        receiver_label = (
-            f"  |  receiver {state.selected_receiver_id}" if profile_mode else ""
-        )
-        metrics_label.setText(
-            f"seq {sequence if sequence is not None else '—'}  |  "
-            f"rec {state.buffer.received_records}  |  "
-            f"bad {getattr(selected_reader, 'malformed_lines', 0)}  |  "
-            f"sense {sensing_missing}  |  record {record_missing}  |  "
-            f"batch {batch_missing}  |  drops {queue_drops}/{ip_drops}/{send_errors}"
-            f"  |  age {age}"
-            f"{receiver_label}"
-            f"  |  {panel.measured_fps:.0f} data fps  |  ui {args.fps} fps"
-            f"  |  {panel.phase_mode}"
-            f"  |  phase gaps {panel.phase_gap_count}"
-        )
+        text = dashboard.refresh()
+        status_label.setText(text.connection)
+        status_label.setToolTip(text.detail)
+        metrics_label.setText(text.compact)
+        metrics_label.setToolTip(text.detail)
 
-    timer = QtCore.QTimer()
+    timer = QtCore.QTimer(window)
     timer.setTimerType(QtCore.Qt.TimerType.PreciseTimer)
-    timer.timeout.connect(panel.refresh)
-    timer.start(frame_interval_ms(args.fps))
-
-    status_timer = QtCore.QTimer()
-    status_timer.timeout.connect(update_status)
-    status_timer.start(250)
-
-    def close() -> None:
-        reader.stop()
-
-    app.aboutToQuit.connect(close)
-    reader.start()
-    window.show()
-    return app.exec()
+    timer.timeout.connect(update_status)
+    app.aboutToQuit.connect(timer.stop)
+    with ExitStack() as resources:
+        resources.callback(window.close)
+        resources.callback(timer.stop)
+        resources.callback(radio.stop)
+        radio.start()
+        timer.start(frame_interval_ms(args.fps))
+        window.show()
+        return app.exec()
 
 
 if __name__ == "__main__":

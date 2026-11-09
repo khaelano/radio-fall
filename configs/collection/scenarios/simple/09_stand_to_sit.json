@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "family_id": "stand-to-sit",
+  "title": "ds · Stand to sit",
+  "activity_label": "stand_to_sit",
+  "instruction_template": "Chair only. Start standing facing {start_direction}, then sit facing {end_direction}.",
+  "start_directions": [
+    "front",
+    "right",
+    "back",
+    "left"
+  ],
+  "end_directions": [
+    "front",
+    "right",
+    "back",
+    "left"
+  ],
+  "repetitions": 2,
+  "direction_frame": "participant_relative",
+  "equipment": "chair",
+  "safety_note": "Use a stable chair and sit down at a controlled pace.",
+  "chair_direction": "end"
+}

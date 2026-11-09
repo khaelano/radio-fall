@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import time
 
 import numpy as np
@@ -13,6 +14,61 @@ def _paint(widget: object, target: object, QtGui: object) -> None:
     painter = QtGui.QPainter(target)
     widget.render(painter)
     painter.end()
+
+
+def _control_refresh_benchmark(*, frames: int, points: int) -> dict[str, float | int]:
+    """Measure display refresh work for unchanged data, excluding paint and RF."""
+    from ..acquisition.protocol import CsiRecord
+    from .dashboard import CsiDashboardPanel
+    from .state import LiveState
+
+    state = LiveState(120)
+    csi = tuple(complex(4 + k % 9, 2 + k % 7) for k in range(256))
+    for sequence in range(points):
+        state.buffer.append(
+            CsiRecord(
+                sequence,
+                "02:00:00:00:00:01",
+                -40,
+                -95,
+                sequence * 8333,
+                csi,
+                sig_mode=4,
+                bandwidth=0,
+                csi_length=512,
+            )
+        )
+    snapshot_calls = 0
+    original = state.buffer.snapshot
+
+    def snapshot(*args, **kwargs):
+        nonlocal snapshot_calls
+        snapshot_calls += 1
+        return original(*args, **kwargs)
+
+    state.buffer.snapshot = snapshot
+    panel = CsiDashboardPanel(state, fps=24)
+    timings = []
+    try:
+        # Cold phase preparation is deliberately spread across bounded GUI ticks.
+        for _ in range(points + 1):
+            if panel.refresh():
+                break
+        else:
+            raise RuntimeError("preview warmup did not complete")
+        for _ in range(frames):
+            panel.mark_dirty()
+            started = time.perf_counter()
+            panel.refresh()
+            timings.append((time.perf_counter() - started) * 1000)
+    finally:
+        panel.widget.close()
+    return {
+        "median_ms": float(np.median(timings)),
+        "p95_ms": float(np.percentile(timings, 95)),
+        "frames": frames,
+        "snapshot_calls_including_warmup": snapshot_calls,
+    }
 
 
 def _dashboard_benchmark(
@@ -42,9 +98,7 @@ def _dashboard_benchmark(
     x = np.linspace(-3.0, 0.0, points)
     values = np.random.default_rng(7).normal(size=(len(curves), points))
     values = values.cumsum(axis=1) / 20.0
-    target = QtGui.QImage(
-        widget.size(), QtGui.QImage.Format.Format_ARGB32
-    )
+    target = QtGui.QImage(widget.size(), QtGui.QImage.Format.Format_ARGB32)
     widget.show()
     QtWidgets.QApplication.processEvents()
     timings: list[float] = []
@@ -94,12 +148,12 @@ def _detail_benchmark(
     trace_plot.enableAutoRange(False)
     trace = trace_plot.plot(pen=pg.mkPen("#4e79a7", width=1))
     x = np.linspace(-3.0, 0.0, points)
-    values = np.random.default_rng(11).uniform(
-        -np.pi, np.pi, size=(64, points)
-    ).astype(np.float32)
-    target = QtGui.QImage(
-        widget.size(), QtGui.QImage.Format.Format_ARGB32
+    values = (
+        np.random.default_rng(11)
+        .uniform(-np.pi, np.pi, size=(64, points))
+        .astype(np.float32)
     )
+    target = QtGui.QImage(widget.size(), QtGui.QImage.Format.Format_ARGB32)
     widget.show()
     QtWidgets.QApplication.processEvents()
     timings: list[float] = []
@@ -123,10 +177,14 @@ def main(argv: list[str] | None = None) -> int:
     """Run the benchmark and print throughput and p95 frame time."""
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--view", choices=("dashboard", "detail", "both"), default="both")
+    parser.add_argument(
+        "--view", choices=("dashboard", "detail", "both", "controls"), default="both"
+    )
     parser.add_argument("--frames", type=int, default=120)
     parser.add_argument("--points", type=int, default=300)
     args = parser.parse_args(argv)
+    if args.frames < 1 or args.points < 1:
+        parser.error("frames and points must be positive")
 
     from PySide6 import QtGui, QtWidgets
     import pyqtgraph as pg
@@ -134,6 +192,13 @@ def main(argv: list[str] | None = None) -> int:
     pg.setConfigOptions(antialias=False, imageAxisOrder="row-major")
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     del app
+    if args.view == "controls":
+        print(
+            json.dumps(
+                _control_refresh_benchmark(frames=args.frames, points=args.points)
+            )
+        )
+        return 0
     views = ("dashboard", "detail") if args.view == "both" else (args.view,)
     for view in views:
         if view == "dashboard":

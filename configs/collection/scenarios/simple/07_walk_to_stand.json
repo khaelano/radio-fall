@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "family_id": "walk-to-stand",
+  "title": "wd · Walk to stand",
+  "activity_label": "walk_to_stand",
+  "instruction_template": "Clear floor. Walk toward {start_direction}, then stop and stand naturally.",
+  "start_directions": [
+    "front",
+    "right",
+    "back",
+    "left"
+  ],
+  "end_directions": [
+    null
+  ],
+  "repetitions": 2,
+  "direction_frame": "participant_relative",
+  "equipment": "none",
+  "safety_note": "Keep the walking path clear and stop at a controlled pace."
+}

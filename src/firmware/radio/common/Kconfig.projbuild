@@ -22,3 +22,50 @@ config CSI_XIAO_EXTERNAL_ANTENNA
         antenna; otherwise GPIO14 low selects the built-in ceramic antenna.
 
 endmenu
+
+menu "CSI UART companion reference"
+config CSI_UART_REFERENCE
+    bool "Use native UART0 for the transmitter reference"
+    default n
+    depends on !CSI_WIRELESS_TRANSMITTER
+    help
+        A separate C6 owns wireless host communication. The sensing C5 only
+        exchanges CRC-protected frames over UART. Disable the UART console.
+
+config CSI_REFERENCE_UART_TX
+    int "Reference UART TX GPIO"
+    depends on CSI_UART_REFERENCE
+    default 11 if IDF_TARGET_ESP32C5
+    default 16
+
+config CSI_REFERENCE_UART_RX
+    int "Reference UART RX GPIO"
+    depends on CSI_UART_REFERENCE
+    default 12 if IDF_TARGET_ESP32C5
+    default 17
+
+config CSI_REFERENCE_UART_BAUD
+    int "Reference UART baud rate"
+    depends on CSI_UART_REFERENCE
+    range 115200 2000000
+    default 921600
+
+config CSI_ESPNOW_UART_RELAY
+    bool "Encrypted C6-to-C6 ESP-NOW reference relay"
+    default n
+    depends on IDF_TARGET_ESP32C6 && !CSI_WIRELESS_TRANSMITTER
+    help
+        Enable on the dedicated UART companion and the USB gateway only.
+        The C5 sensing firmware must not enable this radio transport.
+endmenu
+
+menu "CSI wireless transmitter reference"
+config CSI_WIRELESS_TRANSMITTER
+    bool "Connectionless BLE bridge between transmitter and gateway"
+    default n
+    depends on BT_NIMBLE_ENABLED
+    help
+        Extended non-connectable advertisements carry authenticated commands,
+        clock exchanges and a bounded reliable transmitter log stream.
+        Requires one-time USB pairing on the identified transmitter and gateway.
+endmenu

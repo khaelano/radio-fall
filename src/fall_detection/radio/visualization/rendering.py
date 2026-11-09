@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from ..acquisition.buffer import BufferSnapshot
+from ..acquisition.buffer import BufferSnapshot, RollingCsiBuffer
 from ..preprocessing.phase import (
     HE20_VALID_SUBCARRIERS,
     HT20_VALID_SUBCARRIERS,
@@ -18,9 +18,7 @@ from ..preprocessing.phase import (
 DASHBOARD_TRACE_COUNTS = (8, 12, 16)
 DEFAULT_DASHBOARD_SUBCARRIERS = 12
 DEFAULT_INSPECT_SUBCARRIER = 2
-VALID_SUBCARRIERS = tuple(
-    sorted(HT20_VALID_SUBCARRIERS | HE20_VALID_SUBCARRIERS)
-)
+VALID_SUBCARRIERS = tuple(sorted(HT20_VALID_SUBCARRIERS | HE20_VALID_SUBCARRIERS))
 
 
 class RenderGate:
@@ -76,6 +74,54 @@ class PreparedCsiFrame:
         """Return phase values in the currently selected display mode."""
 
         return self.selected_phases
+
+
+class CsiFrameCache:
+    """Retain one snapshot/frame for unchanged data and display controls.
+
+    The receive counter identifies every buffer append, including duplicates,
+    reordering and sequence resets. Only preview arrays are cached; the raw
+    recording path is independent. Switching receivers evicts the old frame.
+    """
+
+    def __init__(self) -> None:
+        self._snapshot_key: tuple[RollingCsiBuffer, int, float] | None = None
+        self._snapshot: BufferSnapshot | None = None
+        self._phase_mode: tuple[str, str, str] | None = None
+        self._frame: PreparedCsiFrame | None = None
+
+    def prepare(
+        self,
+        buffer: RollingCsiBuffer,
+        *,
+        phase_mode: str,
+        phase_mode_change: str,
+        phase_mode_raw: str,
+        window_seconds: float,
+        prepared_only: bool = False,
+    ) -> PreparedCsiFrame:
+        """Reuse unchanged numerical data while respecting receiver/window changes."""
+        key = (buffer, buffer.received_records, window_seconds)
+        if key != self._snapshot_key:
+            self._snapshot = buffer.snapshot(
+                seconds=window_seconds,
+                include_raw_views=False,
+                prepared_only=prepared_only,
+            )
+            self._snapshot_key = key
+            self._frame = None
+        mode_key = (phase_mode, phase_mode_change, phase_mode_raw)
+        if self._frame is None or self._phase_mode != mode_key:
+            assert self._snapshot is not None
+            self._frame = prepare_frame(
+                self._snapshot,
+                phase_mode=phase_mode,
+                phase_mode_change=phase_mode_change,
+                phase_mode_raw=phase_mode_raw,
+                window_seconds=window_seconds,
+            )
+            self._phase_mode = mode_key
+        return self._frame
 
 
 def as_matrix(rows: Any, *, width: int | None = None) -> np.ndarray:
@@ -141,9 +187,7 @@ def representative_subcarriers(
     if not candidates:
         return ()
     selected_count = min(count, len(candidates))
-    positions = np.rint(
-        np.linspace(0, len(candidates) - 1, selected_count)
-    ).astype(int)
+    positions = np.rint(np.linspace(0, len(candidates) - 1, selected_count)).astype(int)
     return tuple(candidates[position] for position in positions)
 
 
@@ -197,8 +241,15 @@ def prepare_frame(
     else:
         selected_phases = calibrated_phases
 
-    real = as_matrix(snapshot.real)
-    imaginary = as_matrix(snapshot.imaginary)
+    if len(snapshot.mean_i) == len(timestamps) and len(snapshot.mean_q) == len(
+        timestamps
+    ):
+        mean_i = np.asarray(snapshot.mean_i, dtype=np.float32)
+        mean_q = np.asarray(snapshot.mean_q, dtype=np.float32)
+    else:
+        # Historical/offline snapshots may only carry the raw I/Q matrices.
+        mean_i = mean_rows(as_matrix(snapshot.real))
+        mean_q = mean_rows(as_matrix(snapshot.imaginary))
     return PreparedCsiFrame(
         sequence=snapshot.end_sequence,
         timestamps=timestamps,
@@ -207,8 +258,8 @@ def prepare_frame(
         raw_phases=raw_phases,
         calibrated_phases=calibrated_phases,
         selected_phases=selected_phases,
-        mean_i=mean_rows(real),
-        mean_q=mean_rows(imaginary),
+        mean_i=mean_i,
+        mean_q=mean_q,
         rssi=np.asarray(snapshot.rssi, dtype=np.float32),
         noise_floor=np.asarray(snapshot.noise_floor, dtype=np.float32),
     )

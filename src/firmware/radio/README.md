@@ -6,6 +6,12 @@ Images report protocol 3 and sensing version 4. Use isolated build/config paths;
 old BLE binaries are incompatible with live gateway acquisition. Historical BLE
 control sources remain only as offline regression fixtures.
 
+The optional [`relay` project](../../../docs/uart-transmitter-relay.md) adds a
+dedicated C6 companion for transmitter host communication. Build the C5 with
+`common/sdkconfig.uart-reference` and the gateway with
+`common/sdkconfig.espnow-relay`; use `--transmitter-link espnow_uart` on the host.
+The C5 exchanges reference frames over UART0 and retains its fixed sensing radio.
+
 ## Board setup
 
 C5 boards perform 5 GHz sensing; the C6 stays on the fixed 2.4 GHz upload channel.
@@ -42,7 +48,7 @@ value limits immediate host-ACK forwarding by age of receiver activity; skipped
 ACKs remain cached for receiver polling. This is an activity heuristic, not a
 verified channel lease. The selected window and diagnostic counters appear in
 gateway status. Reconfigure cached build directories after adding Kconfig
-options. See [measured burst/ACK results](../../../docs/espnow-burst-ack-2026-11-02.md)
+options. See [measured burst/ACK results](../../../docs/reports/espnow-burst-ack-2026-11-02.md)
 before selecting experimental firmware. No change is enabled by default.
 
 ## Reset and USB diagnostics
@@ -81,7 +87,7 @@ maximum transport version; the gateway also reports negotiated `backhaul_mcs`.
 CGCF-v6 selects HT20 MCS0–3 without changing the HE20 MCS0 sensing link. The
 explicit 120 Hz profile requires updated C5 firmware and profile schema v2;
 restore an 80 Hz profile before returning to older application binaries.
-See [throughput experiments](../../../docs/espnow-throughput-2026-11-02.md) for
+See [throughput experiments](../../../docs/reports/espnow-throughput-2026-11-02.md) for
 measurements and qualification limits. Builds and single-receiver probes do not
 qualify four receivers or detector accuracy.
 

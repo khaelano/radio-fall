@@ -26,7 +26,7 @@ settings; requested values are not assumed to have taken effect.
 
 Artifacts are under the ignored local directory
 `data/experiments/ble/c6-timing-20261101/`. The authoritative derived screening
-summary is [`screen-single-read/analysis.json`](../data/experiments/ble/c6-timing-20261101/screen-single-read/analysis.json).
+summary is [`screen-single-read/analysis.json`](../../data/experiments/ble/c6-timing-20261101/screen-single-read/analysis.json).
 Each condition retains its configuration, exact invocation, console log, raw
 envelopes, session events, immutable availability bins, and integrity report.
 `firmware-single-read.json` records the C6 application hashes and SDK settings;
@@ -86,7 +86,7 @@ configuration at most twice before sensing and rejects an unachieved interval.
 The pair explicitly requested 7.5 ms rather than silently accepting a mismatch.
 
 The local artifact directory is `confirmation-7p5ms/` under the same experiment
-root. Its [`analysis.json`](../data/experiments/ble/c6-timing-20261101/confirmation-7p5ms/analysis.json)
+root. Its [`analysis.json`](../../data/experiments/ble/c6-timing-20261101/confirmation-7p5ms/analysis.json)
 contains raw-journal locations, integrity checks, timing summaries, negotiated
 parameters, and counterfactual deadline counts. `confirmation-environment.json`
 records matching firmware hashes and host source hashes at launch. The failed

@@ -117,4 +117,4 @@ Further work must resolve the failed rate and queue checks, qualify controlled
 post-switch CSI, and run the unchanged sustained criteria and fault checks with
 four identified C5 receivers. Do not infer detector robustness or change the
 criteria to turn this probe into a pass. Operating instructions are in
-[espnow-gateway.md](espnow-gateway.md).
+[espnow-gateway.md](../espnow-gateway.md).

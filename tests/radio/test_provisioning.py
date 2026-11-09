@@ -1,6 +1,5 @@
 import json
 from dataclasses import replace
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -147,8 +146,16 @@ def provisioning_setup():
             receivers=[device(i) for i in range(1, 5)],
         )
     )
-    profile = RadioProfile.load(
-        Path("configs/radio/profiles/indonesia_2g_ch6_80hz.json")
+    profile = RadioProfile.from_mapping(
+        {
+            "schema_version": 1,
+            "profile_id": "indonesia-2g-ch6-80hz",
+            "country_code": "ID",
+            "band": "2.4ghz",
+            "channel": 6,
+            "bandwidth_mhz": 20,
+            "nominal_rate_hz": 80,
+        }
     )
     return inventory, profile
 
@@ -219,8 +226,16 @@ def test_sequential_validates_disconnected_board_capabilities(provisioning_setup
     inventory = replace(
         inventory, transmitter=replace(inventory.transmitter, target="esp32c5")
     )
-    profile = RadioProfile.load(
-        Path("configs/radio/profiles/indonesia_5g_ch44_80hz.json")
+    profile = RadioProfile.from_mapping(
+        {
+            "schema_version": 1,
+            "profile_id": "indonesia-5g-ch44-80hz",
+            "country_code": "ID",
+            "band": "5ghz",
+            "channel": 44,
+            "bandwidth_mhz": 20,
+            "nominal_rate_hz": 80,
+        }
     )
     board = FakeProvisioningDevice(inventory.transmitter)
     with pytest.raises(ProvisioningError, match="5ghz profiles require ESP32-C5"):
@@ -266,3 +281,34 @@ def test_sequential_cli_verifies_only_connected_board(
         board.status.mac in output
         and "other configured boards were not checked" in output
     )
+
+
+@pytest.mark.parametrize("command", ["discover", "provision"])
+def test_radio_cli_dispatches_arguments_to_operation(command, monkeypatch):
+    from fall_detection.radio import provisioning
+
+    calls = []
+    monkeypatch.setattr(provisioning, command, lambda argv: calls.append(argv) or 7)
+    assert provisioning.main([command, "--example"]) == 7
+    assert calls == [["--example"]]
+
+
+def test_radio_cli_help_and_unknown_command(capsys):
+    from fall_detection.radio import provisioning
+
+    with pytest.raises(SystemExit) as help_exit:
+        provisioning.main(["--help"])
+    assert help_exit.value.code == 0
+    assert "discover" in capsys.readouterr().out
+    with pytest.raises(SystemExit) as error:
+        provisioning.main(["unknown"])
+    assert error.value.code == 2
+
+
+def test_radio_cli_dispatches_transmitter_control(monkeypatch):
+    from fall_detection.radio import provisioning, wireless_control
+
+    calls = []
+    monkeypatch.setattr(wireless_control, "main", lambda argv: calls.append(argv) or 3)
+    assert provisioning.main(["transmitter", "status"]) == 3
+    assert calls == [["status"]]

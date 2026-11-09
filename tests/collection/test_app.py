@@ -5,7 +5,7 @@ from fall_detection.collection.app import (
     COLLECTOR_FPS_DEFAULT,
     COLLECTOR_UI_INTERVAL_MS,
     COLLECTOR_VIEW_SECONDS,
-    _format_radio_metrics,
+    DEFAULT_PROTOCOL,
     _parser,
     frame_interval_ms,
 )
@@ -25,42 +25,15 @@ def test_collection_parser_defaults_to_gateway_protocol():
 
     assert args.transport == "espnow_gateway"
     assert args.output_dir.name == "test-sessions"
-    assert args.nominal_rate_hz == 50
+    assert args.config is None  # resolved centrally to configs/radio.json
+    assert args.protocol is None  # selected in the startup dialog
+    assert DEFAULT_PROTOCOL.name == "fall_simple.json"
 
 
-def test_collection_metrics_show_unavailable_telemetry_explicitly():
-    class Reader:
-        class Buffer:
-            received_records = 2
+def test_collection_protocol_can_be_selected_from_command_line():
+    args = _parser().parse_args(["--protocol", "configs/collection/fall_simple.json"])
 
-        buffer = Buffer()
-
-        def telemetry_snapshot(self):
-            from fall_detection.radio.acquisition.telemetry import (
-                BackhaulTelemetrySnapshot,
-            )
-
-            return BackhaulTelemetrySnapshot(
-                captured_monotonic_ns=1,
-                records=2,
-                batches=1,
-                host_missing_sequences=0,
-                transport_missing=0,
-                transport_reordered=0,
-                batch_missing=0,
-                batch_reordered=0,
-                malformed=0,
-                foreign=0,
-                receiver_restarts=0,
-                serial_frames=None,
-                receiver_boot_id=None,
-                receiver_stats=None,
-                transmitter_stats=None,
-                gateway_stats=None,
-            )
-
-    text = _format_radio_metrics(Reader(), 50)
-    assert "unavailable" in text
+    assert str(args.protocol) == "configs/collection/fall_simple.json"
 
 
 def test_collector_shares_the_viewer_frame_pacing_and_window():
@@ -69,3 +42,10 @@ def test_collector_shares_the_viewer_frame_pacing_and_window():
     assert COLLECTOR_UI_INTERVAL_MS == frame_interval_ms(COLLECTOR_FPS_DEFAULT)
     assert COLLECTOR_VIEW_SECONDS == DEFAULT_VIEW_SECONDS
     assert 2 <= COLLECTOR_VIEW_SECONDS <= 5
+
+
+def test_collection_video_is_optional_and_device_is_explicit():
+    assert _parser().parse_args([]).video_device is None
+    args = _parser().parse_args(["--video-device", "/dev/video2", "--video-fps", "25"])
+    assert args.video_device == "/dev/video2"
+    assert args.video_fps == 25 and args.fps == COLLECTOR_FPS_DEFAULT

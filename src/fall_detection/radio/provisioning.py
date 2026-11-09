@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Callable, Iterable, Protocol
 
 from .acquisition.serial_framing import (
@@ -28,7 +27,6 @@ from .profile import (
     RadioInventory,
     RadioProfile,
     RadioProfileError,
-    load_inventory_and_profile,
     profile_fingerprint,
 )
 
@@ -392,7 +390,9 @@ def discover(argv: list[str] | None = None) -> int:
 
     import argparse
 
-    parser = argparse.ArgumentParser(description="Discover CSI radio boards over USB")
+    parser = argparse.ArgumentParser(
+        prog="csi-radio discover", description="Discover CSI radio boards over USB"
+    )
     parser.add_argument(
         "--json", action="store_true", help="emit machine-readable JSON"
     )
@@ -430,10 +430,11 @@ def provision(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Provision a selectable CSI radio profile"
+        prog="csi-radio provision", description="Provision a selectable CSI radio profile"
     )
-    parser.add_argument("--receiver-config", type=Path, required=True)
-    parser.add_argument("--radio-profile", type=Path, required=True)
+    from .settings import add_config_argument, resolve_settings
+
+    add_config_argument(parser)
     parser.add_argument(
         "--sequential",
         action="store_true",
@@ -446,9 +447,9 @@ def provision(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
-        inventory, profile, fingerprint = load_inventory_and_profile(
-            args.receiver_config, args.radio_profile
-        )
+        settings = resolve_settings(args)
+        inventory, profile = settings.inventory, settings.profile
+        fingerprint = settings.profile_fingerprint
         if args.dry_run:
             print(
                 json.dumps(
@@ -473,7 +474,7 @@ def provision(argv: list[str] | None = None) -> int:
         finally:
             for device in devices:
                 device.close()
-    except (RadioProfileError, ProvisioningError) as exc:
+    except (ValueError, OSError, ProvisioningError) as exc:
         parser.error(str(exc))
     print(f"provisioned {report.profile_id} fingerprint={report.fingerprint}")
     if args.sequential:
@@ -482,3 +483,22 @@ def provision(argv: list[str] | None = None) -> int:
             "other configured boards were not checked"
         )
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Dispatch radio discovery, provisioning and transmitter control."""
+    import argparse
+    import sys
+
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "transmitter":
+        from .wireless_control import main as transmitter_main
+
+        return transmitter_main(arguments[1:])
+    actions = {"discover": discover, "provision": provision}
+    if arguments and arguments[0] in actions:
+        return actions[arguments[0]](arguments[1:])
+    parser = argparse.ArgumentParser(description="Manage CSI radios")
+    parser.add_argument("command", choices=(*actions, "transmitter"), help="radio operation")
+    parser.parse_args(arguments)
+    return 2

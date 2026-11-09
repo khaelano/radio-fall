@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from functools import lru_cache
-from math import isfinite, nan
 from typing import Sequence
 
 import numpy as np
@@ -50,23 +49,28 @@ class LtfBlock:
         if len(invalid) != len(self.csi):
             raise ValueError("invalid-slot mask length must match CSI length")
 
-        amplitudes: list[float] = []
-        phases: list[float] = []
-        for index, value in enumerate(self.csi):
-            amplitude = abs(value)
-            usable = (
-                not invalid[index]
-                and isfinite(value.real)
-                and isfinite(value.imag)
-                and amplitude > 0.0
-                and amplitude >= DEFAULT_PHASE_AMPLITUDE_FLOOR
-                and self.subcarrier_indices[index] in self.valid_subcarriers
+        # Prepare a whole LTF at once. Per-tone NumPy dispatch and Python
+        # loops can otherwise stall a cold receiver switch beyond the ingestion deadline.
+        values = np.asarray(self.csi, dtype=np.complex128)
+        with np.errstate(invalid="ignore", over="ignore"):
+            amplitudes = np.abs(values)
+            phases = np.angle(values)
+        usable = (
+            ~np.asarray(invalid, dtype=bool)
+            & np.isfinite(values.real)
+            & np.isfinite(values.imag)
+            & (amplitudes > 0)
+            & (amplitudes >= DEFAULT_PHASE_AMPLITUDE_FLOOR)
+            & np.asarray(
+                [index in self.valid_subcarriers for index in self.subcarrier_indices],
+                dtype=bool,
             )
-            amplitudes.append(amplitude if isfinite(amplitude) else nan)
-            phases.append(float(np.angle(value)) if usable else nan)
+        )
+        phases[~usable] = np.nan
+        amplitudes[~np.isfinite(amplitudes)] = np.nan
         object.__setattr__(self, "invalid_slots", tuple(invalid))
-        object.__setattr__(self, "_amplitudes", tuple(amplitudes))
-        object.__setattr__(self, "_raw_phases", tuple(phases))
+        object.__setattr__(self, "_amplitudes", tuple(map(float, amplitudes)))
+        object.__setattr__(self, "_raw_phases", tuple(map(float, phases)))
         object.__setattr__(
             self,
             "_calibrated_phases",

@@ -137,5 +137,5 @@ detector accuracy require separate measurements. No benchmark promotes this
 policy to the collection default automatically.
 
 The initial measured results and limitations are recorded in
-[the C6 delivery evaluation](ble-c6-delivery-2026-11-01.md). The longer pair
+[the C6 delivery evaluation](reports/ble-c6-delivery-2026-11-01.md). The longer pair
 improved freshness and partial handling but did not establish a throughput gain.

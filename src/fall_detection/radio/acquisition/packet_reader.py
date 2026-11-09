@@ -11,7 +11,7 @@ from typing import Callable, Optional
 from .buffer import RollingCsiBuffer
 from .protocol import CsiRecord
 from .recorder import CsiRecorder
-from .wire import CsiDatagramError, ReceiverStats, decode_csi_packet
+from .wire import CsiDatagramError, DecodedCsiPacket, ReceiverStats, decode_csi_packet
 from .telemetry import BackhaulTelemetrySnapshot
 
 
@@ -154,16 +154,40 @@ class BinaryCsiPacketReader:
         """Accept a complete packet, returning false for validation rejection.
 
         Storage exceptions propagate so a transport cannot ACK unaccepted data.
-        BLE context qualifies duplicates across transmitter and receiver epochs.
+        Transport context qualifies duplicates across transmitter/receiver epochs.
         """
-        host_receive_monotonic_ns = (time.monotonic_ns() if host_receive_monotonic_ns is None
-                                     else host_receive_monotonic_ns)
-        self.total_packets += 1
         try:
             packet = decode_csi_packet(data)
         except (CsiDatagramError, ValueError):
+            self.total_packets += 1
             self.malformed_lines += 1
             return False
+        return self.ingest_decoded_packet(
+            packet,
+            host_receive_monotonic_ns=host_receive_monotonic_ns,
+            context=context,
+            capture_clock=capture_clock,
+        )
+
+    def ingest_decoded_packet(
+        self,
+        packet: DecodedCsiPacket,
+        *,
+        host_receive_monotonic_ns: int | None = None,
+        context: dict | None = None,
+        capture_clock: Callable[[int], int | None] | None = None,
+    ) -> bool:
+        """Ingest a wire-decoded packet with the same identity/storage checks.
+
+        Envelope transports can pass their validated immutable packet here
+        rather than parsing the payload again. Storage failures still propagate.
+        """
+        host_receive_monotonic_ns = (
+            time.monotonic_ns()
+            if host_receive_monotonic_ns is None
+            else host_receive_monotonic_ns
+        )
+        self.total_packets += 1
 
         packet_receiver_mac = packet.records[0].receiver_mac
         if self.receiver_mac is None:
@@ -209,12 +233,20 @@ class BinaryCsiPacketReader:
         for decoded in packet.records:
             self._track_transport_sequence(decoded.transport_sequence)
             record = decoded.record
-            if context:
-                record = replace(record, **context)
-            if capture_clock is not None and record.tx_timestamp_us is not None:
-                record = replace(record, capture_host_monotonic_ns=capture_clock(record.tx_timestamp_us))
-            if self.profile_fingerprint and not record.profile_fingerprint:
-                record = replace(record, profile_fingerprint=self.profile_fingerprint)
+            updates = dict(context or {})
+            tx_timestamp = updates.get("tx_timestamp_us", record.tx_timestamp_us)
+            if capture_clock is not None and tx_timestamp is not None:
+                updates["capture_host_monotonic_ns"] = capture_clock(tx_timestamp)
+            if self.profile_fingerprint and not updates.get(
+                "profile_fingerprint", record.profile_fingerprint
+            ):
+                updates["profile_fingerprint"] = self.profile_fingerprint
+            if updates:
+                record = (
+                    record.with_context(updates)
+                    if hasattr(record, "with_context")
+                    else replace(record, **updates)
+                )
             # Each transmitted frame is captured about twice by the radio.  Keep
             # the first capture of a (sequence, tx timestamp) pair so a session
             # holds one row per sensing frame.  Rows without a transmit

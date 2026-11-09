@@ -71,6 +71,7 @@ _PROTOCOL_KEYS = {
     "blocks",
     "scenario_manifests",
     "resolved_manifest_sources",
+    "trial_order",
 }
 _DEFAULT_KEYS = {"countdown_seconds", "action_seconds", "recovery_seconds"}
 _BLOCK_KEYS = {"id", "title", "scenarios"}
@@ -100,7 +101,12 @@ _MANIFEST_KEYS = {
     "countdown_seconds",
     "action_seconds",
     "recovery_seconds",
+    "equipment",
+    "chair_direction",
 }
+
+_EQUIPMENT_ORDER = ("none", "chair", "chair_and_mattress", "mattress")
+_CARDINAL_ORDER = ("front", "right", "back", "left")
 
 
 def _mapping(value: Any, path: str) -> Mapping[str, Any]:
@@ -188,7 +194,7 @@ def _expand_manifest(
     template = manifest.get("instruction_template", manifest.get("instruction"))
     template = _string(template, f"{path}.instruction_template")
     start_directions = _directions(
-        manifest.get("start_directions"), f"{path}.start_directions"
+        manifest.get("start_directions"), f"{path}.start_directions", allow_null=True
     )
     raw_end_directions = manifest.get("end_directions")
     if raw_end_directions is None:
@@ -211,12 +217,19 @@ def _expand_manifest(
         else _string(raw_safety_note, f"{path}.safety_note")
     )
 
+    equipment = manifest.get("equipment")
+    if equipment is not None and equipment not in _EQUIPMENT_ORDER:
+        raise ProtocolError(f"{path}.equipment: unknown equipment setup")
+    chair_direction = manifest.get("chair_direction")
+    if chair_direction is not None and chair_direction not in ("start", "end"):
+        raise ProtocolError(f"{path}.chair_direction: expected start or end")
+
     scenarios: list[dict[str, Any]] = []
     for start_direction in start_directions:
-        # A null start direction is intentionally disallowed by _directions.
-        assert start_direction is not None
         for end_direction in end_directions:
-            start_label = start_direction
+            start_label = (
+                start_direction if start_direction is not None else "no direction"
+            )
             end_label = end_direction if end_direction is not None else "no direction"
             try:
                 instruction = template.format(
@@ -234,12 +247,18 @@ def _expand_manifest(
             attributes: dict[str, Any] = {
                 "family_id": family_id,
                 "manifest_path": manifest_path,
-                "start_direction": start_label,
+                "start_direction": start_direction,
                 "end_direction": end_direction,
                 "direction_frame": direction_frame,
             }
             if safety_note:
                 attributes["safety_note"] = safety_note
+            if equipment is not None:
+                attributes["equipment"] = equipment
+            if chair_direction is not None:
+                attributes["chair_direction"] = (
+                    start_direction if chair_direction == "start" else end_direction
+                )
             scenario: dict[str, Any] = {
                 "id": scenario_id,
                 "activity_label": activity_label,
@@ -282,6 +301,66 @@ def _resolve_manifest_blocks(
     return blocks, resolved
 
 
+def _ordered_trials(
+    blocks: Iterable[tuple[str, str, tuple[Scenario, ...]]], order: str
+) -> tuple[Trial, ...]:
+    """Group setups when requested, keeping repetitions together."""
+
+    scenarios = [scenario for _id, _title, group in blocks for scenario in group]
+    if order == "equipment":
+        for scenario in scenarios:
+            attributes = scenario.attributes
+            equipment = attributes.get("equipment")
+            if equipment not in _EQUIPMENT_ORDER:
+                raise ProtocolError(
+                    f"{scenario.id}: equipment ordering requires equipment"
+                )
+            for name in ("start_direction", "end_direction", "chair_direction"):
+                direction = attributes.get(name)
+                if direction is not None and direction not in _CARDINAL_ORDER:
+                    raise ProtocolError(
+                        f"{scenario.id}: {name} must be a cardinal direction"
+                    )
+            if equipment in ("chair", "chair_and_mattress"):
+                if attributes.get("chair_direction") not in _CARDINAL_ORDER:
+                    raise ProtocolError(
+                        f"{scenario.id}: chair setup requires chair_direction"
+                    )
+
+        def setup_key(scenario: Scenario) -> tuple[int, int, int, int]:
+            attributes = scenario.attributes
+
+            def direction_index(name: str) -> int:
+                value = attributes.get(name)
+                return -1 if value is None else _CARDINAL_ORDER.index(value)
+
+            stage = _EQUIPMENT_ORDER.index(attributes["equipment"])
+            chair_index = direction_index("chair_direction")
+            if attributes["equipment"] == "chair_and_mattress":
+                # Continue from the final chair-only orientation without a reset.
+                chair_index = len(_CARDINAL_ORDER) - 1 - chair_index
+            return (
+                stage,
+                chair_index,
+                direction_index("start_direction"),
+                direction_index("end_direction"),
+            )
+
+        # Stable sorting retains family order for matching direction pairs.
+        scenarios.sort(key=setup_key)
+    elif order != "declared":
+        raise ProtocolError("protocol.trial_order: expected declared or equipment")
+    pairs = (
+        (scenario, repetition)
+        for scenario in scenarios
+        for repetition in range(1, scenario.repetitions + 1)
+    )
+    return tuple(
+        Trial(ordinal, repetition, scenario)
+        for ordinal, (scenario, repetition) in enumerate(pairs, start=1)
+    )
+
+
 def _load_source(
     source: Mapping[str, Any], *, base_dir: Path | None = None
 ) -> CollectionProtocol:
@@ -314,8 +393,6 @@ def _load_source(
     seen_blocks: set[str] = set()
     seen_scenarios: set[str] = set()
     blocks: list[tuple[str, str, tuple[Scenario, ...]]] = []
-    trials: list[Trial] = []
-    ordinal = 1
     for block_index, raw_block in enumerate(blocks_value):
         block_path = f"protocol.blocks[{block_index}]"
         block = _mapping(raw_block, block_path)
@@ -371,11 +448,9 @@ def _load_source(
             if scenario.action_seconds <= 0:
                 raise ProtocolError(f"{scenario_path}.action_seconds: must be greater than zero")
             scenarios.append(scenario)
-            for repetition in range(1, scenario.repetitions + 1):
-                trials.append(Trial(ordinal, repetition, scenario))
-                ordinal += 1
         blocks.append((block_id, block_title, tuple(scenarios)))
 
+    trials = _ordered_trials(blocks, source.get("trial_order", "declared"))
     canonical = json.dumps(resolved_source, sort_keys=True, separators=(",", ":")).encode()
     return CollectionProtocol(
         schema_version=1,
@@ -383,7 +458,7 @@ def _load_source(
         title=title,
         defaults=timing,
         blocks=tuple(blocks),
-        trials=tuple(trials),
+        trials=trials,
         source=resolved_source,
         source_hash=hashlib.sha256(canonical).hexdigest(),
     )
@@ -418,12 +493,11 @@ def select_blocks(
 ) -> CollectionProtocol:
     """Restrict a protocol to the selected scenario blocks.
 
-    The operator picks which activities a session covers before it starts, so a
-    576-trial protocol does not have to run in one sitting.  Trials are renumbered
-    from one and keep their original block order, and the resolved source is
-    rewritten so ``protocol.json`` describes exactly the queue that ran.  A
-    selection covering every block returns ``protocol`` unchanged, which keeps
-    the protocol hash stable for full sessions.
+    The operator picks which activities a session covers before it starts.
+    Trials are renumbered from one using the protocol's ordering policy. The
+    resolved source is rewritten so ``protocol.json`` describes exactly the
+    queue that ran. A selection covering every block returns ``protocol``
+    unchanged, which keeps the protocol hash stable for full sessions.
     """
 
     wanted = tuple(dict.fromkeys(block_ids))
@@ -441,13 +515,7 @@ def select_blocks(
         for block_id, title, scenarios in protocol.blocks
         if block_id in set(wanted)
     )
-    trials: list[Trial] = []
-    ordinal = 1
-    for _block_id, _title, scenarios in selected:
-        for scenario in scenarios:
-            for repetition in range(1, scenario.repetitions + 1):
-                trials.append(Trial(ordinal, repetition, scenario))
-                ordinal += 1
+    trials = _ordered_trials(selected, protocol.source.get("trial_order", "declared"))
 
     source = dict(protocol.source)
     source["blocks"] = [
@@ -467,7 +535,7 @@ def select_blocks(
         title=protocol.title,
         defaults=protocol.defaults,
         blocks=selected,
-        trials=tuple(trials),
+        trials=trials,
         source=source,
         source_hash=hashlib.sha256(canonical).hexdigest(),
     )

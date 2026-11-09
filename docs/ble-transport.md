@@ -19,7 +19,7 @@ Firmware builds and offline tests do not establish RF throughput, capture
 coverage, timing precision, or detection accuracy. Initial hardware preflight
 identified and fixed unframed transmitter statistics on the USB reference link;
 40 subsequent clock exchanges succeeded. The initial one-receiver byte-integrity
-and delivery measurements are in [the C6 quality report](ble-c6-quality-2026-11-01.md);
+and delivery measurements are in [the C6 quality report](reports/ble-c6-quality-2026-11-01.md);
 they do not establish four-receiver or detector performance.
 The versioned default inventory describes the historical two-receiver C5 cohort.
 Use the actual provisioned C6 inventory for this setup; four-receiver collection
@@ -101,7 +101,7 @@ at most twice before sensing if a connect-time update is still in progress,
 then stops on a mismatch. Normal collection behavior is unchanged. A paired
 five-minute C6 comparison at verified 7.5 ms found improved freshness but lower
 total delivery with an 80 ms age limit; neither condition met 50 usable Hz.
-See [the measured timing report](ble-c6-timing-2026-11-01.md).
+See [the measured timing report](reports/ble-c6-timing-2026-11-01.md).
 
 CBLC v3 adds an opt-in delivery experiment with fresh-record admission, a separate
 started-batch lifetime, and cumulative host-arrival credits. Its CBL2 fragments
@@ -157,7 +157,7 @@ profile change so NimBLE identity and receiver-slot bindings reload together. Di
 
 ```bash
 uv sync --extra radio
-uv run csi-radio-discover --json
+uv run csi-radio discover --json
 ```
 
 Create a four-receiver inventory using those actual addresses and unique IDs.
@@ -166,7 +166,7 @@ addresses as hardware identities. With all five boards connected, provision the
 same inventory/profile:
 
 ```bash
-uv run csi-radio-provision \
+uv run csi-radio provision \
   --receiver-config data/interim/ble/four-receivers.json \
   --radio-profile configs/radio/profiles/indonesia_2g_ch6_80hz.json
 ```
@@ -178,7 +178,7 @@ already known, discovery and provisioning require two passes through the boards.
 Then connect exactly one board and run:
 
 ```bash
-uv run csi-radio-provision --sequential \
+uv run csi-radio provision --sequential \
   --receiver-config data/interim/ble/four-receivers.json \
   --radio-profile configs/radio/profiles/indonesia_2g_ch6_80hz.json
 ```
@@ -288,7 +288,7 @@ changing the transport JSON alone does not re-provision a radio profile. Run a
 single receiver first, then four, and finally the selected round-robin soak.
 `csi-ble-benchmark report RUN_DIRECTORY --signal-quality` also verifies the raw
 envelopes, authoritative timing metadata, and CSI subcarrier statistics.
-The [initial XIAO C6 hardware report](ble-c6-quality-2026-11-01.md) records observed
+The [initial XIAO C6 hardware report](reports/ble-c6-quality-2026-11-01.md) records observed
 limits; it does not establish a collection candidate. Never interpret
 these reports as a four-view model evaluation or a guaranteed 50 usable Hz.
 

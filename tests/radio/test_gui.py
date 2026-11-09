@@ -39,13 +39,11 @@ def test_gui_defaults_to_gateway():
     assert _parser().parse_args([]).transport == "espnow_gateway"
 
 
-def test_gui_parser_accepts_ble_receiver_selection():
+def test_gui_parser_accepts_gateway_receiver_selection():
     args = _parser().parse_args(
         [
-            "--receiver-config",
-            "configs/radio/receivers.json",
-            "--radio-profile",
-            "configs/radio/profiles/indonesia_2g_ch6.json",
+            "--config",
+            "configs/radio.json",
             "--receiver-id",
             "rx-2",
         ]

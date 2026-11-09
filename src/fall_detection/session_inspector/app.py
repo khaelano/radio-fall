@@ -26,6 +26,7 @@ from .data import (
     csi_value_rows,
     downsample_indices,
     load_attempt_data_for_ui,
+    timed_phase_image,
 )
 from .exporter import ExportCancelled, export_curated_bundle, session_size
 from .models import (
@@ -105,6 +106,7 @@ except (
 
 
 if QtCore is not None:
+    from .video_panel import VideoPanel
 
     class TextTableModel(QtCore.QAbstractTableModel):
         """Read-only virtualized model backed by exact textual table values."""
@@ -588,6 +590,7 @@ if QtCore is not None:
             super().__init__(parent)
             self.data: AttemptData | None = None
             self.frame = None
+            self._closed = False
             layout = QtWidgets.QVBoxLayout(self)
             layout.setContentsMargins(0, 0, 0, 0)
             controls = QtWidgets.QHBoxLayout()
@@ -606,7 +609,12 @@ if QtCore is not None:
             layout.addLayout(controls)
 
             self.canvas = pg.GraphicsLayoutWidget()
-            layout.addWidget(self.canvas, 1)
+            self.video = VideoPanel(self)
+            self.video_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+            self.video_splitter.addWidget(self.canvas)
+            self.video_splitter.addWidget(self.video)
+            self.video_splitter.setSizes((850, 350))
+            layout.addWidget(self.video_splitter, 1)
             self.amplitude_plot = self._plot("Amplitude", "value", 0, 0)
             self.phase_plot = self._plot("Selected calibrated phase", "radians", 0, 1)
             self.iq_plot = self._plot("Mean I / Q", "sample", 1, 0)
@@ -640,8 +648,62 @@ if QtCore is not None:
             self.interval_curve = self._curve(
                 self.interval_plot, pg.mkPen("#7c3aed", width=1)
             )
+            self._plots = (
+                self.amplitude_plot,
+                self.phase_plot,
+                self.iq_plot,
+                self.radio_plot,
+                self.interval_plot,
+                self.heatmap_plot,
+            )
+            self.video_cursors = []
+            for plot in self._plots:
+                line = pg.InfiniteLine(
+                    0, angle=90, movable=True, pen=pg.mkPen("#f59e0b", width=2)
+                )
+                plot.addItem(line, ignoreBounds=True)
+                line.hide()
+                line.sigPositionChangeFinished.connect(
+                    lambda item: self.video.seek(float(item.value()))
+                )
+                self.video_cursors.append(line)
+            self.video.position_changed.connect(self._set_video_cursor)
+            self.canvas.scene().sigMouseClicked.connect(self._plot_clicked)
             self.trace_count.currentIndexChanged.connect(self._render)
             self.subcarrier.currentIndexChanged.connect(self._render_phase)
+
+        def _set_video_cursor(self, seconds: float) -> None:
+            aligned = self.data is not None and self.data.signal_times is not None
+            for line in self.video_cursors:
+                line.setVisible(aligned and self.video.timeline is not None)
+                line.setValue(seconds)
+
+        def _plot_clicked(self, event: Any) -> None:
+            if (
+                event.button() != QtCore.Qt.MouseButton.LeftButton
+                or self.data is None
+                or self.data.signal_times is None
+            ):
+                return
+            for plot in self._plots:
+                if plot.getViewBox().sceneBoundingRect().contains(event.scenePos()):
+                    self.video.pause()
+                    self.video.seek(
+                        float(plot.getViewBox().mapSceneToView(event.scenePos()).x())
+                    )
+                    break
+
+        def closeEvent(self, event: Any) -> None:
+            self.shutdown()
+            super().closeEvent(event)
+
+        def shutdown(self) -> None:
+            """Release graphics objects while Qt is alive, before interpreter exit."""
+            if self._closed:
+                return
+            self._closed = True
+            self.video.shutdown()
+            self.canvas.close()
 
         def _plot(self, title: str, label: str, row: int, column: int) -> Any:
             plot = self.canvas.addPlot(row=row, col=column)
@@ -672,6 +734,8 @@ if QtCore is not None:
             ):
                 curve.setData([], [])
             self.heatmap.clear()
+            for line in self.video_cursors:
+                line.hide()
 
         def set_data(self, data: AttemptData) -> None:
             self.data = data
@@ -708,9 +772,10 @@ if QtCore is not None:
                 else 0.0
             )
             self.summary.setText(
-                f"{data.record_count} records · {duration:.2f} s · {data.receiver_id}"
+                f"{data.record_count} records · {duration:.2f} s · {data.receiver_id}\n{data.time_source}"
             )
             self._render()
+            self._set_video_cursor(self.video.position)
 
         def _series(self, values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             if self.frame is None:
@@ -756,7 +821,12 @@ if QtCore is not None:
 
             phase = frame.calibrated_phases
             if phase.size:
-                self.heatmap.setImage(phase.T, autoLevels=False, levels=(-np.pi, np.pi))
+                image = (
+                    timed_phase_image(frame.timestamps, phase)
+                    if self.data.signal_times is not None
+                    else phase.T
+                )
+                self.heatmap.setImage(image, autoLevels=False, levels=(-np.pi, np.pi))
                 x0 = float(frame.timestamps[0])
                 width = max(1e-6, float(frame.timestamps[-1] - x0))
                 y0 = float(frame.subcarriers[0]) if frame.subcarriers else 0.0
@@ -1288,6 +1358,7 @@ if QtCore is not None:
             ):
                 editor.setEnabled(editable)
             self._loading_forms = False
+            self.signals_tab.video.set_attempt(attempt)
             if self.receiver_combo.count():
                 self._schedule_attempt_load(self.receiver_combo.currentText())
             else:
@@ -1316,6 +1387,7 @@ if QtCore is not None:
             ):
                 editor.setEnabled(False)
             self.signals_tab.clear(message)
+            self.signals_tab.video.set_attempt(None)
             self.values_tab.clear(message)
 
         @QtCore.Slot()
@@ -1669,6 +1741,7 @@ if QtCore is not None:
                 event.ignore()
                 return
             self._cancel_load()
+            self.signals_tab.shutdown()
             if not self._process_pool_closed:
                 self.process_pool.shutdown(wait=False, cancel_futures=True)
                 self._process_pool_closed = True

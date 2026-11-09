@@ -97,3 +97,5 @@ No build system exists yet. When code lands, prefer:
 - Before finalizing a cited draft, extract its citation keys and compare them
   with Zotero. The draft must not contain unresolved or fabricated citation
   keys.
+
+For notebook work, prefer the jupyter-agent-bridge MCP tools before reading or editing raw .ipynb files.

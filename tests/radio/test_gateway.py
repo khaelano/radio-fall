@@ -116,6 +116,63 @@ def test_config_inventory_order_and_identity_fingerprint():
         )
 
 
+@pytest.mark.parametrize("wireless", [False, True])
+def test_gateway_ingestion_decodes_nested_payload_once(tmp_path, monkeypatch, wireless):
+    """Full validation and recording must not reparse the same CSI payload."""
+    from fall_detection.radio.acquisition import gateway_protocol, packet_reader, wire
+
+    calls = []
+    original = wire.decode_csi_packet
+
+    def decode(payload):
+        calls.append(payload)
+        return original(payload)
+
+    monkeypatch.setattr(wire, "decode_csi_packet", decode)
+    monkeypatch.setattr(gateway_protocol, "decode_csi_packet", decode)
+    monkeypatch.setattr(packet_reader, "decode_csi_packet", decode)
+    seen = []
+    m = manager(tmp_path, lambda record, arrival: seen.append(record))
+    try:
+        arrival = time.monotonic_ns()
+        payload = batch().encode()
+        if wireless:
+            # The wireless USB reader decodes before waiting for boot evidence.
+            m._reference_pending.append(
+                (arrival, payload, GatewayBatch.decode(payload))
+            )
+            m._flush_reference_pending()
+        else:
+            assert m.accept(payload, arrival)
+        assert len(seen) == 1
+        assert len(calls) == 1
+        assert seen[0].transmitter_boot_id == 11
+        assert seen[0].receiver_boot_id == 21
+        assert seen[0].capture_host_monotonic_ns is not None
+    finally:
+        m.journal.close()
+
+
+def test_gateway_replaced_payload_cannot_reuse_validated_identity():
+    decoded = GatewayBatch.decode(batch().encode())
+    _ = decoded.decoded_packet
+    changed = replace(decoded, payload=batch(receiver=1).payload)
+    with pytest.raises(ValueError, match="identities disagree"):
+        _ = changed.decoded_packet
+
+
+def test_preview_deferral_does_not_change_acquisition_readiness(tmp_path):
+    m = manager(tmp_path, lambda *args: None)
+    try:
+        m.reference.usb_backlog_chunks = 17
+        assert m.clock_sync_ready and not m.preview_ready
+        m.reference.usb_backlog_chunks = 0
+        assert m.clock_sync_ready and m.preview_ready
+        assert m.failure is None
+    finally:
+        m.journal.close()
+
+
 def test_eight_batch_policy_and_legacy_config_are_distinct(tmp_path):
     current = EspnowTransportConfig(
         schema_version=2, outstanding_batches=8, early_return_idle_ms=5

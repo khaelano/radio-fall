@@ -1,18 +1,22 @@
 {
   "schema_version": 1,
-  "protocol_id": "fall-collection-simple-v1",
-  "title": "Four-direction fall-transition collection protocol",
+  "protocol_id": "fall-collection-simple-v2",
+  "title": "Four-direction activity-transition collection protocol",
   "defaults": {
     "countdown_seconds": 5,
     "action_seconds": 8,
     "recovery_seconds": 5
   },
   "scenario_manifests": [
-    "scenarios/simple/01_walk_to_fall.json",
-    "scenarios/simple/02_sit_to_fall.json",
-    "scenarios/simple/03_stand_to_fall.json",
+    "scenarios/simple/07_walk_to_stand.json",
+    "scenarios/simple/08_stand_to_walk.json",
     "scenarios/simple/04_walk_to_sit.json",
+    "scenarios/simple/09_stand_to_sit.json",
     "scenarios/simple/05_sit_to_walk.json",
-    "scenarios/simple/06_sit_to_stand.json"
-  ]
+    "scenarios/simple/06_sit_to_stand.json",
+    "scenarios/simple/02_sit_to_fall.json",
+    "scenarios/simple/01_walk_to_fall.json",
+    "scenarios/simple/03_stand_to_fall.json"
+  ],
+  "trial_order": "equipment"
 }

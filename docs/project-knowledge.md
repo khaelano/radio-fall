@@ -181,7 +181,7 @@ remain in their dedicated documents.
   `src/firmware/radio/README.md` for operating notes.
 - Current state: acquisition, synchronized recording, live visualization,
   session inspection, and operator review are implemented. An isolated offline
-  CNN pilot is available under `notebooks/03_cnn_baseline/`; a production fall
+  CNN pilot is available under `notebooks/trash/03_cnn_baseline/`; a production fall
   detector and independent-session evaluation are not implemented.
 
 The high-level path is:
@@ -305,15 +305,19 @@ transmitter -> radio channel/person -> receivers -> 2.4 GHz gateway -> USB host 
   `docs/figures/simple-eda/<session-id>/subcarriers/`. These are descriptive
   galleries of a chosen condition, not evidence of held-out discrimination.
 
-## Isolated CNN pilot
+## Archived two-receiver CNN pilot
 
-- `notebooks/03_cnn_baseline/03_cnn_experiment.ipynb` provides an executed
+- Active four-receiver experiments use `notebooks/shared_cnn/` for shared
+  helpers and the pinned CPU environment. Earlier selection manifests retain
+  their original code paths; prepare and train again for a new evaluation.
+
+- `notebooks/trash/03_cnn_baseline/03_cnn_experiment.ipynb` provides an executed
   walkthrough of the saved EDA, preprocessing choices, training selection, and
   test results. Run All reads saved outputs by default; an explicit switch
   reruns stages into a separate local artifact folder. The manual action mark
   anchors one fixed window per attempt; timing-shift augmentation is not yet
   implemented or evaluated.
-- `notebooks/03_cnn_baseline/` contains an independent environment/lock,
+- `notebooks/trash/03_cnn_baseline/` contains an independent environment/lock,
   configuration, EDA, preprocessing, CNN training, and evaluation scripts. Local
   snapshots of canonical decoding, clock alignment, and phase-change code have
   provenance hashes; the pilot has no runtime dependency on the repository
@@ -344,7 +348,7 @@ transmitter -> radio channel/person -> receivers -> 2.4 GHz gateway -> USB host 
   The missingness-only baseline obtains balanced accuracy 0.647 and ROC AUC
   0.844, so acquisition confounding remains unresolved. These are one fixed
   within-session pilot's measurements, not generalization or a confirmed
-  phase-burst mechanism; see `notebooks/03_cnn_baseline/results/pilot_v1/REPORT.md`.
+  phase-burst mechanism; see `notebooks/trash/03_cnn_baseline/results/pilot_v1/REPORT.md`.
 - Versionable reports, plots, and metrics go to the pilot's `results/`; large
   derived arrays, checkpoints, and the CPU environment stay locally ignored
   inside the same folder. `README.md` documents commands and limits. Cue-aligned
@@ -611,7 +615,7 @@ short motion pattern associated with a fall.
 | Activity-phase motion comparisons | `src/fall_detection/analysis/phase_motion.py` and `notebooks/trash/01_data_exploration.ipynb` |
 | Exploratory phase bursts | `src/fall_detection/analysis/phase_bursts.py` and section 5 of `notebooks/trash/02_simple_eda.ipynb` |
 | Separate-subcarrier phase changes | `src/fall_detection/analysis/phase_motion.py` and section 6 of `notebooks/trash/02_simple_eda.ipynb` |
-| Isolated CNN pilot | `notebooks/03_cnn_baseline/README.md` and its `results/` |
+| Isolated CNN pilot | `notebooks/trash/03_cnn_baseline/README.md` and its `results/` |
 | Collection protocols | `configs/collection/README.md` and JSON configs |
 | Radio profiles and receivers | `configs/radio/` |
 | Phase calibration | `src/fall_detection/radio/preprocessing/phase.py` |

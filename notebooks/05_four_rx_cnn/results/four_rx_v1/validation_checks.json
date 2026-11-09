@@ -1,0 +1,24 @@
+{
+  "repository_pytest": {
+    "passed": 571,
+    "command": ".venv/bin/python -m pytest -q"
+  },
+  "four_rx_pytest": {
+    "passed": 7,
+    "command": "notebooks/03_cnn_baseline/.venv/bin/python -m pytest -q notebooks/05_four_rx_cnn/tests"
+  },
+  "pilot_helper_pytest": {
+    "passed": 8
+  },
+  "transport_helper_pytest": {
+    "passed": 15
+  },
+  "ruff": "passed",
+  "notebook": {
+    "status": "executed successfully",
+    "code_cells": 6,
+    "sha256": "5560b8a4e7080933efbce37153d21b8cd583d01f422e94bf5c3043a081b11501"
+  },
+  "frozen_code_and_checkpoints": "all hashes match",
+  "source_inputs": "3947 inputs rehashed; zero mismatches"
+}

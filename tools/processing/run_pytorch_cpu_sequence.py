@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import replace
 import os
-from pathlib import Path
 import sys
+from dataclasses import replace
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
@@ -29,7 +29,7 @@ def main() -> None:
     parser.add_argument("--patience", type=int, default=3)
     parser.add_argument("--cpu-threads", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="cpu")
+    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument(
         "--data-root",
         type=Path,

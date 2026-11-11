@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import hashlib
 import json
 import os
-from pathlib import Path
 import platform
 import random
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 try:
     import resource
@@ -86,7 +86,7 @@ class CpuPilotConfig:
     clip_norm: float = 1.0
     cpu_threads: int = 4
     patience: int = 3
-    device: str = "cpu"
+    device: str = "auto"
 
 
 def _rss_bytes() -> int | None:
@@ -133,7 +133,7 @@ def run_cpu_training(
     frame_path: Path,
     normalizer_path: Path,
     output: Path,
-    config: CpuPilotConfig = CpuPilotConfig(),
+    config: CpuPilotConfig | None = None,
     *,
     expected_dataset: str | None = None,
     data_root: Path | None = None,
@@ -151,6 +151,8 @@ def run_cpu_training(
     Returns:
         Runtime and validation summaries for CNN, LSTM, and GRU.
     """
+    if config is None:
+        config = CpuPilotConfig()
     frame_path, normalizer_path, output = (
         frame_path.resolve(),
         normalizer_path.resolve(),
@@ -190,6 +192,11 @@ def run_cpu_training(
     if device_name == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but PyTorch cannot access an NVIDIA GPU")
     device = torch.device(device_name)
+    print(
+        f"Training device: {device}"
+        + (f" ({torch.cuda.get_device_name(device)})" if device.type == "cuda" else ""),
+        flush=True,
+    )
     torch.set_num_threads(config.cpu_threads)
     try:
         torch.set_num_interop_threads(1)
@@ -227,6 +234,9 @@ def run_cpu_training(
             "python": platform.python_version(),
             "torch": torch.__version__,
             "device": str(device),
+            "step_timing": (
+                "cuda_event_seconds" if device.type == "cuda" else "wall_seconds"
+            ),
             "cuda_version": torch.version.cuda,
             "gpu_name": torch.cuda.get_device_name(device)
             if device.type == "cuda"
@@ -262,13 +272,20 @@ def run_cpu_training(
             model.train()
             started = perf_counter()
             load_wait, step_seconds, total_loss, seen = 0.0, [], 0.0, 0
+            cuda_events = []
             waiting = perf_counter()
             for values, rows in prefetched_batches(
                 datasets["train"], config.batch_size, config.seed + epoch
             ):
                 load_wait += perf_counter() - waiting
                 step_started = perf_counter()
-                inputs = torch.from_numpy(values).to(device)
+                if device.type == "cuda":
+                    start_event = torch.cuda.Event(enable_timing=True)
+                    end_event = torch.cuda.Event(enable_timing=True)
+                    start_event.record()
+                inputs = torch.from_numpy(values).to(
+                    device, non_blocking=device.type == "cuda"
+                )
                 labels = torch.tensor(
                     [row["target"] for row in rows], dtype=torch.float32, device=device
                 )
@@ -278,11 +295,20 @@ def run_cpu_training(
                 nn.utils.clip_grad_norm_(model.parameters(), config.clip_norm)
                 optimizer.step()
                 if device.type == "cuda":
-                    torch.cuda.synchronize(device)
-                step_seconds.append(perf_counter() - step_started)
-                total_loss += float(loss.detach()) * len(rows)
+                    total_loss = total_loss + loss.detach() * len(rows)
+                    end_event.record()
+                    cuda_events.append((start_event, end_event))
+                else:
+                    step_seconds.append(perf_counter() - step_started)
+                    total_loss += float(loss.detach()) * len(rows)
                 seen += len(rows)
                 waiting = perf_counter()
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+                step_seconds = [
+                    start.elapsed_time(end) / 1000 for start, end in cuda_events
+                ]
+                total_loss = float(total_loss)
             train_seconds = perf_counter() - started
             validation = _evaluate(
                 model, datasets["validation"], config.batch_size, device
@@ -340,7 +366,7 @@ def run_cpu_training(
 def run_cpu_pilot(
     tinygrad_run: Path,
     output: Path,
-    config: CpuPilotConfig = CpuPilotConfig(),
+    config: CpuPilotConfig | None = None,
     *,
     data_root: Path | None = None,
 ) -> dict:
@@ -354,6 +380,8 @@ def run_cpu_pilot(
     Returns:
         Runtime and validation summaries for the three architectures.
     """
+    if config is None:
+        config = CpuPilotConfig()
     return run_cpu_training(
         tinygrad_run / "profile/window_split.parquet",
         tinygrad_run / f"profile/normalizer-{config.duration}s.npz",

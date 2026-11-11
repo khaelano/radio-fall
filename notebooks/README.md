@@ -12,8 +12,8 @@ needed:
   comparison; use `02_preprocess.ipynb` for current work.
 - `03_training.ipynb` compares CNN, LSTM, GRU, and random forest models.
 - `03_training_tinygrad.ipynb` profiles sequence models on OpenCL.
-- `03_training_pytorch_cpu.ipynb` runs PyTorch on CPU or NVIDIA CUDA, compares
-  the saved tinygrad selection, and offers opt-in full-data training.
+- `03_training_pytorch.ipynb` runs PyTorch sequence models on CPU or NVIDIA
+  CUDA, with independent pilot and full-data training sections.
 
 For CPU PyTorch, run `uv sync --inexact --extra analysis --extra detection
 --extra notebook`. For the CUDA 13.0 wheel on Linux or Windows, use
@@ -23,13 +23,12 @@ enabled together. Restart the project notebook kernel after switching wheels.
 Set `DEVICE = "cuda"` to require an available NVIDIA GPU, or use `"auto"` to
 select CUDA when available and CPU otherwise. A compatible NVIDIA GPU and driver
 are required for CUDA. The notebook prints and records the device actually used.
-Reduce `BATCH_SIZE` if GPU memory is insufficient; the saved pilot timing
-comparison requires its original batch size of 32. The saved tinygrad pilot is
-optional when its comparison is disabled.
+Reduce `BATCH_SIZE` for the pilot or the `batch_size` in each model's settings
+for a full run if GPU memory is insufficient.
 
 Reusable analysis code lives in `src/fall_detection/` and is tested under
-`tests/`. These notebooks investigate activity phases; they do not replace the
-separate experimental live fall detector.
+`tests/`. These notebooks investigate activity phases and cue-labelled falls;
+they do not replace the separate experimental live fall detector.
 
 Exploration and preprocessing read `data/raw/sessions/<session-id>.zip` through
 the shared analysis loaders. Derived Parquet caches remain under `data/interim/`.

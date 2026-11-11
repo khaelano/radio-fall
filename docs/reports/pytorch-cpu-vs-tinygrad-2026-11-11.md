@@ -36,14 +36,15 @@ quality. The PyTorch process high-water resident memory reached 0.71 GiB after
 CNN and 1.00 GiB after the recurrent models, while the tinygrad workers peaked
 at 0.81–1.12 GB in their cgroups. The memory measures have different scopes.
 
-The executed notebook is
-[`notebooks/latest/03_training_pytorch_cpu.ipynb`](../../notebooks/latest/03_training_pytorch_cpu.ipynb).
+The experiment used the former `03_training_pytorch_cpu.ipynb`. Its current
+successor is [`03_training_pytorch.ipynb`](../../notebooks/latest/03_training_pytorch.ipynb);
+the notebook has since changed.
 CPU metrics and checkpoints are under
 `data/processed/pytorch_cpu_segment_pilot/notebook/20261111T105709133687Z/`;
 the paired tinygrad metrics and worker records are under
 `data/processed/tinygrad_segment_pilot/akmal_v2_cpu_comparison/`.
-The notebook also contains an opt-in complete-data CPU training section for
-2, 4, and 6 second windows. That section has not been run.
+At the time, the notebook also contained an opt-in complete-data CPU training
+section for 2, 4, and 6 second windows. That section was not run for this report.
 
 ## Larger stratified pilot
 

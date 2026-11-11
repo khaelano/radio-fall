@@ -347,11 +347,10 @@ def test_video_markers_match_csi_attempt_timeline_and_gate_acceptance(tmp_path):
     controller.tick()
     assert video.starts[0][1] == 0
     assert video.ends[0] == (video.starts[0][0], 4_000_000_000)
-    with pytest.raises(RuntimeError, match="finalizing"):
-        controller.dispatch(OperatorCommand.ACCEPT)
+    assert controller.dispatch(OperatorCommand.ACCEPT).accept_pending
     video.finished = {"status": "complete", "frames": 120}
     clock.advance(5)  # Review does not extend capture/video boundaries.
-    controller.dispatch(OperatorCommand.ACCEPT)
+    assert not controller.tick().accept_pending
     assert len(video.ends) == 1  # Review does not extend video or sensing capture.
     metadata = json.loads((video.starts[0][0] / "attempt.json").read_text())
     assert metadata["video"]["metadata_file"] == "video.json"
@@ -397,3 +396,55 @@ def test_video_finalization_failure_prevents_accepted_metadata(tmp_path):
         controller.dispatch(OperatorCommand.ACCEPT)
     metadata = json.loads((video.starts[0][0] / "attempt.json").read_text())
     assert metadata["status"] == "invalid"
+
+
+@pytest.mark.parametrize("command", [OperatorCommand.RETRY, OperatorCommand.SKIP, OperatorCommand.END_SESSION])
+def test_queued_accept_can_be_cancelled_without_later_accepting(tmp_path, monkeypatch, command):
+    from fall_detection.collection.capture import TrialCapture
+
+    clock = FakeClock()
+    c = make_controller(tmp_path, clock)
+    start_ready(c)
+    c.dispatch(OperatorCommand.START_TRIAL)
+    for seconds in (1, 2, 1):
+        clock.advance(seconds)
+        c.tick()
+    capture = c._last_capture
+    monkeypatch.setattr(TrialCapture, "writes_complete", property(lambda self: False))
+    c._recording_io = object()  # Guard enabled; no flush or disk wait is available.
+    assert c.dispatch(OperatorCommand.ACCEPT).accept_pending
+    assert c.tick().accept_pending
+    assert not c.dispatch(command).accept_pending
+    monkeypatch.setattr(TrialCapture, "writes_complete", property(lambda self: True))
+    assert not c.tick().accept_pending
+    assert json.loads((capture.path / "attempt.json").read_text())["status"] != "accepted"
+    c._recording_io = None
+    c.dispatch(OperatorCommand.END_SESSION)
+
+
+def test_queued_accept_reports_background_storage_failure(tmp_path, monkeypatch):
+    from fall_detection.collection.capture import TrialCapture
+
+    clock = FakeClock()
+    c = make_controller(tmp_path, clock)
+    start_ready(c)
+    c.dispatch(OperatorCommand.START_TRIAL)
+    for seconds in (1, 2, 1):
+        clock.advance(seconds)
+        c.tick()
+    capture = c._last_capture
+    monkeypatch.setattr(TrialCapture, "writes_complete", property(lambda self: False))
+    c._recording_io = object()
+    c.dispatch(OperatorCommand.ACCEPT)
+
+    def failed(self):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(TrialCapture, "writes_complete", property(failed))
+    result = c.tick()
+    assert not result.accept_pending
+    assert result.attempt_status == "invalid"
+    assert "disk full" in result.message
+    assert json.loads((capture.path / "attempt.json").read_text())["status"] == "pending_review"
+    c._recording_io = None
+    c.dispatch(OperatorCommand.END_SESSION)

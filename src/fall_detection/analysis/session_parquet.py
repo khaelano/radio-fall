@@ -244,6 +244,8 @@ def load_parquet_session(
             timing/payload/phase validation fails. Failed builds have no valid
             export manifest and are rebuilt on the next call.
     """
+    if Path(session_dir).is_file():
+        return _load_archive_session(Path(session_dir), Path(export_dir), rebuild=rebuild, progress=progress)
     session = load_session(session_dir)
     destination = Path(export_dir).resolve()
     raw_root = (session.path.parent.parent
@@ -319,3 +321,47 @@ def load_parquet_session(
         destination, cached, pd.read_parquet(destination / "attempts.parquet"),
         pd.read_parquet(destination / "phases.parquet"),
     )
+
+
+def _load_archive_session(source: Path, destination: Path, *, rebuild: bool, progress) -> ParquetSession:
+    """Build from verified analysis members; keep temporary CSVs out of caches."""
+    from ..storage import Recording
+
+    source, destination = source.resolve(), destination.resolve()
+    raw_root = source.parent.parent if source.parent.name == "sessions" else source
+    if destination.is_relative_to(raw_root):
+        raise ValueError("Place Parquet exports outside raw session data")
+    with Recording(source) as recording:
+        digest = hashlib.sha256(json.dumps(recording.manifest, sort_keys=True).encode())
+        for module in (Path(__file__), Path(phase_signals.__file__)):
+            digest.update(module.read_bytes())
+        fingerprint = digest.hexdigest()
+        manifest_path = destination / "session.json"
+        try:
+            cached = json.loads(manifest_path.read_text())
+        except (OSError, ValueError):
+            cached = {}
+        if rebuild or not (
+            cached.get("archive_fingerprint") == fingerprint
+            and cached.get("schema_version") == SCHEMA_VERSION
+            and all((destination / name).is_file() for name in (
+                "attempts.parquet", "phases.parquet", "packets.parquet"))
+        ):
+            if progress:
+                progress("Preparing temporary analysis members from raw archive")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with TemporaryDirectory(prefix=".archive-analysis-", dir=destination.parent) as tmp:
+                members = [name for name in recording.files if (
+                    name in {"session.json", "protocol.json", "events.jsonl", "session_review.json"}
+                    or name.startswith("trials/") and (
+                        name.endswith("/attempt.json") or "/receivers/" in name))]
+                root = recording.extract(Path(tmp) / "session", members=members)
+                built = load_parquet_session(root, destination, rebuild=True, progress=progress)
+                cached = dict(built.manifest, archive_fingerprint=fingerprint,
+                              source_directory=str(source), source_fingerprint=fingerprint)
+                temporary = destination / "session.json.tmp"
+                temporary.write_text(json.dumps(cached, indent=2) + "\n")
+                temporary.replace(manifest_path)
+        return ParquetSession(destination, cached,
+                              pd.read_parquet(destination / "attempts.parquet"),
+                              pd.read_parquet(destination / "phases.parquet"))

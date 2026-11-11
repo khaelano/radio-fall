@@ -40,7 +40,7 @@ def test_complete_application_closes_inputs_and_windows(
         monkeypatch.setattr(
             command,
             "MetadataDialog",
-            lambda widgets, protocol: SimpleNamespace(
+            lambda widgets, protocol, *, continuous=False: SimpleNamespace(
                 get=lambda: SessionMetadata("test-participant"),
                 block_ids=lambda: (protocol.blocks[0][0],),
             ),
@@ -133,7 +133,7 @@ def test_canceling_collection_setup_releases_unstarted_camera(tmp_path, monkeypa
         ),
     )
     monkeypatch.setattr(
-        command, "MetadataDialog", lambda *args: SimpleNamespace(get=lambda: None)
+        command, "MetadataDialog", lambda *args, **kwargs: SimpleNamespace(get=lambda: None)
     )
     monkeypatch.setattr(
         command,

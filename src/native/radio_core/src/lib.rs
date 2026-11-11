@@ -31,5 +31,6 @@ fn _radio_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bindings::simd_kernel, m)?)?;
     m.add_function(wrap_pyfunction!(hampel::hampel_filter, m)?)?;
     m.add_function(wrap_pyfunction!(amplitude::prepare_amplitude, m)?)?;
+    m.add_function(wrap_pyfunction!(amplitude::prepare_magnitude, m)?)?;
     Ok(())
 }

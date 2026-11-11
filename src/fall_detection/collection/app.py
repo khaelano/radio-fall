@@ -86,7 +86,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     with ExitStack() as resources:
-        return _run(args, parser, resources)
+        result = _run(args, parser, resources)
+    controller = getattr(args, "_archive_controller", None)
+    if controller is not None and controller._store is not None:
+        from .archive import finalize_recording
+
+        print(f"Saving raw recording from {controller.session_root}...", flush=True)
+        try:
+            archive = finalize_recording(controller.session_root)
+        except Exception as exc:
+            print(f"Raw archive finalization failed; working session retained: {exc}", file=sys.stderr)
+            return 1
+        print(f"Saved raw recording: {archive}")
+    return result
 
 
 def _run(
@@ -147,7 +159,8 @@ def _run(
             return 0
 
     try:
-        recording_io = RecordingIO(interval_s=args.recording_flush_seconds)
+        recording_io = RecordingIO(interval_s=args.recording_flush_seconds,
+                                   compressed=not (saved and (saved.root / "events.jsonl").exists()))
     except ValueError as exc:
         parser.error(str(exc))
     resources.callback(recording_io.close)
@@ -206,6 +219,7 @@ def _run(
             **radio.environment(),
             "video": video.config.metadata() if video else None,
             "recording_io": {"flush_interval_s": args.recording_flush_seconds,
+                             "compression": "zstd" if recording_io.compressed else "none",
                              "capacity_bytes": recording_io.capacity_bytes},
         },
         telemetry_provider=lambda: radio.manager.telemetry_snapshot(),
@@ -213,6 +227,7 @@ def _run(
         recording_io=recording_io,
         manual_confirmation_required=not args.continuous,
     )
+    args._archive_controller = controller
     profile = radio.settings.profile
     dashboard = LiveDashboard(
         radio, fps=args.fps, window_seconds=COLLECTOR_VIEW_SECONDS

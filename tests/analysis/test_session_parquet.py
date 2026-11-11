@@ -238,3 +238,29 @@ def test_amplitude_session_reuses_valid_export_without_pandas_tables(capture, mo
     assert len(actual.attempts) == 2
     with pytest.raises(ValueError, match="outside raw"):
         load_amplitude_session(root, root / "parquet", progress=None)
+
+
+def test_archive_export_survives_source_removal_and_reuses_cache(capture, monkeypatch):
+    import shutil
+    import pandas as pd
+    from fall_detection.storage import create_archive, Recording
+    from fall_detection.analysis.amplitude_pipeline import load_amplitude_session
+
+    root, destination = capture
+    expected = load_parquet_session(root, destination / "legacy").read_packets()
+    archive = root.with_suffix(".zip")
+    create_archive(root, archive)
+    shutil.rmtree(root)
+    exported = load_parquet_session(archive, destination / "archive")
+    pd.testing.assert_frame_equal(exported.read_packets(), expected)
+    assert exported.manifest["source_directory"] == str(archive)
+    assert not list(destination.glob(".archive-analysis-*"))
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Valid archive cache must not extract again")
+
+    monkeypatch.setattr(Recording, "extract", forbidden)
+    cached = load_parquet_session(archive, destination / "archive")
+    pd.testing.assert_frame_equal(cached.read_packets(), expected)
+    amplitude = load_amplitude_session(archive, destination / "archive", progress=None)
+    assert len(amplitude.attempts) == 2

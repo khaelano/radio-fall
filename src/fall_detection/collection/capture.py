@@ -11,6 +11,7 @@ import re
 from threading import RLock
 from typing import Any, TextIO
 
+from ..storage.compressed import physical_path, read_bytes
 from ..contracts import ARTIFACT_SCHEMA_VERSION
 from ..radio.acquisition.clock_sync import ClockSyncEstimate, ClockSyncSample
 from ..radio.acquisition.protocol import CSI_HEADER, CsiRecord, format_csi_record
@@ -309,7 +310,7 @@ class SessionArtifactStore:
         """Lock and validate an existing session before allowing any mutation."""
         from .resume import load_session_resume
 
-        _reject_legacy_writer(root / "events.jsonl")
+        _reject_legacy_writer(physical_path(root / "events.jsonl"))
         stream = (recording_io.open(root / "events.jsonl", "a") if recording_io
                   else (root / "events.jsonl").open("a", encoding="utf-8"))
         try:
@@ -346,7 +347,7 @@ class SessionArtifactStore:
         self._session["status"] = "open"
         _write_json(self.root / "session.json", self._session)
         # A fully written last JSON value may lack its final newline after exit.
-        data = (self.root / "events.jsonl").read_bytes()
+        data = read_bytes(self.root / "events.jsonl")
         if data and not data.endswith(b"\n"):
             self._event_file.write("\n")
         self.event("session_resumed", monotonic_ns, **value)

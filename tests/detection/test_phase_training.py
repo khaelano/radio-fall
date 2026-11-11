@@ -1,78 +1,55 @@
-"""Check deterministic explicit augmentation and the absence of fitted scaling."""
-
-import importlib.util
-from pathlib import Path
+"""Native phase regression coverage independent of retired training notebooks."""
 
 import numpy as np
-import pandas as pd
 import pytest
 
-path = Path(__file__).resolve().parents[2] / "notebooks/trash/06_phase_shifted/run.py"
-spec = importlib.util.spec_from_file_location("phase_random20_experiment", path)
-experiment = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(experiment)
 
+def reference_phase_windows(rows: list, starts: list[int]) -> np.ndarray:
+    """Independently compute lagged phase/bin means with integer capture times."""
+    result = [[] for _ in starts]
+    for rx in range(4):
+        unique = {(t, r.sequence): r for r, receiver, t in rows if receiver == rx}
+        times, phases = [], []
+        for (capture, _), record in sorted(unique.items()):
+            encoded = record.wire
+            phase = record.phase_bytes()
+            if encoded[37:40] != bytes([4, 0, 0]) or phase is None:
+                continue
+            tones, _, raw, calibrated = phase
+            order = np.argsort(tones)
+            tones = np.asarray(tones)[order]
+            keep = (np.abs(tones) > 1) & (np.abs(tones) <= 122)
+            values = np.frombuffer(calibrated, dtype="=f8")[order][keep].copy()
+            valid = np.isfinite(np.frombuffer(raw, dtype="=f8")[order][keep])
+            values[~valid] = np.nan
+            if encoded[50] != 0:
+                values[:] = np.nan
+            times.append(capture)
+            phases.append(values)
+        times = np.asarray(times, dtype=np.int64)
+        phases = np.asarray(phases)
+        previous = np.searchsorted(times, times - 100_000_000, side="right") - 1
+        valid = (previous >= 0) & (
+            (times - times[np.maximum(previous, 0)]) <= 150_000_000
+        )
+        delta = np.full_like(phases, np.nan)
+        delta[valid] = np.angle(np.exp(1j * (phases[valid] - phases[previous[valid]])))
+        for wi, start in enumerate(starts):
+            inside = (times >= start) & (times < start + 4_000_000_000)
+            bins = (times[inside] - start) * 25 // 1_000_000_000
+            for component in [np.sin(delta[inside]), np.cos(delta[inside])]:
+                finite = np.isfinite(component)
+                total = np.zeros((100, 242))
+                count = np.zeros_like(total)
+                np.add.at(total, bins, np.where(finite, component, 0))
+                np.add.at(count, bins, finite)
+                result[wi].append(
+                    np.divide(
+                        total, count, out=np.full_like(total, np.nan), where=count > 0
+                    )
+                )
+    return np.asarray(result, dtype=np.float32)
 
-def test_random_shifts_are_reproducible_distinct_and_cover_both_sides():
-    config = experiment.read_json(path.with_name("config.json"))
-    first = experiment.random_offsets("001/02", config)
-    assert first == experiment.random_offsets("001/02", config)
-    assert first != experiment.random_offsets("002/01", config)
-    assert len(first) == len(set(first)) == 20
-    assert all(-0.5 <= value <= 0.5 and value != 0 for value in first)
-    assert sum(value < 0 for value in first) == 10
-
-
-def test_phase_inputs_keep_values_unchanged_and_zero_only_missing_samples():
-    values = np.array([[[0.7, -0.2, np.nan]], [[1.0, 0.3, np.nan]]], dtype="float32")
-    result = experiment.encode(values)
-    np.testing.assert_array_equal(result[:2], np.nan_to_num(values))
-    np.testing.assert_array_equal(result[2:], np.isfinite(values))
-
-
-def test_dataset_exposes_every_shift_with_its_original_label():
-    raw = np.random.default_rng(42).uniform(-1, 1, (42, 8, 2, 3)).astype("float32")
-    table = pd.DataFrame(dict(window_index=range(42), target=[0] * 21 + [1] * 21))
-    dataset = experiment.PhaseDataset(raw, table)
-    assert len(dataset) == 42
-    for i in range(len(dataset)):
-        values, target = dataset[i]
-        np.testing.assert_array_equal(values[:8], raw[i])
-        assert target.item() == int(i >= 21)
-
-
-def test_preparation_replaces_failed_shifts_without_reducing_training_quota(
-    monkeypatch,
-):
-    config = experiment.read_json(path.with_name("config.json"))
-    calls = []
-
-    def fake(job):
-        offsets = job[2]["offsets_seconds"]
-        calls.append(offsets)
-        q = [
-            dict(
-                offset_seconds=offset,
-                phase_change_coverage=0.1 if len(calls) == 1 and i == 1 else 0.9,
-            )
-            for i, offset in enumerate(offsets)
-            for _ in range(4)
-        ]
-        return q, dict(phase_change=np.zeros((len(offsets), 8, 2, 3), dtype="float32"))
-
-    monkeypatch.setattr(experiment, "prepare_one", fake)
-    rows, values, audit = experiment.prepare_attempt(
-        ("unused", dict(attempt_id="001/02", split="train"), config)
-    )
-    assert len(rows) == len(values) == 21
-    assert len(calls) == 2
-    assert sum(row["central"] for row in rows) == 1
-    assert len({row["offset_seconds"] for row in rows}) == 21
-    assert any(not row["qualified"] for row in audit)
-    rows, _, _ = experiment.prepare_attempt(
-        ("unused", dict(attempt_id="002/01", split="test"), config)
-    )
-    assert len(rows) == 1 and rows[0]["offset_seconds"] == 0
 
 
 def test_phase_native_matches_independent_integer_clock_reference(native_record):
@@ -85,7 +62,7 @@ def test_phase_native_matches_independent_integer_clock_reference(native_record)
         rows.extend(
             (record, rx, start - 150_000_000 + i * 40_000_000) for rx in range(4)
         )
-    reference = experiment.reference_phase_windows(rows, [start, start + 13_791_235])
+    reference = reference_phase_windows(rows, [start, start + 13_791_235])
     for kernel in ["scalar", "auto"]:
         native = core.CnnPreprocessor(
             [0.0] * 968, [1.0] * 968, kernel=kernel, representation="phase_change"
@@ -102,9 +79,10 @@ def test_phase_native_matches_independent_integer_clock_reference(native_record)
                 tensor = np.frombuffer(window.tensor_bytes(), dtype="=f4").reshape(
                     16, 100, 242
                 )
-                np.testing.assert_array_equal(tensor, experiment.encode(raw))
+                np.testing.assert_array_equal(tensor, np.concatenate([np.nan_to_num(raw), np.isfinite(raw)], axis=-3).astype("float32"))
         finally:
             native.close()
+
 
 
 def test_phase_maximum_lag_accepts_exact_150_ms_and_rejects_one_ns_more(native_record):
@@ -131,62 +109,9 @@ def test_phase_maximum_lag_accepts_exact_150_ms_and_rejects_one_ns_more(native_r
         native.close()
 
 
+
 def test_phase_native_constructor_rejects_fitted_scaling():
     from fall_detection import _radio_native as core
 
     with pytest.raises(ValueError, match="identity parameters"):
         core.CnnPreprocessor([1.0] * 968, [2.0] * 968, representation="phase_change")
-
-
-def test_training_visits_every_materialized_window_and_saves_unscaled_checkpoints(
-    tmp_path,
-):
-    config = experiment.read_json(path.with_name("config.json"))
-    config.update(max_epochs=2, patience=2, threads=1)
-    rows = []
-    for split in ["train", "validation", "test"]:
-        for target in [0, 1]:
-            offsets = (
-                [0.0] + list(np.linspace(-0.49, 0.49, 20))
-                if split == "train"
-                else [0.0]
-            )
-            rows.extend(
-                dict(
-                    attempt_id=f"{split}/{target}",
-                    scenario_id=f"{split}_{target}",
-                    split=split,
-                    target=target,
-                    offset_seconds=offset,
-                    central=offset == 0,
-                )
-                for offset in offsets
-            )
-    table = pd.DataFrame(rows)
-    table.insert(0, "window_index", range(len(table)))
-    table.to_csv(tmp_path / "windows.csv", index=False)
-    table.drop_duplicates("attempt_id").to_csv(tmp_path / "trials.csv", index=False)
-    raw = (
-        np.random.default_rng(42).uniform(-1, 1, (len(rows), 8, 8, 8)).astype("float32")
-    )
-    np.save(tmp_path / "phase_change.npy", raw)
-    experiment.write_json(
-        tmp_path / "manifest.json",
-        dict(
-            config=config,
-            windows_sha256=experiment.sha256(tmp_path / "windows.csv"),
-            trials_sha256=experiment.sha256(tmp_path / "trials.csv"),
-            arrays_sha256={
-                "phase_change": experiment.sha256(tmp_path / "phase_change.npy")
-            },
-        ),
-    )
-    experiment.train(config, tmp_path)
-    history = pd.read_csv(tmp_path / "training_history.csv")
-    assert history.windows_per_epoch.eq(42).all()
-    assert history.updates_per_epoch.eq(3).all()
-    assert set(history.seed) == {17, 29, 43}
-    assert len(list((tmp_path / "models").glob("*.pt"))) == 3
-    assert not list((tmp_path / "models").glob("*.npz"))
-    selection = experiment.read_json(tmp_path / "selection.json")
-    assert selection["normalization"] == "none"

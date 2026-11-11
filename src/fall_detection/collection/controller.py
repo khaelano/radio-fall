@@ -85,6 +85,7 @@ class SessionSnapshot:
     message: str
     attempt_status: str | None
     action_confirmed: bool = False
+    accept_pending: bool = False
 
     @property
     def progress_text(self) -> str:
@@ -168,6 +169,7 @@ class SessionController:
         self._health = HealthSnapshot()
         self._message = "enter session metadata"
         self._attempt_status: str | None = None
+        self._accept_requested = False
         self._action_confirmed = False
         self._action_confirmed_monotonic_ns: int | None = None
         self._attempt_telemetry_start: BackhaulTelemetrySnapshot | None = None
@@ -344,6 +346,13 @@ class SessionController:
 
         with self._lock:
             self._expire_draining_locked(self._monotonic_ns())
+            if self._accept_requested:
+                try:
+                    self._accept_locked()
+                except (OSError, RuntimeError, BufferError) as exc:
+                    self._accept_requested = False
+                    self._attempt_status = "invalid"
+                    self._message = f"acceptance failed: {exc}; retry or skip this attempt"
             current = self._clock() if now is None else now
             if (
                 self._state is SessionState.COUNTDOWN
@@ -601,11 +610,15 @@ class SessionController:
         if self._attempt_status == "invalid":
             raise RuntimeError("an invalid attempt cannot be accepted")
         if self._recording_io and self._last_capture and not self._last_capture.writes_complete:
-            raise RuntimeError("recording is still saving; wait before accepting")
+            self._accept_requested = True
+            self._message = "accept queued; saving recording in the background"
+            return
         if self._video is not None and self._last_capture is not None:
             result = self._video.result(self._last_capture.path)
             if result is None:
-                raise RuntimeError("video is still finalizing; wait before accepting")
+                self._accept_requested = True
+                self._message = "accept queued; finalizing video in the background"
+                return
             if result.get("status") != "complete" or not result.get("frames", 0):
                 self._last_capture.update_status(
                     "invalid", interruption_reason="video recording failed"
@@ -620,6 +633,7 @@ class SessionController:
             raise RuntimeError("retry is only available during review")
         if self._attempt_status not in ("invalid", "pending_review"):
             raise RuntimeError("there is no retryable attempt")
+        self._accept_requested = False
         if self._attempt_status == "pending_review":
             self._finish_capture_locked("rejected", self._clock())
         self._state = SessionState.READY
@@ -639,6 +653,7 @@ class SessionController:
         self._advance_locked("skipped")
 
     def _advance_locked(self, disposition: str) -> None:
+        self._accept_requested = False
         if self._store is not None and self._current_trial is not None:
             self._store.event(
                 "trial_resolved",
@@ -669,6 +684,7 @@ class SessionController:
             )
 
     def _end_session_locked(self, reason: str) -> None:
+        self._accept_requested = False
         if self._state is SessionState.COMPLETE:
             return
         if self._state in (
@@ -798,4 +814,5 @@ class SessionController:
             message=self._message,
             attempt_status=self._attempt_status,
             action_confirmed=self._action_confirmed,
+            accept_pending=self._accept_requested,
         )

@@ -81,17 +81,13 @@ unsafe fn magnitudes_avx2(i: &[u8], q: &[u8], out: &mut [f64]) {
     }
 }
 
-/// Per-row flags: pair count is inferred from offsets; flags encode first-word
-/// invalidity and driver validity. Python validates HE20 format before entry.
-#[pyfunction]
-pub fn prepare_amplitude<'py>(
-    py: Python<'py>,
+fn decode_magnitudes(
     i: &[u8],
     q: &[u8],
-    offsets: Vec<usize>,
-    first_word: Vec<bool>,
-    driver_valid: Vec<bool>,
-) -> PyResult<Buffers<'py>> {
+    offsets: &[usize],
+    first_word: &[bool],
+    driver_valid: &[bool],
+) -> PyResult<Vec<f64>> {
     let rows = first_word.len();
     if rows == 0
         || driver_valid.len() != rows
@@ -106,41 +102,71 @@ pub fn prepare_amplitude<'py>(
     {
         return Err(PyValueError::new_err("Invalid HE20 I/Q lengths or offsets"));
     }
-    let (masked, normalized, lower, upper) = py.detach(|| {
-        let mut masked = vec![f64::NAN; rows * 245];
-        masked
-            .par_chunks_mut(245)
-            .enumerate()
-            .for_each(|(row, out)| {
-                if !driver_valid[row] {
-                    return;
+    let mut masked = vec![f64::NAN; rows * 245];
+    masked
+        .par_chunks_mut(245)
+        .enumerate()
+        .for_each(|(row, out)| {
+            if !driver_valid[row] {
+                return;
+            }
+            let start = offsets[row];
+            let count = offsets[row + 1] - start;
+            let mut amplitudes = [0.0; 256];
+            magnitudes(
+                &i[start * 2..(start + count) * 2],
+                &q[start * 2..(start + count) * 2],
+                &mut amplitudes[..count],
+            );
+            for (column, value) in out.iter_mut().enumerate() {
+                let physical = column as i32 - 122;
+                let slot = if count == 256 {
+                    (physical + 128) as usize
+                } else if physical >= 0 {
+                    physical as usize
+                } else {
+                    (245 + physical) as usize
+                };
+                if physical.abs() <= 1 || (first_word[row] && slot < 2) {
+                    continue;
                 }
-                let start = offsets[row];
-                let count = offsets[row + 1] - start;
-                let mut amplitudes = [0.0; 256];
-                magnitudes(
-                    &i[start * 2..(start + count) * 2],
-                    &q[start * 2..(start + count) * 2],
-                    &mut amplitudes[..count],
-                );
-                for (column, value) in out.iter_mut().enumerate() {
-                    let physical = column as i32 - 122;
-                    let slot = if count == 256 {
-                        (physical + 128) as usize
-                    } else if physical >= 0 {
-                        physical as usize
-                    } else {
-                        (245 + physical) as usize
-                    };
-                    if physical.abs() <= 1 || (first_word[row] && slot < 2) {
-                        continue;
-                    }
-                    let amplitude = amplitudes[slot];
-                    if amplitude >= 4.0 {
-                        *value = amplitude;
-                    }
+                let amplitude = amplitudes[slot];
+                if amplitude >= 4.0 {
+                    *value = amplitude;
                 }
-            });
+            }
+        });
+    Ok(masked)
+}
+
+/// Decode masked physical HE20 magnitudes without fitting normalization.
+#[pyfunction]
+pub fn prepare_magnitude<'py>(
+    py: Python<'py>,
+    i: &[u8],
+    q: &[u8],
+    offsets: Vec<usize>,
+    first_word: Vec<bool>,
+    driver_valid: Vec<bool>,
+) -> PyResult<Bound<'py, PyBytes>> {
+    let masked = py.detach(|| decode_magnitudes(i, q, &offsets, &first_word, &driver_valid))?;
+    Ok(PyBytes::new(py, bytes(&masked)))
+}
+
+/// Per-row flags: pair count is inferred from offsets; flags encode first-word
+/// invalidity and driver validity. Python validates HE20 format before entry.
+#[pyfunction]
+pub fn prepare_amplitude<'py>(
+    py: Python<'py>,
+    i: &[u8],
+    q: &[u8],
+    offsets: Vec<usize>,
+    first_word: Vec<bool>,
+    driver_valid: Vec<bool>,
+) -> PyResult<Buffers<'py>> {
+    let rows = first_word.len();
+    let (masked, normalized, lower, upper) = py.detach(|| -> PyResult<_> {
+        let masked = decode_magnitudes(i, q, &offsets, &first_word, &driver_valid)?;
         let mut normalized = vec![f64::NAN; masked.len()];
         let mut lower = vec![f64::NAN; 245];
         let mut upper = vec![f64::NAN; 245];
@@ -175,8 +201,8 @@ pub fn prepare_amplitude<'py>(
                     }
                 }
             });
-        (masked, normalized, lower, upper)
-    });
+        Ok((masked, normalized, lower, upper))
+    })?;
     Ok((
         PyBytes::new(py, bytes(&masked)),
         PyBytes::new(py, bytes(&normalized)),

@@ -35,7 +35,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--experiment",
         type=Path,
-        default=Path("notebooks/trash/06_phase_shifted/artifacts/phase_random20_v1"),
+        help="Experiment artifact directory required with --export-model",
     )
     result.add_argument("--scheme", choices=["fixed", "shift_augmented", "random20"])
     result.add_argument("--replay-session", type=Path)
@@ -241,6 +241,8 @@ def main(argv: list[str] | None = None) -> int:
         cli.error("--replay-session requires --attempt")
     if args.phase_hop_ms <= 0:
         cli.error("--phase-hop-ms must be positive")
+    if args.export_model and args.experiment is None:
+        cli.error("--export-model requires --experiment")
     try:
         if args.export_model:
             bundle = export_bundle(args.experiment, args.export_model, args.scheme)

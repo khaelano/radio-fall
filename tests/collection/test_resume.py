@@ -13,6 +13,32 @@ from test_controller import FakeClock, protocol, ready_health
 ENV = {"receiver_ids": {"00:11:22:33:44:55": "rx-1"}}
 
 
+def test_resume_reads_and_appends_compressed_events(tmp_path):
+    from fall_detection.radio.acquisition.recording_io import RecordingIO
+    from fall_detection.storage.compressed import read_bytes
+
+    clock = FakeClock()
+    old = controller(tmp_path, clock)
+    writer = RecordingIO(compressed=True)
+    old._recording_io = writer
+    old.start_session(SessionMetadata("p01"))
+    old.dispatch(OperatorCommand.END_SESSION)
+    old.flush_radio()
+    writer.close()
+    root = tmp_path / "session"
+    assert not (root / "events.jsonl").exists()
+    before = read_bytes(root / "events.jsonl")
+    new = controller(tmp_path, clock)
+    writer = RecordingIO(compressed=True)
+    new._recording_io = writer
+    new.resume_session(root)
+    new.dispatch(OperatorCommand.END_SESSION)
+    new.flush_radio()
+    writer.close()
+    assert read_bytes(root / "events.jsonl").startswith(before)
+    load_session_resume(root)
+
+
 def controller(tmp_path, clock):
     source = protocol()
     source["blocks"][0]["scenarios"][0]["repetitions"] = 3
@@ -132,7 +158,7 @@ def test_resume_uses_saved_protocol_and_rejects_corruption(tmp_path):
         load_session_resume(root)
 
 
-def test_buffered_attempt_cannot_be_accepted_before_its_streams_are_saved(tmp_path):
+def test_accept_queues_while_saving_and_advances_without_another_click(tmp_path):
     from fall_detection.radio.acquisition.recording_io import RecordingIO
 
     clock = FakeClock()
@@ -147,12 +173,13 @@ def test_buffered_attempt_cannot_be_accepted_before_its_streams_are_saved(tmp_pa
         for step in (1, 2, 1):
             clock.advance(step)
             c.tick()
-        with pytest.raises(RuntimeError, match="still saving"):
-            c.dispatch(OperatorCommand.ACCEPT)
+        queued = c.dispatch(OperatorCommand.ACCEPT)
+        assert queued.accept_pending
+        assert queued.trial.ordinal == 1
+        assert queued.attempt_status == "pending_review"
         clock.advance(2)
         c.tick()
         writer.flush()
-        c.dispatch(OperatorCommand.ACCEPT)
         assert c.tick().trial.ordinal == 2
     finally:
         c.dispatch(OperatorCommand.END_SESSION)

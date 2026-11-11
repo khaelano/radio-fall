@@ -32,6 +32,21 @@ or skips each attempt after recovery. The session manifest pins the inventory,
 profile, transport policy and receiver identities. CSI attempts remain artifact
 schema 2 with immutable receiver-specific recordings and timing sidecars.
 
+During recording, the native writer compresses CSI, timing and transport/session
+journals directly into complete Zstandard frames in `.zst` files. Compression
+happens on the disk worker at each configured flush; no plain stream copy is
+written. Small mutable JSON metadata and video frame indexes remain plain.
+
+On application exit the collector drains and closes acquisition and video,
+then saves a verified `<session-id>.zip` raw recording beside its working
+directory. Version-2 archives retain the `.zst` bytes directly and expose logical
+file names through the shared reader. The archive includes every original file and compressed Parquet
+receiver tables. Finalization may take several minutes for large sessions;
+wait for `Saved raw recording` before treating it as complete. The working
+directory is retained for recovery and resume. A resumed session saves a new
+numbered archive revision. See the [raw archive contract](../../../docs/session-archive-pilot.md)
+and `fall_detection.storage.Recording` for reading and verified extraction.
+
 An interrupted radio link reconnects automatically while the collector remains
 open. Sensing resumes with a fresh run and timing reference; an active attempt
 is retained as invalid and requires Retry or Skip. See
@@ -51,8 +66,14 @@ age interruption now reconnects automatically while the collector stays open.
 
 Recording data is buffered in a bounded 32 MiB memory pool and written by a
 background thread every five seconds. Adjust this with
-`--recording-flush-seconds 5`. Attempt acceptance waits for saving to finish;
-normal shutdown drains pending data. A crash can lose unflushed data. See the
+`--recording-flush-seconds 5`. Clicking Accept while recording or video saves
+are pending queues the decision immediately. The UI remains responsive, displays
+the queued decision, and advances automatically when saving completes. The next
+trial becomes available after that completion; accepted metadata is never
+published before the recording has saved successfully. Retry, Skip and End
+Session cancel the queued decision. A queued decision is in memory, so closing
+the collector before it completes leaves the attempt incomplete. Normal shutdown
+drains pending data. A crash can lose unflushed data. See the
 [recovery guide](../../../docs/automatic-radio-recovery.md) for precise acceptance
 and resume behavior.
 

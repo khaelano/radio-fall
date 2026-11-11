@@ -9,8 +9,6 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 from sklearn.model_selection import GroupShuffleSplit
-import torch
-from torch.utils.data import Dataset
 
 LABELS = ("preparation", "action", "resting")
 
@@ -69,7 +67,7 @@ def pooled_input(amplitude: np.ndarray, valid: np.ndarray, bins: int) -> np.ndar
     return np.concatenate((np.asarray(means), np.asarray(coverage)), axis=1).astype(np.float32)
 
 
-class WindowDataset(Dataset):
+class WindowDataset:
     """Load individual window archives lazily with a small bounded cache."""
     def __init__(self, frame: pl.DataFrame, bins: int):
         self.rows = frame.select('path', 'index', 'label').iter_rows()
@@ -94,7 +92,7 @@ class WindowDataset(Dataset):
             if len(self.cache) > 1024:
                 self.cache.popitem(last=False)
         self.cache.move_to_end(path)
-        return torch.from_numpy(self.cache[path][window]), LABELS.index(label)
+        return self.cache[path][window], LABELS.index(label)
 
 
 class FileBatchSampler:
@@ -136,4 +134,4 @@ def save_manifest(index: pl.DataFrame, output: str | Path, config: dict) -> None
     (output / 'manifest.json').write_text(json.dumps({'config': config, 'labels': LABELS,
         'source': 'amplitude_windows_v1', 'file_metadata_sha256': fingerprint,
         'files': files, 'split_unit': 'session_id + attempt_key',
-        'limitation': 'one session and participant; whole-recording scaling and centered filtering use future samples'}, indent=2))
+        'limitation': 'attempt-level split does not test participant or session generalization; whole-recording scaling and centered filtering use future samples'}, indent=2))

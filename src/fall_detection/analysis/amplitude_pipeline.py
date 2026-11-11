@@ -40,6 +40,9 @@ def load_amplitude_session(
     from ..session_inspector.models import load_session
 
     raw_dir, parquet_dir = Path(raw_dir), Path(parquet_dir).resolve()
+    if raw_dir.is_file():
+        manifest = load_parquet_session(raw_dir, parquet_dir, progress=progress).manifest
+        return AmplitudeSession(parquet_dir, manifest, pl.read_parquet(parquet_dir / "attempts.parquet"))
     raw_session = load_session(raw_dir)
     raw_root = (raw_session.path.parent.parent
                 if raw_session.path.parent.name == "sessions" else raw_session.path)
@@ -72,7 +75,7 @@ class AmplitudeRecording:
 
     metadata: pl.DataFrame
     masked: np.ndarray
-    normalized: np.ndarray
+    normalized: np.ndarray | None
     lower: np.ndarray
     upper: np.ndarray
 
@@ -90,7 +93,8 @@ class AmplitudeRecording:
 class AmplitudePacketReader:
     """Reuse Parquet metadata and read only candidate row groups and columns."""
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, columns: list[str] | None = None):
+        self.columns = COLUMNS if columns is None else columns
         self.path = Path(path)
         self.file = pq.ParquetFile(self.path)
         names = self.file.schema.names
@@ -112,7 +116,7 @@ class AmplitudePacketReader:
     def read(self, attempt_key: str, receiver_id: str) -> pl.DataFrame:
         """Read one recording, also supporting mixed/unknown row-group statistics."""
         groups = sorted(self.groups.get((attempt_key, receiver_id), []) + self.unknown)
-        table = self.file.read_row_groups(groups, columns=COLUMNS, use_threads=False)
+        table = self.file.read_row_groups(groups, columns=self.columns, use_threads=False)
         return pl.from_arrow(table).filter(
             (pl.col("attempt_key") == attempt_key) & (pl.col("receiver_id") == receiver_id)
         )
@@ -122,11 +126,12 @@ class AmplitudePacketReader:
         self.file.close()
 
 
-def prepare_recording(packets: pl.DataFrame) -> AmplitudeRecording:
+def prepare_recording(packets: pl.DataFrame, *, magnitude_only: bool = False) -> AmplitudeRecording:
     """Decode, physically align, mask and normalize a recording in Rust.
 
     Args:
         packets: Polars rows from the enriched session Parquet contract.
+        magnitude_only: Skip normalization; normalized is None and extrema empty.
 
     Returns:
         Masked and normalized float64 matrices and aligned sensing metadata.
@@ -134,7 +139,7 @@ def prepare_recording(packets: pl.DataFrame) -> AmplitudeRecording:
     Raises:
         ValueError: Mixed identities, unsupported layouts or corrupt payloads/times.
     """
-    from fall_detection._radio_native import prepare_amplitude
+    from fall_detection._radio_native import prepare_amplitude, prepare_magnitude
 
     if packets.is_empty() or any(
         packets[name].n_unique() != 1 or packets[name].null_count()
@@ -170,18 +175,23 @@ def prepare_recording(packets: pl.DataFrame) -> AmplitudeRecording:
         raise ValueError("Null I/Q sample")
     start, stop = int(i.offsets[0].as_py()), int(i.offsets[-1].as_py())
     qstart, qstop = int(q.offsets[0].as_py()), int(q.offsets[-1].as_py())
-    raw, normalized, lower, upper = prepare_amplitude(
+    result = (prepare_magnitude if magnitude_only else prepare_amplitude)(
         i.values.slice(start, stop-start).to_numpy().astype(np.int16, copy=False).tobytes(),
         q.values.slice(qstart, qstop-qstart).to_numpy().astype(np.int16, copy=False).tobytes(),
         (i.offsets.to_numpy() - start).tolist(),
         frame["first_word"].cast(pl.Boolean).to_list(),
         frame["driver_valid"].fill_null(False).to_list(),
     )
+    if magnitude_only:
+        raw, normalized, lower, upper = result, b"", b"", b""
+    else:
+        raw, normalized, lower, upper = result
     shape = (len(frame), 245)
     return AmplitudeRecording(
         frame,
         np.frombuffer(raw, dtype=np.float64).reshape(shape),
-        np.frombuffer(normalized, dtype=np.float64).reshape(shape, order="F"),
+        (None if magnitude_only else
+         np.frombuffer(normalized, dtype=np.float64).reshape(shape, order="F")),
         np.frombuffer(lower, dtype=np.float64), np.frombuffer(upper, dtype=np.float64),
     )
 

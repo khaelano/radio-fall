@@ -21,6 +21,7 @@ struct Status {
     closed: AtomicBool,
     saved: AtomicBool,
     fd: i32,
+    compressed: bool,
 }
 struct Stream {
     file: File,
@@ -192,7 +193,7 @@ impl RecordingWriter {
                 _ => return Err(PyValueError::new_err("unsupported recording open mode")),
             };
             let file = o
-                .open(path)
+                .open(&path)
                 .map_err(|e| PyOSError::new_err(e.to_string()))?;
             #[cfg(unix)]
             let fd = file.as_raw_fd();
@@ -202,6 +203,7 @@ impl RecordingWriter {
                 closed: AtomicBool::new(false),
                 saved: AtomicBool::new(false),
                 fd,
+                compressed: path.ends_with(".zst"),
             });
             let mut s = self.shared.state.lock().unwrap();
             check(&s)?;
@@ -348,7 +350,12 @@ fn run(shared: Arc<Shared>) {
         for (id, mut file, data, status, closing) in jobs.drain(..) {
             let result = (|| {
                 if !data.is_empty() {
-                    file.write_all(&data)?;
+                    if status.compressed {
+                        let encoded = zstd::bulk::compress(&data, 1)?;
+                        file.write_all(&encoded)?;
+                    } else {
+                        file.write_all(&data)?;
+                    }
                 }
                 file.flush()
             })(); // No fsync guarantee.

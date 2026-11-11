@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ..storage.compressed import read_text
 from ..contracts import ARTIFACT_SCHEMA_VERSION
 from .capture import SessionMetadata
 from .protocol import CollectionProtocol, load_protocol
@@ -53,7 +54,7 @@ def load_session_resume(root: Path) -> SessionResume:
         raise ValueError("saved session has no participant identity")
     numbers: dict[int, int] = {}
     resolved: dict[int, str] = {}
-    for line in (root / "events.jsonl").read_text().splitlines():
+    for line in read_text(root / "events.jsonl").splitlines():
         e = json.loads(line)
         if e.get("kind") not in {"attempt_started", "trial_resolved"}:
             continue

@@ -300,7 +300,7 @@ class OperatorWindow:
             and not snapshot.action_confirmed,
             OperatorCommand.ABORT: snapshot.state in active_states,
             OperatorCommand.ACCEPT: snapshot.state is SessionState.REVIEW
-            and snapshot.attempt_status != "invalid",
+            and snapshot.attempt_status != "invalid" and not snapshot.accept_pending,
             OperatorCommand.RETRY: snapshot.state is SessionState.REVIEW,
             OperatorCommand.SKIP: snapshot.state
             in (SessionState.READY, SessionState.REVIEW),

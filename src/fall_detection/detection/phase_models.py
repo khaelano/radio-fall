@@ -74,6 +74,19 @@ def load_phase_models(directory: Path, threads: int = 2) -> dict:
                     model.classes_
                 ).issubset({0, 1, 2}):
                     raise ValueError(f"Incompatible forest features or labels: {path}")
+            elif info.get("backend") == "tinygrad":
+                from tinygrad.nn.state import get_state_dict, load_state_dict, safe_load
+                from .tiny_phase_models import CNNModel, LSTMModel, GRUModel
+
+                if info.get("features") != 490 or tuple(info.get("labels", ())) != LABELS:
+                    raise ValueError(f"Incompatible tinygrad phase metadata: {path}")
+                model = {"cnn": CNNModel, "lstm": LSTMModel, "gru": GRUModel}[kind](
+                    info["features"], int(info["config"]["hidden_size"])
+                )
+                state = safe_load(str(path / "model.safetensors"))
+                if set(state) != set(get_state_dict(model)):
+                    raise ValueError(f"Incompatible tinygrad phase parameters: {path}")
+                load_state_dict(model, state, verbose=False)
             else:
                 checkpoint = torch.load(
                     path / "model.pt", map_location="cpu", weights_only=True
@@ -110,6 +123,10 @@ def score_phase_models(
             raw = model.predict_proba(x.reshape(1, -1))[0]
             probabilities = np.zeros(len(LABELS), dtype=float)
             probabilities[np.asarray(model.classes_, dtype=int)] = raw
+        elif type(model).__module__.endswith("tiny_phase_models"):
+            from tinygrad import Tensor
+
+            probabilities = model(Tensor(x[None])).softmax(axis=1)[0].numpy().astype(float)
         else:
             with torch.inference_mode():
                 logits = model(torch.from_numpy(x).unsqueeze(0))

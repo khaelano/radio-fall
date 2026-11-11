@@ -22,7 +22,6 @@ src/*.egg-info/
 
 # Local thesis drafts, data and literature
 /draft/
-/data/
 /resources/
 
 # Regenerable figures

@@ -54,6 +54,7 @@ fall-detect = "fall_detection.detection.app:main"
 
 [dependency-groups]
 dev = [
+    "dvc>=3.67.1",
     "pytest>=8.0",
     "ruff>=0.17.4",
 ]

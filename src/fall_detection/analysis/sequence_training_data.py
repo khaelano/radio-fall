@@ -34,7 +34,7 @@ def load_sequence_index(root: Path) -> tuple[pl.DataFrame, dict]:
         folder = root / name
         manifest_path = folder / "manifest.json"
         manifest = json.loads(manifest_path.read_text())
-        if manifest["schema"] != "amplitude_sequence_v2":
+        if manifest["schema"] not in ("amplitude_sequence", "amplitude_sequence_v2"):
             raise ValueError(f"Unsupported export schema: {folder}")
         if manifest["coordinates"] != {
             "receivers": [f"rx-{i}" for i in range(1, 5)],
@@ -64,9 +64,17 @@ def load_sequence_index(root: Path) -> tuple[pl.DataFrame, dict]:
                 raise ValueError("Signal path escapes dataset directory")
             if path.stat().st_size != row["bytes"]:
                 raise ValueError(f"Signal size differs: {path}")
+            if manifest["parameters"]["target_hz"] == 120:
+                presence_path = folder / row["presence"]
+                if (
+                    hashlib.sha256(presence_path.read_bytes()).hexdigest()
+                    != row["presence_sha256"]
+                ):
+                    raise ValueError(f"Presence mask differs: {presence_path}")
         frames.append(
             index.with_columns(
                 pl.lit(name).alias("dataset"),
+                pl.lit(manifest["parameters"]["target_hz"]).alias("rate_hz"),
                 pl.col("signal")
                 .map_elements(
                     lambda p: str((folder / p).resolve()), return_dtype=pl.String
@@ -237,12 +245,12 @@ def _selected(
         if any(
             r["stop"] > len(signal)
             or r["start"] < 0
-            or r["stop"] - r["start"] != r["duration"] * 96
+            or r["stop"] - r["start"] != r["duration"] * r.get("rate_hz", 96)
             for r in rows
         ):
             raise ValueError(f"Window bounds differ: {path}")
         values = np.stack([signal[r["start"] : r["stop"]] for r in rows]).reshape(
-            len(rows), rows[0]["duration"] * 96, -1
+            len(rows), rows[0]["duration"] * rows[0].get("rate_hz", 96), -1
         )
         mask = np.isfinite(values)
         return np.where(mask, values, 0), mask
@@ -322,28 +330,49 @@ class SequenceDataset:
         paths = np.arange(len(groups))
         if seed is not None:
             rng.shuffle(paths)
-        batch, batch_masks, metadata = [], [], []
+        batch, batch_masks, batch_presence, metadata = [], [], [], []
         for i in paths:
             path, original = groups[int(i)]
             rows = original.copy()
             if seed is not None:
                 rng.shuffle(rows)
             values, masks = _selected(self.store, path, rows)
-            for value, mask, row in zip(values, masks, rows):
+            presence = None
+            if rows[0].get("rate_hz") == 120:
+                presence_path = Path(path).with_name(Path(path).stem + ".presence.npy")
+                present = np.load(presence_path, mmap_mode="r", allow_pickle=False)
+                presence = np.stack(
+                    [present[row["start"] : row["stop"]] for row in rows]
+                )
+            for position, (value, mask, row) in enumerate(zip(values, masks, rows)):
                 batch.append(value)
                 batch_masks.append(mask)
+                if presence is not None:
+                    batch_presence.append(presence[position])
                 metadata.append(row)
                 if len(batch) == batch_size:
+                    transformed = self.normalizer.transform(
+                        np.stack(batch), np.stack(batch_masks)
+                    )
+                    if batch_presence:
+                        transformed = np.concatenate(
+                            (transformed, np.stack(batch_presence)), axis=-1
+                        )
                     yield (
-                        self.normalizer.transform(
-                            np.stack(batch), np.stack(batch_masks)
-                        ),
+                        transformed,
                         metadata,
                     )
-                    batch, batch_masks, metadata = [], [], []
+                    batch, batch_masks, batch_presence, metadata = [], [], [], []
         if batch:
+            transformed = self.normalizer.transform(
+                np.stack(batch), np.stack(batch_masks)
+            )
+            if batch_presence:
+                transformed = np.concatenate(
+                    (transformed, np.stack(batch_presence)), axis=-1
+                )
             yield (
-                self.normalizer.transform(np.stack(batch), np.stack(batch_masks)),
+                transformed,
                 metadata,
             )
 

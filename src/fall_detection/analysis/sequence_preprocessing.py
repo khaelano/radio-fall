@@ -309,9 +309,10 @@ def label_windows(
     activity: str,
     action_intervals: list[tuple[int, int]],
     bounds_ns: tuple[int, int] | None = None,
+    rate_hz: int = 96,
 ) -> tuple[np.ndarray, int]:
     """Select complete windows by cue-center labels, returning omitted count."""
-    starts = window_starts(len(times_ns), seconds)
+    starts = window_starts(len(times_ns), seconds, rate_hz=rate_hz)
     if bounds_ns is not None:
         begin, end = bounds_ns
         starts = starts[
@@ -375,7 +376,9 @@ def split_packet_epochs(
     return [frame.slice(a, b - a) for a, b in zip(bounds, bounds[1:]) if b > a]
 
 
-def align_epoch(frame: pl.DataFrame) -> tuple[dict[str, np.ndarray], list[dict]]:
+def align_epoch(
+    frame: pl.DataFrame, *, rate_hz: int = 96
+) -> tuple[dict[str, np.ndarray], list[dict]]:
     """Decode four receiver views onto one 120-to-96 Hz sequence grid."""
     if frame.is_empty() or set(frame["receiver_id"].unique()) - set(RECEIVERS):
         raise ValueError("Empty epoch or unknown receiver identity")
@@ -405,7 +408,11 @@ def align_epoch(frame: pl.DataFrame) -> tuple[dict[str, np.ndarray], list[dict]]
     lowest = min(int(v.min()) for v in offsets.values())
     highest = max(int(v.max()) for v in offsets.values())
     anchor = (anchor + lowest) % _MODULUS
-    rounds = source_rounds(0, (highest - lowest) * 96 // 120 + 1)
+    rounds = (
+        np.arange(highest - lowest + 1, dtype=np.int64)
+        if rate_hz == 120
+        else source_rounds(0, (highest - lowest) * 96 // 120 + 1)
+    )
     amplitude = np.full((len(rounds), 4, 245), np.nan)
     capture = np.full((len(rounds), 4), -1, dtype=np.int64)
     origins = []
@@ -432,7 +439,7 @@ def align_epoch(frame: pl.DataFrame) -> tuple[dict[str, np.ndarray], list[dict]]
         origins.append(source_times - off / 120 * 1e9)
     # Nominal grid time is distinct from retained actual per-receiver captures.
     origin = int(np.median(np.concatenate(origins)))
-    times = origin + np.rint(np.arange(len(rounds)) / 96 * 1e9).astype(np.int64)
+    times = origin + np.rint(np.arange(len(rounds)) / rate_hz * 1e9).astype(np.int64)
     return dict(
         amplitude=amplitude,
         valid=np.isfinite(amplitude),
@@ -587,13 +594,12 @@ class SequenceDataset:
     @property
     def output(self) -> Path:
         """Return this dataset's derived directory."""
-        if self.format_version not in (1, 2):
+        if self.format_version not in (1, 2, 3):
             raise ValueError("Unknown sequence format version")
-        return (
-            self.root
-            / f"data/processed/amplitude_sequence_v{self.format_version}"
-            / self.name
-        )
+        if self.format_version == 1:
+            return self.root / "data/processed/amplitude_sequence_v1" / self.name
+        rate = 120 if self.format_version == 3 else 96
+        return self.root / "data/processed/amplitude_sequence" / f"{rate}hz" / self.name
 
     def load(self) -> pl.DataFrame:
         """Load reviewed metadata and report every selected/excluded attempt."""
@@ -693,7 +699,9 @@ class SequenceDataset:
                 for number, epoch in enumerate(
                     split_packet_epochs(frame, gap_seconds=self.gap_seconds)
                 ):
-                    arrays, audit = align_epoch(epoch)
+                    arrays, audit = align_epoch(
+                        epoch, rate_hz=120 if self.format_version == 3 else 96
+                    )
                     identifier = f"{attempt['trial_ordinal']:03d}-{attempt['attempt']:02d}-{number:03d}"
                     phase = np.full(len(arrays["time_ns"]), "unassigned", dtype="<U12")
                     intervals = self.phases.filter(
@@ -736,6 +744,7 @@ class SequenceDataset:
                             **info,
                             path=str(path),
                             samples=len(phase),
+                            sequence_start=int(arrays["sequence"][0]),
                             start_ns=int(arrays["time_ns"][0]),
                             end_ns=int(arrays["time_ns"][-1]),
                         )
@@ -806,7 +815,7 @@ class SequenceDataset:
             values = arrays["amplitude"]
             filtered, replaced = hampel_subcarriers(
                 values.reshape(len(values), -1),
-                np.arange(len(values)) / 96,
+                np.arange(len(values)) / (120 if self.format_version == 3 else 96),
                 window_seconds=0.5,
                 threshold=3,
                 min_periods=5,
@@ -899,8 +908,15 @@ class SequenceDataset:
                         segment["activity_label"],
                         actions,
                         attempt_bounds.get(segment["attempt_key"]),
+                        rate_hz=120 if self.format_version == 3 else 96,
                     )
-                    candidates = len(window_starts(len(times), duration))
+                    candidates = len(
+                        window_starts(
+                            len(times),
+                            duration,
+                            rate_hz=120 if self.format_version == 3 else 96,
+                        )
+                    )
                     boundary_omitted = candidates - len(starts) - omitted
                     omissions.append(
                         dict(
@@ -914,7 +930,9 @@ class SequenceDataset:
                         )
                     )
                     for start in starts:
-                        stop = int(start) + duration * 96
+                        stop = int(start) + duration * (
+                            120 if self.format_version == 3 else 96
+                        )
                         coverage = valid[start:stop].mean(axis=(0, 2))
                         info = {
                             k: segment[k]
@@ -969,9 +987,9 @@ class SequenceDataset:
     def load_exported(self, *, verify_hashes: bool = False) -> pl.DataFrame:
         """Load completed metadata and optionally audit all signal hashes."""
         manifest = json.loads((self.output / "manifest.json").read_text())
-        if self.format_version == 2:
+        if self.format_version in (2, 3):
             if (
-                manifest.get("schema") != "amplitude_sequence_v2"
+                manifest.get("schema") != "amplitude_sequence"
                 or (
                     manifest.get("source", {}).get("source_fingerprint")
                     != self.session.manifest.get("source_fingerprint")
@@ -991,6 +1009,17 @@ class SequenceDataset:
                     or (verify_hashes and file_hash(path) != row["sha256"])
                 ):
                     raise ValueError(f"Export signal differs: {path}")
+                if self.format_version == 3:
+                    presence = (self.output / row["presence"]).resolve()
+                    if (
+                        not presence.is_relative_to(self.output.resolve())
+                        or not presence.is_file()
+                        or (
+                            verify_hashes
+                            and file_hash(presence) != row["presence_sha256"]
+                        )
+                    ):
+                        raise ValueError(f"Export presence mask differs: {presence}")
             self.index = pl.read_parquet(self.output / "window_index.parquet")
             self.segments = pl.read_parquet(self.output / "segments.parquet")
             if len(self.index) != manifest["counts"]["windows"]:
@@ -1057,7 +1086,7 @@ class SequenceDataset:
 
     def export(self) -> pl.DataFrame:
         """Publish v2 signals, or legacy v1 shards when explicitly requested."""
-        if self.format_version == 2:
+        if self.format_version in (2, 3):
             return self.export_v2()
         from fall_detection._radio_native import BACKEND_VERSION
 
@@ -1331,9 +1360,13 @@ class SequenceDataset:
         source_metadata = self.session.manifest
         parameters = dict(
             source_hz=120,
-            target_hz=96,
+            target_hz=120 if self.format_version == 3 else 96,
             normalization=None,
-            sampling="nearest source round; ties upward; no interpolation",
+            sampling=(
+                "all source rounds; no interpolation"
+                if self.format_version == 3
+                else "nearest source round; ties upward; no interpolation"
+            ),
             recording_gap_seconds=self.gap_seconds,
             hampel_seconds=0.5,
             threshold=3,

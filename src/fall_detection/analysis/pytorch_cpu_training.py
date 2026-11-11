@@ -31,7 +31,7 @@ from .sequence_training_data import (
 
 
 class TorchCNN(nn.Module):
-    """Two temporal convolutions and a pooled binary head, like the tinygrad CNN."""
+    """Two temporal convolutions and a pooled binary head, for sequence inputs."""
 
     def __init__(self, features: int, hidden: int) -> None:
         super().__init__()
@@ -75,7 +75,7 @@ MODELS = {"cnn": TorchCNN, "lstm": TorchLSTM, "gru": TorchGRU}
 
 @dataclass(frozen=True)
 class CpuPilotConfig:
-    """Training settings shared with the tinygrad comparison."""
+    """Training settings for PyTorch experiments."""
 
     seed: int = 42
     duration: int = 2
@@ -361,32 +361,3 @@ def run_cpu_training(
         }
     (output / "metrics.json").write_text(json.dumps(result, indent=2) + "\n")
     return result
-
-
-def run_cpu_pilot(
-    tinygrad_run: Path,
-    output: Path,
-    config: CpuPilotConfig | None = None,
-    *,
-    data_root: Path | None = None,
-) -> dict:
-    """Reuse the exact saved tinygrad `akmal` pilot split and normalizer.
-
-    Args:
-        tinygrad_run: Prior tinygrad run containing its profile artifacts.
-        output: Directory for PyTorch artifacts.
-        config: Three-epoch comparison settings.
-
-    Returns:
-        Runtime and validation summaries for the three architectures.
-    """
-    if config is None:
-        config = CpuPilotConfig()
-    return run_cpu_training(
-        tinygrad_run / "profile/window_split.parquet",
-        tinygrad_run / f"profile/normalizer-{config.duration}s.npz",
-        output,
-        config,
-        expected_dataset="akmal",
-        data_root=data_root,
-    )

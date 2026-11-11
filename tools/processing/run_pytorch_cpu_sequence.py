@@ -12,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from fall_detection.analysis.pytorch_cpu_training import (
     CpuPilotConfig,
-    run_cpu_pilot,
     run_cpu_training,
 )
 
@@ -21,7 +20,6 @@ def main() -> None:
     """Run a saved pilot or full split in a fresh process."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--tinygrad-run", type=Path)
     parser.add_argument("--frame", type=Path)
     parser.add_argument("--normalizer", type=Path)
     parser.add_argument("--duration", type=int, default=2, choices=(2, 4, 6))
@@ -34,16 +32,13 @@ def main() -> None:
         "--data-root",
         type=Path,
         default=Path(__file__).resolve().parents[2]
-        / "data/processed/amplitude_sequence_v2",
+        / "data/processed/amplitude_sequence/120hz",
     )
     args = parser.parse_args()
     if args.cpu_threads < 1 or args.batch_size < 1:
         parser.error("--cpu-threads and --batch-size must be positive")
-    pilot = args.tinygrad_run is not None
-    if pilot == (args.frame is not None or args.normalizer is not None):
-        parser.error("Provide --tinygrad-run or both --frame and --normalizer")
-    if (args.frame is None) != (args.normalizer is None):
-        parser.error("--frame and --normalizer must be supplied together")
+    if args.frame is None or args.normalizer is None:
+        parser.error("--frame and --normalizer are required")
     if hasattr(os, "sched_setaffinity"):
         allowed = sorted(os.sched_getaffinity(0))
         if len(allowed) < args.cpu_threads:
@@ -58,14 +53,9 @@ def main() -> None:
         device=args.device,
         batch_size=args.batch_size,
     )
-    if pilot:
-        result = run_cpu_pilot(
-            args.tinygrad_run, args.output, config, data_root=args.data_root
-        )
-    else:
-        result = run_cpu_training(
-            args.frame, args.normalizer, args.output, config, data_root=args.data_root
-        )
+    result = run_cpu_training(
+        args.frame, args.normalizer, args.output, config, data_root=args.data_root
+    )
     print(
         "device",
         result["runtime"]["device"],

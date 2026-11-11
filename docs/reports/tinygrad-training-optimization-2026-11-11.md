@@ -1,5 +1,7 @@
 # tinygrad sequence-training optimization, 11 November 2026
 
+This is a historical report. The tinygrad notebook and profiling tools have since been removed.
+
 The training notebook now runs a stratified subset pilot before full-data
 training. The pilot exercises loading, normalization, weighted BCE updates,
 validation-based checkpoint selection, restoration, held-out predictions, and

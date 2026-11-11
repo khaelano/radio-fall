@@ -10,9 +10,7 @@ needed:
 - `02_preprocess.ipynb` prepares amplitude data and generates windows.
 - `02_preprocess_old.ipynb` retains the earlier preprocessing workflow for
   comparison; use `02_preprocess.ipynb` for current work.
-- `03_training.ipynb` compares CNN, LSTM, GRU, and random forest models.
-- `03_training_tinygrad.ipynb` profiles sequence models on OpenCL.
-- `03_training_pytorch.ipynb` runs PyTorch sequence models on CPU or NVIDIA
+- `03_training.ipynb` runs PyTorch sequence models on CPU or NVIDIA
   CUDA, with independent pilot and full-data training sections.
 
 For CPU PyTorch, run `uv sync --inexact --extra analysis --extra detection

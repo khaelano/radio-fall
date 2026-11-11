@@ -138,9 +138,9 @@ def publish_export(
     _atomic_table(ledger, destination / "signals.parquet")
     _atomic_json(
         dict(
-            schema=SCHEMA,
+            schema="amplitude_sequence" if method == "direct-preprocessing" else SCHEMA,
             dataset=destination.name,
-            version=2,
+            version=3 if format_parameters.get("target_hz") == 120 else 2,
             source=source_metadata or v1.get("source"),
             parameters=format_parameters,
             provenance=dict(
@@ -295,11 +295,30 @@ def export_cached_segments(
                 arrays["squared_difference"], arrays["difference_valid"]
             )
             coordinates = (arrays["receivers"].tolist(), arrays["subcarriers"].tolist())
+            presence = (
+                arrays["capture_time_ns"] >= 0
+                if parameters["target_hz"] == 120
+                else None
+            )
         path = destination / "signals" / f"{segment['segment_id']}.npy"
+        if presence is not None:
+            presence_path = (
+                destination / "signals" / f"{segment['segment_id']}.presence.npy"
+            )
+            presence_path.parent.mkdir(parents=True, exist_ok=True)
+            np.save(presence_path, presence, allow_pickle=False)
         ledger.append(
             dict(
                 segment_id=segment["segment_id"],
                 **write_signal(path, signal),
+                **(
+                    {
+                        "presence": str(presence_path.relative_to(destination)),
+                        "presence_sha256": file_hash(presence_path),
+                    }
+                    if presence is not None
+                    else {}
+                ),
                 subcarriers=coordinates[1],
             )
         )

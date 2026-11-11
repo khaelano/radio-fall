@@ -68,7 +68,7 @@ and predicted only action in the held-out evaluation.
 The scores are experimental and have not been validated for live use.
 
 The trusted model directory must contain each
-`<2|4|6>s/<cnn|lstm|gru>/model.pt` (or prior tinygrad `model.safetensors`),
+`<2|4|6>s/<cnn|lstm|gru>/model.pt`,
 and each `<2|4|6>s/random_forest/model.joblib`, plus
 `metrics.json` for its pooling configuration. The notebook's phase model
 checkpoints do not contain a verified radio identity; the existing fall bundle's
@@ -76,9 +76,7 @@ radio validation still applies, but it does not authenticate the phase models'
 training setup or receiver placement. Joblib files must come from a trusted
 source because loading them executes pickle deserialization.
 
-Prior tinygrad phase checkpoints remain loadable with `--extra tinygrad-legacy`
-installed; their backend remains configured by tinygrad environment variables.
-The notebook now trains new neural checkpoints on PyTorch CPU.
+Legacy phase-model checkpoints require the PyTorch format.
 
 Phase scores use the shared amplitude normalization, centered Hampel,
 80 Hz linear interpolation and mask-aware temporal pooling routines. Live

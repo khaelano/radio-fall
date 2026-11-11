@@ -27,7 +27,7 @@ tools/
   `migrate_session_archives.py` validates and migrates session directories.
 - `migrate_sequence_segments.py` and `compact_sequence_shards.py` maintain
   sequence segment stores.
-- `benchmark_*.py`, `check_*.py`, `profile_sequence_training.py`, and
+- `benchmark_*.py`, `check_*.py`, and
   `run_pytorch_cpu_sequence.py` measure or inspect processing and model paths.
   `benchmark_live_detector.py` requires an experiment directory via
   `--experiment`.

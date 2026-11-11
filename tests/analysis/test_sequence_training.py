@@ -1,21 +1,17 @@
 """Leakage, input semantics, and model/checkpoint lifecycle checks."""
 
-from dataclasses import asdict
-import json
-import os
-
 import numpy as np
 import polars as pl
 import pytest
 
 from fall_detection.analysis.sequence_training_data import (
     Normalizer,
+    SegmentStore,
     SequenceDataset,
     ShardStore,
-    SegmentStore,
     fit_normalizer,
-    split_sequence_attempts,
     prefetched_batches,
+    split_sequence_attempts,
 )
 
 
@@ -110,15 +106,15 @@ def test_segment_slices_keep_nan_mask_and_deterministic_batches(tmp_path):
     np.save(path, signal)
     frame = pl.DataFrame(
         [
-            dict(
-                path=str(path),
-                start=start,
-                stop=start + 192,
-                duration=2,
-                target=0,
-                split="train",
-                window_id=i,
-            )
+            {
+                "path": str(path),
+                "start": start,
+                "stop": start + 192,
+                "duration": 2,
+                "target": 0,
+                "split": "train",
+                "window_id": i,
+            }
             for i, start in enumerate((0, 96))
         ]
     )
@@ -134,183 +130,32 @@ def test_segment_slices_keep_nan_mask_and_deterministic_batches(tmp_path):
     assert np.isfinite(first[0][0]).all()
 
 
-@pytest.mark.parametrize("kind", ["cnn", "lstm", "gru"])
-def test_model_update_and_checkpoint_round_trip(kind, tmp_path):
-    pytest.importorskip("tinygrad")
-    from tinygrad import Tensor
-    from tinygrad.helpers import Context
-    from tinygrad.nn.optim import Adam
-    from tinygrad.nn.state import get_parameters
-    from fall_detection.analysis.tinygrad_training import (
-        MODEL_CLASSES,
-        make_training_step,
-        TrainingConfig,
-        classification_metrics,
-        load_checkpoint,
-        save_checkpoint,
-        ModelPredictor,
+def test_full_rate_batch_includes_packet_presence(tmp_path):
+    path = tmp_path / "segment.npy"
+    signal = np.ones((240, 4, 245), dtype=np.float32)
+    signal[4, 0] = np.nan
+    np.save(path, signal)
+    presence = np.ones((240, 4), dtype=bool)
+    presence[4, 0] = False
+    presence[5, 1] = False
+    np.save(tmp_path / "segment.presence.npy", presence)
+    frame = pl.DataFrame(
+        [
+            {
+                "path": str(path),
+                "start": 0,
+                "stop": 240,
+                "duration": 2,
+                "rate_hz": 120,
+                "target": 0,
+                "split": "train",
+                "window_id": 0,
+            }
+        ]
     )
-
-    # The interpreter keeps this small regression independent of GPU drivers
-    # and external C/LLVM compiler installations.
-    with Context(DEV="PYTHON", CACHELEVEL=0):
-        Tensor.manual_seed(42)
-        x = np.random.default_rng(42).normal(size=(4, 4, 4)).astype(np.float32)
-        targets = np.array([0, 1, 0, 1])
-        model = MODEL_CLASSES[kind](4, 4)
-        parameters = get_parameters(model)
-        before = [p.numpy().copy() for p in parameters]
-        optimizer = Adam(parameters, lr=0.001)
-        step = make_training_step(
-            model,
-            optimizer,
-            1.0,
-            TrainingConfig(hidden_size=4, recurrent_chunk_steps=2, micro_batch_size=1),
-        )
-        # Warm-up, capture, and replay must all update live model parameters.
-        for _ in range(4):
-            head_before = parameters[-1].numpy().copy()
-            loss = step(x, targets)
-            assert np.isfinite(loss) and loss >= 0
-            assert not np.array_equal(head_before, parameters[-1].numpy())
-        assert all(
-            p.grad is not None and np.isfinite(p.grad.numpy()).all() for p in parameters
-        )
-        assert any(
-            not np.array_equal(old, p.numpy()) for old, p in zip(before, parameters)
-        )
-        expected = model(Tensor(x)).sigmoid().numpy()
-        assert expected.shape == (4,)
-        predictor = ModelPredictor(model, chunk_steps=3)
-        # Different inputs exercise warm-up, capture, and replay. The last input
-        # follows a weight update, catching accidentally frozen JIT parameters.
-        for offset in (0.0, 0.1, 0.2, 0.3):
-            if offset == 0.3:
-                step(x, targets)
-            values = x + offset
-            np.testing.assert_allclose(
-                predictor(Tensor(values)).numpy(),
-                model(Tensor(values)).numpy(),
-                rtol=1e-5,
-                atol=1e-6,
-            )
-        expected = model(Tensor(x)).sigmoid().numpy()
-        save_checkpoint(model, tmp_path / "model.safetensors")
-        config = TrainingConfig(hidden_size=4)
-        (tmp_path / "config.json").write_text(
-            json.dumps(
-                {
-                    "model": kind,
-                    "features": 4,
-                    "config": asdict(config),
-                }
-            )
-        )
-        Normalizer(np.zeros(2), np.ones(2), np.ones(2)).save(
-            tmp_path / "normalizer.npz"
-        )
-        loaded, _, _ = load_checkpoint(tmp_path)
-        actual = loaded(Tensor(x)).sigmoid().numpy()
-        np.testing.assert_allclose(actual, expected, atol=1e-6)
-        report = classification_metrics(targets, actual)
-        assert sum(map(sum, report["confusion_matrix"])) == 4
-        empty_positive = classification_metrics(targets, np.zeros(4))
-        assert (
-            empty_positive["precision"]
-            == empty_positive["recall"]
-            == empty_positive["f1"]
-            == 0
-        )
-
-
-@pytest.mark.skipif(
-    os.environ.get("RADIO_TEST_OPENCL") != "1", reason="Opt-in OpenCL driver regression"
-)
-def test_opencl_cnn_loss_matches_numpy():
-    """Catch the large CNN/loss fusion fault seen with Mesa 26.2.6 on Renoir."""
-    from tinygrad import Tensor
-    from fall_detection.analysis.tinygrad_training import CNNModel, binary_loss
-
-    Tensor.manual_seed(42)
-    model = CNNModel(1960, 64)
-    x = np.random.default_rng(42).normal(size=(8, 576, 1960)).astype(np.float32)
-    targets = (np.arange(8) % 2).astype(np.float32)
-    logits = model(Tensor(x))
-    actual = float(binary_loss(logits, Tensor(targets), 1.0).item())
-    host_logits = logits.numpy()
-    expected = float((np.logaddexp(0, host_logits) - targets * host_logits).mean())
-    print("OpenCL CNN BCE:", actual, "NumPy:", expected)
-    np.testing.assert_allclose(actual, expected, rtol=1e-4, atol=1e-5)
-
-
-@pytest.mark.skipif(
-    os.environ.get("RADIO_TEST_OPENCL") != "1", reason="Opt-in OpenCL JIT regression"
-)
-@pytest.mark.parametrize("kind", ["lstm", "gru"])
-def test_opencl_predictor_replays_across_new_window_boundaries(kind):
-    """Catch initial-state versus carried-state JIT signatures on a real device."""
-    from tinygrad import Tensor
-    from fall_detection.analysis.tinygrad_training import MODEL_CLASSES, ModelPredictor
-
-    Tensor.manual_seed(42)
-    model = MODEL_CLASSES[kind](4, 4)
-    predictor = ModelPredictor(model, chunk_steps=3)
-    rng = np.random.default_rng(42)
-    for _ in range(4):
-        x = rng.normal(size=(2, 19, 4)).astype(np.float32)
-        np.testing.assert_allclose(
-            predictor(Tensor(x.copy())).numpy(),
-            model(Tensor(x.copy())).numpy(),
-            rtol=1e-4,
-            atol=1e-5,
-        )
-
-
-@pytest.mark.parametrize("kind", ["lstm", "gru"])
-def test_recomputed_chunks_match_full_sequence_gradients(kind):
-    """Compare every parameter gradient, including across uneven chunk edges."""
-    pytest.importorskip("tinygrad")
-    from tinygrad import Tensor
-    from tinygrad.helpers import Context
-    from tinygrad.nn.optim import Adam
-    from tinygrad.nn.state import get_parameters
-    from fall_detection.analysis.tinygrad_training import (
-        MODEL_CLASSES,
-        RecurrentStep,
-        binary_loss,
-    )
-
-    with Context(DEV="PYTHON", CACHELEVEL=0):
-        Tensor.manual_seed(17)
-        model = MODEL_CLASSES[kind](2, 2)
-        parameters = get_parameters(model)
-        Tensor.realize(*parameters)
-        x = np.random.default_rng(7).normal(size=(2, 19, 2)).astype(np.float32)
-        targets = np.array([0, 1], dtype=np.float32)
-        inputs = Tensor(x.copy())
-        final = model.encode(inputs, model.initial_state(2, "PYTHON"))
-        reference_loss = binary_loss(
-            model.head(final[0]).reshape(-1), Tensor(targets), 2.5
-        )
-        reference_gradients = reference_loss.gradient(*parameters)
-        Tensor.realize(reference_loss, *reference_gradients)
-        expected = [g.numpy().copy() for g in reference_gradients]
-        expected_loss = float(reference_loss.item())
-        np.testing.assert_allclose(
-            model(Tensor(x.copy())).numpy(),
-            model.head(final[0]).reshape(-1).numpy(),
-            atol=1e-6,
-        )
-        for micro_batch_size in (1, 2, 3):
-            step = RecurrentStep(
-                model,
-                Adam(parameters),
-                2.5,
-                1.0,
-                chunk_steps=3,
-                micro_batch_size=micro_batch_size,
-            )
-            loss, actual = step.gradients(x, targets)
-            np.testing.assert_allclose(loss, expected_loss, rtol=2e-5, atol=2e-6)
-            for reference, gradient in zip(expected, actual):
-                np.testing.assert_allclose(gradient, reference, rtol=2e-4, atol=2e-5)
+    store = SegmentStore()
+    dataset = SequenceDataset(frame, fit_normalizer(frame, store), store)
+    values, _ = next(dataset.batches(1))
+    assert values.shape == (1, 240, 1964)
+    np.testing.assert_array_equal(values[0, :, -4:], presence)
+    assert not values[0, 4, 980:1225].any()

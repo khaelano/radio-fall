@@ -119,7 +119,7 @@ def _plot_identity(workflow, stage, scales, max_points, max_window_overlays, dpi
         "difference": (),
         "windows": ("index",),
         "export": ("index", "signals")
-        if getattr(workflow, "format_version", 1) == 2
+        if getattr(workflow, "format_version", 1) in (2, 3)
         else ("index", "shards"),
     }[stage]
     inputs = {name: _frame_identity(getattr(workflow, name)) for name in frames}
@@ -133,7 +133,9 @@ def _plot_identity(workflow, stage, scales, max_points, max_window_overlays, dpi
         inputs["timings"] = workflow.timings
         if len(workflow.index):
             column = (
-                "signal" if getattr(workflow, "format_version", 1) == 2 else "shard"
+                "signal"
+                if getattr(workflow, "format_version", 1) in (2, 3)
+                else "shard"
             )
             path = workflow.output / workflow.index[column][0]
             inputs["example"] = dict(path=str(path), **stamp(path))
@@ -394,7 +396,7 @@ def plot_stage(
                 )
         elif stage == "export":
             fig, axes = plt.subplots(1, 3, figsize=(15, 4), constrained_layout=True)
-            v2 = getattr(workflow, "format_version", 1) == 2
+            v2 = getattr(workflow, "format_version", 1) in (2, 3)
             files = workflow.signals if v2 else workflow.shards
             axes[0].hist(files["bytes"].to_numpy() / 2**20, bins=25)
             axes[0].set(

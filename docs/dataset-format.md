@@ -1147,10 +1147,31 @@ Live commands load `configs/radio.json` (or `--config <file>`). The session
 remain the authoritative snapshots. Connection paths are host metadata and do
 not alter on-air fingerprints. Historical sessions may instead identify split
 inputs in `receiver_config`; their contents and schemas remain unchanged.
-# Derived amplitude sequence v2 export
+# Derived amplitude sequence exports
+
+## Full-rate amplitude sequence export
+
+`data/processed/amplitude_sequence/120hz/<dataset>/` retains every nominal 120 Hz
+transmitter sequence position on a shared four-receiver grid. The signal has
+the same float32 `[time, receiver, subcarrier]` log1p squared-difference layout
+as the 96 Hz export; invalid values remain NaN. Two masks describe different causes:
+`isfinite(signal)` is the transformed-signal validity mask, while the adjacent
+`signals/<segment_id>.presence.npy` Boolean `[time, receiver]` array records
+whether a receiver packet was observed, including packets with invalid CSI.
+The `signals.parquet` ledger includes each presence file and its SHA-256 hash.
+Segment sequence metadata retains the uint32 sequence coordinate across rollover.
+Two-, four-, and six-second windows contain 240, 480, and 720 samples.
+
+Training selects 96 or 120 Hz through `SAMPLE_RATE` in the preprocessing and
+training notebooks. Full-rate batches append four receiver-presence channels after
+the normalized values and signal-validity channels. Missing values are set to
+zero only in the model batch; the export retains NaN. Each run records source
+manifest hashes and uses an attempt-level split with training-only normalization.
+
+## 96 Hz amplitude sequence export
 
 The training export is under
-`data/processed/amplitude_sequence_v2/<dataset>/`. It does not alter the raw
+`data/processed/amplitude_sequence/96hz/<dataset>/`. It does not alter the raw
 session archive. Each `signals/<segment_id>.npy` is a C-order float32 array
 with axes `[time, receiver, subcarrier]`. Receiver order is `rx-1` through
 `rx-4`; the 245 subcarriers run from -122 through 122. A finite value is the
@@ -1164,7 +1185,7 @@ and relative `signal` select the NPY file; integer `start` is inclusive and
 coverage, session, participant, run, trial, attempt, and grouping identifiers.
 `segments.parquet` keeps segment provenance. `signals.parquet` records one row
 per NPY file with `samples`, `bytes`, and `sha256`. `manifest.json` declares
-`amplitude_sequence_v2`, preprocessing provenance, coordinates, counts, and
+`amplitude_sequence`, preprocessing provenance, coordinates, counts, and
 metadata hashes. Validate the file sizes before loading and compare hashes for
 a full integrity audit. The Btrfs `compression=none` property applies only to
 new signal files; NPY loading does not depend on Btrfs.

@@ -160,6 +160,20 @@ def test_four_view_alignment_rollover_duplicates_losses_and_missing_receiver():
     assert not loss["valid"][2, 1].any() and loss["valid"][2, 0].any()
 
 
+def test_full_rate_alignment_retains_every_round_and_receiver_loss():
+    frame = epoch_frame().filter(
+        ~((pl.col("receiver_id") == "rx-2") & (pl.col("sequence") == 0))
+    )
+    data, _ = align_epoch(frame, rate_hz=120)
+    np.testing.assert_array_equal(
+        data["sequence"], [2**32 - 2, 2**32 - 1, 0, 1, 2, 3, 4]
+    )
+    assert data["amplitude"].shape == (7, 4, 245)
+    assert data["capture_time_ns"][2, 1] == -1
+    assert data["capture_time_ns"][2, 0] > 0
+    assert not data["valid"][:, 3].any()
+
+
 def test_epoch_boundaries_isolate_runs_boots_gaps_and_reject_unresolved_reset():
     frame = epoch_frame().filter(pl.col("receiver_id") == "rx-1").head(3)
     next_run = frame.with_columns(

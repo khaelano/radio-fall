@@ -121,7 +121,7 @@ Body request = byte file PDF; metadata parent ada di header `X-Metadata`:
 curl -s -X POST "http://localhost:23119/connector/saveAttachment" \
   -H "Content-Type: application/pdf" \
   -H "X-Metadata: {\"sessionID\":\"sid-import-1\",\"parentItemID\":\"conn-01\",\"title\":\"Radar-Based Fall Detection: A Survey\",\"url\":\"https://ieeexplore.ieee.org/document/10420485\"}" \
-  --data-binary "@Resources/Papers/radar-based-fall-detection-survey-2024.pdf"
+  --data-binary "@resources/Papers/radar-based-fall-detection-survey-2024.pdf"
 ```
 
 Respon sukses: `201`. Zotero membuat attachment dengan nama otomatis

@@ -1,6 +1,6 @@
 # Pedoman penulisan
 
-Dasar: analisis bahasa dan penyajian [Igual 2013](Resources/Papers/md/igual-fall-detection-review-2013.md), [WiFall 2017](Resources/Papers/md/wifall-2017.md), dan [tinjauan long lie 2022](Resources/Papers/md/long-lie-systematic-review-2022-manuscript.md). Posisi visual diperiksa pada PDF pasangannya. Aturan Indonesia di bawah merupakan adaptasi, bukan ketentuan penulis sumber.
+Dasar: analisis bahasa dan penyajian [Igual 2013](resources/Papers/md/igual-fall-detection-review-2013.md), [WiFall 2017](resources/Papers/md/wifall-2017.md), dan [tinjauan long lie 2022](resources/Papers/md/long-lie-systematic-review-2022-manuscript.md). Posisi visual diperiksa pada PDF pasangannya. Aturan Indonesia di bawah merupakan adaptasi, bukan ketentuan penulis sumber.
 
 ## Pola sumber
 

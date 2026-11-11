@@ -9,8 +9,8 @@ Retrieve and reference the academic paper collection on fall detection and human
 
 ## Collection
 
-- Papers: `Resources/Papers/md/` (converted Markdown)
-- Raw PDFs: `Resources/Papers/`
+- Papers: `resources/Papers/md/` (converted Markdown)
+- Raw PDFs: `resources/Papers/`
 - Metadata catalog: `tools/papers/index.json` (`papers` entries)
 - Search index: built by `tools/papers/rag.py` into `tools/papers/.rag-index/`
 
@@ -30,15 +30,15 @@ Queries work in English and Indonesian; results show source file, section headin
 3. **Exact-match verification** — use ripgrep for specific terms:
 
 ```bash
-rg -i "ultra-wideband" Resources/Papers/md/
-rg -l "CSI amplitude" Resources/Papers/md/
+rg -i "ultra-wideband" resources/Papers/md/
+rg -l "CSI amplitude" resources/Papers/md/
 ```
 
 4. **Deep read** — read the abstract and conclusion of the most relevant papers:
 
 ```bash
-head -40 Resources/Papers/md/<paper>.md
-tail -50 Resources/Papers/md/<paper>.md
+head -40 resources/Papers/md/<paper>.md
+tail -50 resources/Papers/md/<paper>.md
 ```
 
 5. **Index maintenance** — after adding or converting papers:

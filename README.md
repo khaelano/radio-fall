@@ -35,7 +35,7 @@ BLE/USB recordings and research reports remain available.
 | `tests/` | Unit tests mirroring the package modules |
 | [`docs/`](docs/README.md) | Current guides, engineering reports and presentations |
 | `draft/` | Local thesis drafts and exports; ignored by Git |
-| `Resources/Papers/` | Local, ignored literature library (PDFs plus Markdown conversions) |
+| `resources/Papers/` | Local, ignored literature library (PDFs plus Markdown conversions) |
 | [`tools/`](tools/README.md) | Paper, data, analysis, runtime, and draft tools |
 | `data/` | Local raw recordings and derived datasets; only directory guides are versioned |
 | [`notebooks/`](notebooks/README.md) | Current analysis and experiment notebooks |

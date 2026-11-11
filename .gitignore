@@ -23,7 +23,7 @@ src/*.egg-info/
 # Local thesis drafts, data and literature
 /draft/
 /data/
-/Resources/
+/resources/
 
 # Regenerable figures
 /docs/figures/

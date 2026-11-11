@@ -32,7 +32,7 @@ import unicodedata
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUT = PROJECT_ROOT / "Resources" / "Papers" / "md"
+DEFAULT_OUT = PROJECT_ROOT / "resources" / "Papers" / "md"
 
 # ---------------------------------------------------------------------------
 # Text-layer quality check

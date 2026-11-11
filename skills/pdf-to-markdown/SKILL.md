@@ -1,6 +1,6 @@
 ---
 name: pdf-to-markdown
-description: Convert research papers in the radio-fall-detection project from PDF to Markdown using Docling or the fast pdftotext path. Use when adding papers to Resources/Papers/ or converting PDFs for the thesis literature review.
+description: Convert research papers in the radio-fall-detection project from PDF to Markdown using Docling or the fast pdftotext path. Use when adding papers to resources/Papers/ or converting PDFs for the thesis literature review.
 ---
 
 # PDF to Markdown — radio-fall-detection
@@ -23,15 +23,15 @@ Run from the project root (`/home/khaelano/Projects/radio-fall-detection`).
 ### Default: docling (recommended)
 
 ```bash
-python3 tools/papers/pdf2md.py Resources/Papers/<paper>.pdf
+python3 tools/papers/pdf2md.py resources/Papers/<paper>.pdf
 ```
 
-Output is written to `Resources/Papers/md/<paper>.md`.
+Output is written to `resources/Papers/md/<paper>.md`.
 
 ### Fast path (clean text PDFs)
 
 ```bash
-python3 tools/papers/pdf2md.py --fast Resources/Papers/<paper>.pdf
+python3 tools/papers/pdf2md.py --fast resources/Papers/<paper>.pdf
 ```
 
 Tries `pdftotext -layout` first (~0.1s per paper) and promotes section headings to `##` for RAG chunking; falls back to docling if the text layer is garbled.
@@ -39,7 +39,7 @@ Tries `pdftotext -layout` first (~0.1s per paper) and promotes section headings 
 ### Check text-layer quality first
 
 ```bash
-python3 tools/papers/pdf2md.py --check Resources/Papers/*.pdf
+python3 tools/papers/pdf2md.py --check resources/Papers/*.pdf
 ```
 
 Prints `CLEAN` or `GARBLED` per PDF.
@@ -47,7 +47,7 @@ Prints `CLEAN` or `GARBLED` per PDF.
 ### Scanned or garbled PDFs
 
 ```bash
-python3 tools/papers/pdf2md.py --force-ocr Resources/Papers/<scanned>.pdf
+python3 tools/papers/pdf2md.py --force-ocr resources/Papers/<scanned>.pdf
 ```
 
 ## Options Reference

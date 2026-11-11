@@ -37,7 +37,7 @@ CATALOG_FILE = Path(__file__).resolve().with_name("index.json")
 
 # Directories to index (relative to project root). Order by priority.
 SOURCE_DIRS = [
-    "Resources/Papers/md",
+    "resources/Papers/md",
 ]
 
 # Chunking
@@ -431,7 +431,7 @@ def cmd_status():
     sources = find_markdown_files()
     total_size = sum(s["size"] for s in sources)
 
-    print(f"Resources: {len(sources)} markdown files, {total_size / 1024:.0f} KB total")
+    print(f"resources: {len(sources)} markdown files, {total_size / 1024:.0f} KB total")
 
     by_dir = Counter(s["rel"].split("/")[0] for s in sources)
     for dirname, count in sorted(by_dir.items()):
@@ -463,7 +463,7 @@ def cmd_check():
         for paper in catalog.get("papers", []):
             file_field = paper.get("file") or ""
             if file_field.startswith("Papers/"):
-                cataloged.add(f"Resources/{file_field}")
+                cataloged.add(f"resources/{file_field}")
             elif file_field:
                 cataloged.add(file_field)
 

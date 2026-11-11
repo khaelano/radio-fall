@@ -1,7 +1,0 @@
-activity,n,accuracy,balanced_accuracy,fall_precision,fall_recall,specificity,fall_f1,roc_auc,average_precision,tn,fp,fn,tp
-sit_to_fall,4,1.0,1.0,1.0,1.0,,1.0,,1.0,0,0,0,4
-sit_to_stand,2,1.0,1.0,0.0,0.0,1.0,0.0,,,2,0,0,0
-sit_to_walk,6,1.0,1.0,0.0,0.0,1.0,0.0,,,6,0,0,0
-stand_to_fall,6,1.0,1.0,1.0,1.0,,1.0,,1.0,0,0,0,6
-walk_to_fall,6,1.0,1.0,1.0,1.0,,1.0,,1.0,0,0,0,6
-walk_to_sit,6,0.6666666666666666,0.6666666666666666,0.0,0.0,0.6666666666666666,0.0,,,4,2,0,0

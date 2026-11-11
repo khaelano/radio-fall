@@ -1,6 +1,0 @@
-# Observed research dependencies. Install CPU torch 2.14.1 first through the
-# repository's detection extra, which selects the explicit official CPU index.
-numpy==2.5.2
-pandas==3.0.6
-scikit-learn==1.9.1
-matplotlib==3.11.2

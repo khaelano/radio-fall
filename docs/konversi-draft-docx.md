@@ -1,6 +1,6 @@
 # Konversi Draf Markdown ke DOCX
 
-Skrip `tools/build_draft_docx.py` mengubah satu atau beberapa file Markdown
+Skrip `tools/thesis/build_draft_docx.py` mengubah satu atau beberapa file Markdown
 yang memakai sitasi Pandoc menjadi DOCX. Citation key divalidasi langsung
 terhadap field `citationKey` di database Zotero, kemudian metadata item yang
 benar-benar disitasi diekspor ke CSL-JSON. Pandoc/Citeproc mengubah sitasi
@@ -21,19 +21,19 @@ Dari root repository, perintah berikut membangun gabungan draf Bab 1–3 pada
 `draft/naskah-bab-1-3.docx`:
 
 ```bash
-python3 tools/build_draft_docx.py
+python3 tools/thesis/build_draft_docx.py
 ```
 
 Validasi citation key tanpa membuat DOCX:
 
 ```bash
-python3 tools/build_draft_docx.py --check
+python3 tools/thesis/build_draft_docx.py --check
 ```
 
 Mengonversi draf lain:
 
 ```bash
-python3 tools/build_draft_docx.py \
+python3 tools/thesis/build_draft_docx.py \
   draft/pendahuluan.md draft/landasan-kepustakaan.md \
   --output draft/bab-1-2.docx \
   --title "Deteksi Jatuh Berbasis Radar Doppler" \

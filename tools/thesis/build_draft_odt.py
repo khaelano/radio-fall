@@ -2,7 +2,7 @@
 """Convert Pandoc Markdown to ODT with live Zotero citation fields.
 
 Usage:
-    python3 tools/build_draft_odt.py draft/pendahuluan.md -o draft/pendahuluan.odt
+    python3 tools/thesis/build_draft_odt.py draft/pendahuluan.md -o draft/pendahuluan.odt
 
 Requires Pandoc >= 2.16.2 and running Zotero with Better BibTeX. Install the
 Zotero LibreOffice integration to edit the resulting fields. On first opening,

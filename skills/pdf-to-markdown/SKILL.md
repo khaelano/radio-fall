@@ -23,7 +23,7 @@ Run from the project root (`/home/khaelano/Projects/radio-fall-detection`).
 ### Default: docling (recommended)
 
 ```bash
-python3 tools/pdf2md.py Resources/Papers/<paper>.pdf
+python3 tools/papers/pdf2md.py Resources/Papers/<paper>.pdf
 ```
 
 Output is written to `Resources/Papers/md/<paper>.md`.
@@ -31,7 +31,7 @@ Output is written to `Resources/Papers/md/<paper>.md`.
 ### Fast path (clean text PDFs)
 
 ```bash
-python3 tools/pdf2md.py --fast Resources/Papers/<paper>.pdf
+python3 tools/papers/pdf2md.py --fast Resources/Papers/<paper>.pdf
 ```
 
 Tries `pdftotext -layout` first (~0.1s per paper) and promotes section headings to `##` for RAG chunking; falls back to docling if the text layer is garbled.
@@ -39,7 +39,7 @@ Tries `pdftotext -layout` first (~0.1s per paper) and promotes section headings 
 ### Check text-layer quality first
 
 ```bash
-python3 tools/pdf2md.py --check Resources/Papers/*.pdf
+python3 tools/papers/pdf2md.py --check Resources/Papers/*.pdf
 ```
 
 Prints `CLEAN` or `GARBLED` per PDF.
@@ -47,7 +47,7 @@ Prints `CLEAN` or `GARBLED` per PDF.
 ### Scanned or garbled PDFs
 
 ```bash
-python3 tools/pdf2md.py --force-ocr Resources/Papers/<scanned>.pdf
+python3 tools/papers/pdf2md.py --force-ocr Resources/Papers/<scanned>.pdf
 ```
 
 ## Options Reference
@@ -61,17 +61,17 @@ python3 tools/pdf2md.py --force-ocr Resources/Papers/<scanned>.pdf
 
 ## Post-Conversion
 
-1. Add a metadata entry to `tools/index.json` (see `Resources/Papers/README.md`).
+1. Add a metadata entry to `tools/papers/index.json` (see `Resources/Papers/README.md`).
 2. Rebuild the search index:
 
 ```bash
-python3 tools/rag.py index
+python3 tools/papers/rag.py index
 ```
 
 3. Verify the catalog:
 
 ```bash
-python3 tools/rag.py check
+python3 tools/papers/rag.py check
 ```
 
 ## Common Issues

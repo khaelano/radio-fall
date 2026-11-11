@@ -1,5 +1,11 @@
 # Data layout
 
+Raw recordings use version-1 and version-2 ZIP64
+[session archives](../docs/session-archive-pilot.md). The collector publishes
+`raw/sessions/<session-id>.zip` on application exit; retained directories are
+working or legacy bundles. Use
+`fall_detection.storage.Recording` for verified access and extraction.
+
 Raw recordings are immutable. Dataset contents under `data/` are git-ignored;
 only the directory README files are versioned. The complete
 file-by-file reference is [`docs/dataset-format.md`](../docs/dataset-format.md);
@@ -8,7 +14,8 @@ this page is the short map.
 ```text
 data/
 ├── raw/
-│   ├── sessions/<session-id>/       collector output, one directory per session
+│   ├── sessions/<session-id>.zip    closed, verified session archive
+│   ├── sessions/<session-id>/       working or legacy session directory
 │   │   ├── session.json
 │   │   ├── protocol.json
 │   │   ├── events.jsonl
@@ -56,14 +63,14 @@ sessions are historical and are rejected by the current reader.
 
 ## Pruning
 
-`tools/prune_data.py` reports (and with `--apply`, removes) data the current
+`tools/processing/prune_data.py` reports (and with `--apply`, removes) data the current
 pipeline no longer uses:
 
 ```sh
-python3 tools/prune_data.py                       # dry run, safe defaults
-python3 tools/prune_data.py --verbose             # list every path
-python3 tools/prune_data.py --apply               # delete the reported entries
-python3 tools/prune_data.py --viewer-captures --keep-days 0 --apply
+python3 tools/processing/prune_data.py                       # dry run, safe defaults
+python3 tools/processing/prune_data.py --verbose             # list every path
+python3 tools/processing/prune_data.py --apply               # delete the reported entries
+python3 tools/processing/prune_data.py --viewer-captures --keep-days 0 --apply
 ```
 
 Categories:

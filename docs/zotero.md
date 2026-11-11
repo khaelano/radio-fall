@@ -142,7 +142,7 @@ Respon sukses: `201`. Zotero membuat attachment dengan nama otomatis
 
 ## Melengkapi metadata dari sumber eksternal
 
-`tools/index.json` hanya memuat judul/tahun/DOI/URL. Untuk import yang rapi,
+`tools/papers/index.json` hanya memuat judul/tahun/DOI/URL. Untuk import yang rapi,
 penulis dan venue diambil dari OpenAlex (fallback Crossref):
 
 - Bulk berdasarkan DOI (pipe `|` = OR):

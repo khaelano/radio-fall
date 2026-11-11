@@ -23,7 +23,7 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor, Twips
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DRAFT_DIR = ROOT / "draft"
 DEFAULT_INPUTS = (
     DRAFT_DIR / "pendahuluan.md",

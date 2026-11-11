@@ -6,13 +6,13 @@ Zero dependencies beyond numpy + Python stdlib. TF-IDF vector space model
 with cosine similarity. Supports bilingual queries (EN + ID).
 
 Usage:
-    python3 tools/rag.py index              # Build / rebuild index
-    python3 tools/rag.py query "your question"  # Search
-    python3 tools/rag.py list               # Indexed documents
-    python3 tools/rag.py status             # Index stats
-    python3 tools/rag.py check              # md files missing from tools/index.json
-    python3 tools/rag.py query "..." --top 10  # More results
-    python3 tools/rag.py query "..." --no-snippet  # Titles only
+    python3 tools/papers/rag.py index              # Build / rebuild index
+    python3 tools/papers/rag.py query "your question"  # Search
+    python3 tools/papers/rag.py list               # Indexed documents
+    python3 tools/papers/rag.py status             # Index stats
+    python3 tools/papers/rag.py check              # md files missing from tools/papers/index.json
+    python3 tools/papers/rag.py query "..." --top 10  # More results
+    python3 tools/papers/rag.py query "..." --no-snippet  # Titles only
 """
 
 import json
@@ -29,11 +29,11 @@ import numpy as np
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-INDEX_DIR = PROJECT_ROOT / "tools" / ".rag-index"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+INDEX_DIR = Path(__file__).resolve().parent / ".rag-index"
 INDEX_FILE = INDEX_DIR / "index.npz"
 META_FILE = INDEX_DIR / "meta.json"
-CATALOG_FILE = PROJECT_ROOT / "tools" / "index.json"
+CATALOG_FILE = Path(__file__).resolve().with_name("index.json")
 
 # Directories to index (relative to project root). Order by priority.
 SOURCE_DIRS = [
@@ -311,7 +311,7 @@ def build_index():
 def load_index():
     """Load saved index, return (vectorizer, chunks, matrix)."""
     if not INDEX_FILE.exists() or not META_FILE.exists():
-        print("No index found. Run 'python3 tools/rag.py index' first.", file=sys.stderr)
+        print("No index found. Run 'python3 tools/papers/rag.py index' first.", file=sys.stderr)
         sys.exit(1)
 
     data = np.load(str(INDEX_FILE))
@@ -351,7 +351,7 @@ def query(search_text: str, top_k: int = TOP_K, show_snippet: bool = True):
     # Filter zero-score results
     top_indices = [i for i in top_indices if scores[i] > 0]
     if not top_indices:
-        print("No relevant results found. Try different keywords or run 'python3 tools/rag.py index'.", file=sys.stderr)
+        print("No relevant results found. Try different keywords or run 'python3 tools/papers/rag.py index'.", file=sys.stderr)
         return
 
     print(f"Query: {search_text}")
@@ -446,11 +446,11 @@ def cmd_status():
         print(f"  Matrix shape: {matrix.shape[0]} x {matrix.shape[1]}")
         print(f"  Built: {time.ctime(meta['build_time'])}")
     else:
-        print("\nIndex: not built yet. Run 'python3 tools/rag.py index'.")
+        print("\nIndex: not built yet. Run 'python3 tools/papers/rag.py index'.")
 
 
 def cmd_check():
-    """Report markdown files missing from the tools/index.json catalog."""
+    """Report markdown files missing from the tools/papers/index.json catalog."""
     sources = find_markdown_files()
     if not sources:
         print("No markdown files found.")
@@ -469,11 +469,11 @@ def cmd_check():
 
     missing = [s["rel"] for s in sources if s["rel"] not in cataloged]
     if missing:
-        print(f"{len(missing)} markdown file(s) not cataloged in tools/index.json:")
+        print(f"{len(missing)} markdown file(s) not cataloged in tools/papers/index.json:")
         for rel in missing:
             print(f"  {rel}")
         return 1
-    print(f"All {len(sources)} markdown file(s) cataloged in tools/index.json.")
+    print(f"All {len(sources)} markdown file(s) cataloged in tools/papers/index.json.")
     return 0
 
 
@@ -492,7 +492,7 @@ def main():
 
     elif cmd == "query":
         if len(sys.argv) < 3:
-            print("Usage: python3 tools/rag.py query \"your question\"")
+            print("Usage: python3 tools/papers/rag.py query \"your question\"")
             return
         query_text = sys.argv[2]
 

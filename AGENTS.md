@@ -11,24 +11,28 @@ Current layout:
 - `src/fall_detection/` — Python package for shared contracts, radio processing, synchronized collection, and evaluation
 - `src/firmware/radio/` — ESP-IDF transmitter and receiver projects
 - `configs/` — versioned collection, radio, and experiment settings
-- `notebooks/` — exploratory analysis and experiment notebooks, numbered sequentially (e.g., `01_data_exploration.ipynb`)
+- `notebooks/latest/` — current exploratory analysis and experiment notebooks
 - `tests/` — unit tests mirroring the research modules under `src/fall_detection/`
 - `data/` — raw recordings, derived datasets, annotations, and dataset splits; session bundles are documented in `docs/dataset-format.md`; never commit large data files
-- `draft/` — thesis chapter drafts and other text intended to become part of the final thesis
+- `draft/` — local thesis chapter drafts and exports; ignored by Git
 - `docs/` — supporting notes, literature documentation, procedures, and figures
 - `docs/project-knowledge.md` — compact record of current implementation facts, decisions, limitations, and open questions
 - `Resources/Papers/` — literature library: raw PDFs plus converted Markdown in `Resources/Papers/md/`
-- `tools/` — paper processing and retrieval scripts (`pdf2md.py`, `rag.py`) and the catalog `index.json`
+- `tools/papers/` — PDF conversion, paper catalog, and retrieval
+- `tools/processing/` — dataset processing, migration, benchmarks, and inspection
+- `tools/thesis/` — local draft export utilities
+- `tools/radio/` — host AP setup and radio diagnostics
+- `tools/README.md` — tool directory guide
 - `skills/` — paper-related agent skills (`pdf-to-markdown`, `paper-rag`)
 
 ## Paper Processing & Retrieval
 
-The literature library lives in `Resources/Papers/` with a metadata catalog at `tools/index.json`. Before working with papers, read the skills in `skills/pdf-to-markdown/` and `skills/paper-rag/`.
+The literature library lives in `Resources/Papers/` with a metadata catalog at `tools/papers/index.json`. Before working with papers, read the skills in `skills/pdf-to-markdown/` and `skills/paper-rag/`.
 
-- Convert a PDF: `python3 tools/pdf2md.py <paper.pdf>` (docling default; `--fast` for clean text, `--force-ocr` for scanned)
-- Rebuild the search index: `python3 tools/rag.py index`
-- Search papers: `python3 tools/rag.py query "<question>"`
-- List/status/verify: `python3 tools/rag.py list`, `status`, `check`
+- Convert a PDF: `python3 tools/papers/pdf2md.py <paper.pdf>` (docling default; `--fast` for clean text, `--force-ocr` for scanned)
+- Rebuild the search index: `python3 tools/papers/rag.py index`
+- Search papers: `python3 tools/papers/rag.py query "<question>"`
+- List/status/verify: `python3 tools/papers/rag.py list`, `status`, `check`
 - Zotero: read `docs/zotero.md` before reading from or writing to the Zotero library (collections, items, PDF attachments).
 
 ## Citation Guidelines
@@ -97,5 +101,5 @@ No build system exists yet. When code lands, prefer:
 - Before finalizing a cited draft, extract its citation keys and compare them
   with Zotero. The draft must not contain unresolved or fabricated citation
   keys.
-
-For notebook work, prefer the jupyter-agent-bridge MCP tools before reading or editing raw .ipynb files.
+- do not create any unecessary test. Before writing a test, infer if this test result can be inferred from another test.
+- For notebook work, prefer the jupyter-agent-bridge MCP tools before reading or editing raw .ipynb files.

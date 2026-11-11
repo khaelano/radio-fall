@@ -102,7 +102,7 @@ uv run pytest
 cargo test --manifest-path src/native/radio_core/Cargo.toml
 cargo clippy --manifest-path src/native/radio_core/Cargo.toml --all-targets -- -D warnings
 cargo test --release --manifest-path src/native/radio_core/Cargo.toml benchmark_iq_kernel -- --ignored --nocapture
-uv run python tools/benchmark_radio_pipeline.py <path/to/envelopes.bin>
+uv run python tools/processing/benchmark_radio_pipeline.py <path/to/envelopes.bin>
 ```
 
 The automated GIL stress test sends 200 distinct envelopes through a real PTY

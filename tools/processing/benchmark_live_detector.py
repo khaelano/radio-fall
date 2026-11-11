@@ -10,7 +10,7 @@ import time
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from fall_detection.radio.acquisition.native import require_native
 from fall_detection.detection.model import ModelBundle, load_ensemble, score_tensor
@@ -75,7 +75,8 @@ def main() -> None:
     parser.add_argument(
         "--experiment",
         type=Path,
-        default=Path("notebooks/trash/05_four_rx_cnn/artifacts/four_rx_v1"),
+        required=True,
+        help="Experiment artifacts containing manifest.json, trials.csv, and predictions.",
     )
     parser.add_argument(
         "--output",

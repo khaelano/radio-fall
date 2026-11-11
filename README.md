@@ -34,11 +34,11 @@ BLE/USB recordings and research reports remain available.
 | `configs/` | One radio settings file, collection protocols and scenarios |
 | `tests/` | Unit tests mirroring the package modules |
 | [`docs/`](docs/README.md) | Current guides, engineering reports, figures and presentations |
-| `draft/` | Thesis chapters |
+| `draft/` | Local thesis drafts and exports; ignored by Git |
 | `Resources/Papers/` | Literature library (PDFs plus Markdown conversions) |
-| `tools/` | Paper conversion, RAG index, draft builders |
+| [`tools/`](tools/README.md) | Paper, data, analysis, runtime, and draft tools |
 | `data/` | Local raw recordings and derived datasets; only directory guides are versioned |
-| `notebooks/` | Current experiments and historical notebooks in `trash/` |
+| [`notebooks/`](notebooks/README.md) | Current analysis and experiment notebooks |
 
 ## Setup
 
@@ -72,8 +72,8 @@ Both live applications use `espnow_gateway`; receiver IDs and model channels
 remain stable regardless of USB arrival order. Firmware protocol 3 is required.
 
 The separate experimental detector uses Rust preprocessing and an isolated
-three-seed CPU CNN scorer. With the exported four-receiver model already in
-this workspace, launch its GUI with:
+three-seed CPU CNN scorer. With an exported four-receiver model available
+locally, launch its GUI with:
 
 ```sh
 uv sync --extra radio --extra detection
@@ -84,7 +84,7 @@ Add `--headless` for JSON output. The [live detector guide](docs/live-fall-detec
 covers model export, read-only replay, timing, quality gating and benchmarks.
 The current default uses phase change without fitted normalization, trained on
 20 random shifts plus the central window per training attempt. See the
-[retraining report](notebooks/trash/06_phase_shifted/results/phase_random20_v1/REPORT.md).
+[historical model pilot summary](docs/reports/fall-model-pilots.md).
 Live accuracy remains unqualified; the earlier amplitude bundle is preserved.
 
 Optional synchronized phone video is available through a DroidCam USB virtual

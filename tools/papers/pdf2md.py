@@ -14,11 +14,11 @@ Strategy:
     fallback with a warning instead of aborting.
 
 Usage:
-    python3 tools/pdf2md.py <file.pdf> [more.pdf ...]    # docling conversion
-    python3 tools/pdf2md.py --fast <file.pdf>            # pdftotext first, docling fallback
-    python3 tools/pdf2md.py --out <dir> <file.pdf> ...
-    python3 tools/pdf2md.py --force-ocr <file.pdf>       # force OCR in docling
-    python3 tools/pdf2md.py --check <file.pdf>           # print text-layer verdict only
+    python3 tools/papers/pdf2md.py <file.pdf> [more.pdf ...]    # docling conversion
+    python3 tools/papers/pdf2md.py --fast <file.pdf>            # pdftotext first, docling fallback
+    python3 tools/papers/pdf2md.py --out <dir> <file.pdf> ...
+    python3 tools/papers/pdf2md.py --force-ocr <file.pdf>       # force OCR in docling
+    python3 tools/papers/pdf2md.py --check <file.pdf>           # print text-layer verdict only
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = PROJECT_ROOT / "Resources" / "Papers" / "md"
 
 # ---------------------------------------------------------------------------

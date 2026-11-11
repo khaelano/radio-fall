@@ -10,10 +10,10 @@ Categories:
   viewer-capture   data/raw/receivers (ad-hoc captures, opt-in only)
 
 Examples:
-  python tools/prune_data.py                        # show safe defaults
-  python tools/prune_data.py --verbose              # list every path
-  python tools/prune_data.py --legacy-sessions --apply
-  python tools/prune_data.py --viewer-captures --keep-days 0 --apply
+  python tools/processing/prune_data.py                        # show safe defaults
+  python tools/processing/prune_data.py --verbose              # list every path
+  python tools/processing/prune_data.py --legacy-sessions --apply
+  python tools/processing/prune_data.py --viewer-captures --keep-days 0 --apply
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SESSIONS = ROOT / "data" / "raw" / "sessions"
 VIEWER = ROOT / "data" / "raw" / "receivers"
 ARTIFACT_SCHEMA_VERSION = 2

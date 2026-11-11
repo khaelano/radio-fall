@@ -11,7 +11,7 @@ INTERFACE="${CSI_AP_INTERFACE:-}"
 
 usage() {
     cat <<'EOF'
-Usage: tools/csi_ap.sh {up|down|status} [--interface IFACE]
+Usage: tools/radio/csi_ap.sh {up|down|status} [--interface IFACE]
 
 Environment overrides: CSI_AP_SSID, CSI_AP_PASSWORD, CSI_AP_CHANNEL,
 CSI_AP_ADDRESS, CSI_AP_UDP_PORT, CSI_AP_INTERFACE, CSI_AP_PROFILE.

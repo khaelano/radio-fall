@@ -1,6 +1,6 @@
 """Compare Python and Rust CSI preparation using an immutable gateway journal.
 
-Run with ``uv run python tools/benchmark_radio_pipeline.py <envelopes.bin>``.
+Run with ``uv run python tools/processing/benchmark_radio_pipeline.py <envelopes.bin>``.
 This measures decode, CSV preparation and phase views, excluding USB, live
 session acceptance, storage and GUI rendering. It is not a radio-rate test.
 """

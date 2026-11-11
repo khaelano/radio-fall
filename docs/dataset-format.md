@@ -5,7 +5,15 @@ where each file lives, what it contains, and how to read it without guessing.
 It is the reference for anyone building datasets, annotations, or models from
 `data/raw/sessions/`.
 
-**Current artifact schema:** `2` (receiver-split). The obsolete schema 1 is
+**Raw container:** version-1 and version-2 ZIP64
+[session archives](session-archive-pilot.md) are supported. New collector
+streams use version 2 with direct Zstandard recording.
+The collector publishes one verified `<session-id>.zip` on application exit.
+The layout below describes its exact original members, working directories,
+and verified extractions. Use `fall_detection.storage.Recording` to open raw
+archives and legacy directories. Migration retains both representations.
+
+**Inner artifact schema:** `2` (receiver-split). The obsolete schema 1 is
 described in [Legacy format](#8-legacy-format-and-cleanup) and is no longer
 written or read.
 
@@ -39,6 +47,7 @@ written or read.
    - [8.2 Cleanup performed on 2026-10-27](#82-cleanup-performed-on-2026-10-27)
    - [8.3 Pruning](#83-pruning)
 9. [Quick reference](#9-quick-reference)
+10. [Derived amplitude sequence v2 export](#derived-amplitude-sequence-v2-export)
 
 ## 1. Where the data lives
 
@@ -859,7 +868,7 @@ attempt_01/
 It had no `receivers/<receiver-id>/` directory, so a file could mix streams that
 belong to different receivers. The current collector never writes it; the
 session inspector rejects it (`unsupported artifact schema`), and
-`tools/prune_data.py --legacy-sessions` reports it.
+`tools/processing/prune_data.py --legacy-sessions` reports it.
 
 Pre-session flat captures are also obsolete: `data/raw/csi_<timestamp>.csv`,
 `data/raw/radio_timing_<timestamp>.csv`, and
@@ -896,14 +905,14 @@ as a session.
 
 ### 8.3 Pruning
 
-`tools/prune_data.py` reports, and with `--apply` removes, data the current
+`tools/processing/prune_data.py` reports, and with `--apply` removes, data the current
 pipeline no longer uses:
 
 ```sh
-python3 tools/prune_data.py                 # dry run: safe defaults
-python3 tools/prune_data.py --verbose       # list every path
-python3 tools/prune_data.py --apply         # remove the reported entries
-python3 tools/prune_data.py --viewer-captures --keep-days 0 --apply
+python3 tools/processing/prune_data.py                 # dry run: safe defaults
+python3 tools/processing/prune_data.py --verbose       # list every path
+python3 tools/processing/prune_data.py --apply         # remove the reported entries
+python3 tools/processing/prune_data.py --viewer-captures --keep-days 0 --apply
 ```
 
 Categories:
@@ -942,7 +951,7 @@ find data/raw/sessions -maxdepth 2 -name session.json -print
 sha256sum -c data/archive/legacy-20261027T123855Z.tar.zst.sha256
 
 # Report removable data
-python3 tools/prune_data.py --verbose
+python3 tools/processing/prune_data.py --verbose
 ```
 
 Related documentation:
@@ -1137,3 +1146,32 @@ Live commands load `configs/radio.json` (or `--config <file>`). The session
 remain the authoritative snapshots. Connection paths are host metadata and do
 not alter on-air fingerprints. Historical sessions may instead identify split
 inputs in `receiver_config`; their contents and schemas remain unchanged.
+# Derived amplitude sequence v2 export
+
+The training export is under
+`data/processed/amplitude_sequence_v2/<dataset>/`. It does not alter the raw
+session archive. Each `signals/<segment_id>.npy` is a C-order float32 array
+with axes `[time, receiver, subcarrier]`. Receiver order is `rx-1` through
+`rx-4`; the 245 subcarriers run from -122 through 122. A finite value is the
+current `log1p(squared_difference)` training value. NaN marks an invalid
+sample; the loader derives the mask from `isfinite` and replaces invalid values
+with zero only when constructing a batch. No separate mask tensor is stored.
+
+`window_index.parquet` has one row per 2, 4, or 6 second window. `segment_id`
+and relative `signal` select the NPY file; integer `start` is inclusive and
+`stop` is exclusive on its 96 Hz time axis. The row also retains target,
+coverage, session, participant, run, trial, attempt, and grouping identifiers.
+`segments.parquet` keeps segment provenance. `signals.parquet` records one row
+per NPY file with `samples`, `bytes`, and `sha256`. `manifest.json` declares
+`amplitude_sequence_v2`, preprocessing provenance, coordinates, counts, and
+metadata hashes. Validate the file sizes before loading and compare hashes for
+a full integrity audit. The Btrfs `compression=none` property applies only to
+new signal files; NPY loading does not depend on Btrfs.
+
+To migrate a verified v1 export, run
+`uv run python tools/processing/migrate_sequence_segments.py <dataset>`. The converter
+reconstructs each segment from indexed windows, requires overlapping values
+and validity to agree, and publishes each NPY atomically. It preserves review
+tables, figures, and the representative audit segment. The full verification
+routine compares every indexed window with its v1 source, including values,
+validity, target, and row metadata. Raw recordings are never modified.

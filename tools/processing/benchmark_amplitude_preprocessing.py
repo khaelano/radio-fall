@@ -1,6 +1,6 @@
 """Compare the previous batched NumPy Hampel filter with native modes on real CSI.
 
-Run: uv run --no-sync python tools/benchmark_amplitude_preprocessing.py SESSION_DIR
+Run: uv run --no-sync python tools/processing/benchmark_amplitude_preprocessing.py SESSION_DIR
 """
 import argparse
 import json

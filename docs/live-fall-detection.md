@@ -19,30 +19,24 @@ send notifications or treat unavailable data as a non-fall decision.
 ## Install and run
 
 Run from the repository root. Installation requires Rust and builds the native
-extension; the detection extra pins CPU PyTorch 2.14.1 to the training runtime.
+extension; the detection extra includes CPU PyTorch 2.14.1 for both the fall
+scorer and notebook-trained phase models.
 Keep `--extra video` when also using the camera-enabled collector.
 
 ```sh
 uv sync --inexact --extra radio --extra detection --extra analysis
 ```
 
-The unscaled phase-change bundle is `data/models/phase_random20_v1/`; its
-[experiment](../notebooks/trash/06_phase_shifted/README.md) materializes 20 random
-shifts plus the central window for every training attempt. Export another copy
-from the completed experiment when needed:
-
-```sh
-.venv/bin/fall-detect --export-model data/models/phase_random20_copy \
-  --experiment notebooks/trash/06_phase_shifted/artifacts/phase_random20_v1
-```
-
-The export directory must be new and outside raw recordings and the source
-experiment. Export validates the frozen manifest, selected checkpoint hashes
-and recorded session radio metadata. It copies the selected three weights and
-`bundle.json`; amplitude bundles also carry a fitted scaler. A deployed bundle
-does not need the original dataset or notebook code. The previous amplitude
-bundle remains at `data/models/four_rx_v1/`. For that original experiment only,
-`--scheme shift_augmented` exports its five-offset augmentation ensemble.
+The unscaled phase-change bundle is `data/models/phase_random20_v1/`. Its
+historical training experiment materialized 20 random shifts plus the central
+window for every training attempt; the experiment notebook and generated
+artifacts have been removed from the repository. The model bundle is a local,
+Git-ignored artifact and is not included in a clean checkout. See the
+[historical pilot summary](reports/fall-model-pilots.md) for retained results
+and limitations. Exporting a new bundle still requires an external copy of the
+original experiment artifacts with `--export-model <new-directory>
+--experiment <artifact-directory>`. The earlier amplitude bundle, when
+available, is `data/models/four_rx_v1/`.
 
 With the gateway connected and all boards powered:
 
@@ -68,17 +62,23 @@ receivers. Each row reports preparation, action and resting probabilities and
 coverage. These are **collection-phase scores at the window center**, not
 fall probabilities. The window centers are respectively 1, 2, and 3 seconds
 before the displayed window end. An asterisk marks a model with absent training
-classes; hovering over its name shows the missing classes. The six-second models were trained without
-preparation examples and predicted only action in the held-out evaluation.
+classes; hovering over its name shows the missing classes. In the earlier
+one-session evaluation, the six-second models had no preparation examples
+and predicted only action in the held-out evaluation.
 The scores are experimental and have not been validated for live use.
 
 The trusted model directory must contain each
-`<2|4|6>s/<cnn|lstm|gru|random_forest>/model.pt` or `model.joblib`, plus
+`<2|4|6>s/<cnn|lstm|gru>/model.pt` (or prior tinygrad `model.safetensors`),
+and each `<2|4|6>s/random_forest/model.joblib`, plus
 `metrics.json` for its pooling configuration. The notebook's phase model
 checkpoints do not contain a verified radio identity; the existing fall bundle's
 radio validation still applies, but it does not authenticate the phase models'
 training setup or receiver placement. Joblib files must come from a trusted
 source because loading them executes pickle deserialization.
+
+Prior tinygrad phase checkpoints remain loadable with `--extra tinygrad-legacy`
+installed; their backend remains configured by tinygrad environment variables.
+The notebook now trains new neural checkpoints on PyTorch CPU.
 
 Phase scores use the shared amplitude normalization, centered Hampel,
 80 Hz linear interpolation and mask-aware temporal pooling routines. Live
@@ -225,7 +225,7 @@ builder and the exact ensemble. It reads raw inputs without changing them.
 ## Verification and measured limits
 
 The simultaneous model path was exercised with
-`tools/check_multi_phase_runtime.py --rate-hz 120` using synthetic native
+`tools/processing/check_multi_phase_runtime.py --rate-hz 120` using synthetic native
 records and both the existing fall scorer and all 12 phase models. A fixed-deadline
 producer delivered 7,668 records in 16.0 s, about 119.80 records/s per receiver
 against a requested 120/s, with three missed producer rounds. All 48 phase rows
@@ -245,11 +245,13 @@ mask/channel order and rejection of late availability; strict Clippy passes.
 Python tests cover model hashes, radio order, isolated scoring, generation and
 freshness rules, quality gating, startup cleanup and CLI modes.
 
-`tools/benchmark_live_detector.py` checked four real accepted attempts at all
-five trained offsets, including the missed fall `192/01`: raw inputs match
-the saved arrays within 1e-6, normalized inputs within 1e-5, phase-change
-coverage within 1e-12, and ensemble scores within 1e-6. The replay score for
-`192/01` is 0.141641, reproducing the saved miss rather than changing its label.
+The historical `tools/processing/benchmark_live_detector.py` run checked four accepted
+attempts at all five trained offsets, including the missed fall `192/01`: raw
+inputs matched saved arrays within 1e-6, normalized inputs within 1e-5,
+phase-change coverage within 1e-12, and ensemble scores within 1e-6. The replay
+score for `192/01` was 0.141641. The source experiment artifacts and saved
+arrays are no longer in the repository, so this parity run needs an external
+copy of that artifact directory.
 
 On this Ryzen 7 PRO 4750U, 15 repetitions of the same cached recorded window
 gave the following medians. Native-window times exclude one-time packet
@@ -276,12 +278,15 @@ candidates and missed falls reported by the operator; see the
 [live-model diagnosis](reports/live-model-diagnosis-2026-11-04.md). Its input arithmetic
 matched offline replay, while receiver conditions shifted substantially.
 
-Local evidence is saved under `data/experiments/detector/parity-benchmark.json`
-and `data/experiments/detector/runtime-check/`. Reproduce it with:
+Local evidence, when present, is saved under
+`data/experiments/detector/parity-benchmark.json` and
+`data/experiments/detector/runtime-check/`. Run the parity benchmark with an
+external copy of the experiment artifacts; the synthetic runtime check needs
+no experiment directory:
 
 ```sh
-.venv/bin/python tools/benchmark_live_detector.py
-QT_QPA_PLATFORM=offscreen .venv/bin/python tools/check_live_detector_runtime.py
+.venv/bin/python tools/processing/benchmark_live_detector.py --experiment /path/to/four_rx_v1
+QT_QPA_PLATFORM=offscreen .venv/bin/python tools/processing/check_live_detector_runtime.py
 ```
 
 Before interpreting candidates as alarms, evaluate independently annotated

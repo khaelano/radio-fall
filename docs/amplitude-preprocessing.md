@@ -1,6 +1,107 @@
 # Amplitude preprocessing with Polars and Rust
 
-`notebooks/latest/02_preprocess.ipynb` runs the complete amplitude workflow through
+## Synchronized raw magnitude at 96 Hz
+
+`notebooks/latest/02_preprocess.ipynb` uses
+`analysis/sequence_preprocessing.py` to process Khaelano
+(`20261104T081805521126Z`), Akmal (`20261109T131546367822Z`), and continuous
+non-fall (`20261109T161519702956Z`). It selects accepted attempts unless review
+metadata excludes them. The existing archive-aware loader verifies source
+checksums and reuses the canonical Parquet cache. Raw archives and previous
+derived datasets remain unchanged.
+
+Projected Parquet reads and Polars handle metadata. The magnitude-only Rust
+entry point keeps the existing HE20 masks without min–max scaling. Rayon defaults
+to all available logical CPUs (16 on this laptop). Restart an existing notebook
+kernel before changing its already initialized Rayon pool.
+
+Intermediate arrays are uncompressed NPY files, loaded through read-only memory
+maps. Hampel and squared differences add only their new arrays; existing arrays
+are not rewritten. Stage checkpoints bind source fingerprints, parameters, code,
+and output file identities. A completed dataset reuses its audit tables and index
+without opening signal arrays. Source-cache hits check file identities and the
+previously verified archive/Parquet manifest; changed source files return to the
+canonical validation path. Normal cache reads are not forensic integrity audits.
+
+All receivers share one sequence anchor per segment. Nearest-round selection
+converts nominal 120 Hz to 96 Hz, with ties upward, without interpolation or an
+anti-alias filter. Missing selected rounds remain NaN. The first duplicate wins;
+duplicate and rollover counts are reported. Legitimate uint32 rollover unwraps;
+unresolved backward jumps fail. Attempts, run changes, transmitter boots, and
+receiver reboots remain separate. A recording gap is defined here as at least
+one second without any sensing packet in the union of receiver streams. Shorter
+losses remain explicit holes; this boundary rule does not impose a coverage
+cutoff. The gap duration is recorded in the manifest.
+
+Grid times use nominal 96 Hz ticks anchored by the median of observed capture
+time minus sequence offset/120. Retained source sequence numbers and actual
+per-receiver capture times are also stored; capture time −1 means no selected
+packet. Grid time is a nominal coordinate, not an interpolation of signal values.
+
+Centered Hampel uses a 0.5 s inclusive neighborhood, threshold 3, at least five
+finite samples, and the existing scaled-MAD factor 1.4826. Zero MAD leaves the
+center unchanged. Missing values remain missing. Squared consecutive differences
+follow filtering and propagate missing values from either endpoint. Each
+segment starts with an invalid difference; no difference crosses a boundary.
+
+Window start plus duration must fit inside the recorded attempt interval,
+even when nominal grid timing drifts slightly beyond an edge. Boundary omissions
+and cue-label omissions are reported separately. Complete 2/4/6 s windows contain
+192/384/576 samples with 50% overlap. All four
+receivers share each boundary. Fall windows receive target 1 only when their
+center lies in the recorded action cue [start, end); other windows from fall
+attempts are omitted. Non-fall activities, including continuous non-fall,
+receive target 0. Action cues approximate an activity interval and are not
+impact annotations. Coverage never causes an exclusion, and missing values
+are never filled. Centered filtering uses future samples and may extend beyond
+an interior window boundary within the same segment. This is an offline
+representation; causal live preprocessing needs a separate design.
+
+Training outputs live in `data/processed/amplitude_sequence_v2/<dataset>/`.
+Each `signals/<segment_id>.npy` contains one float32
+`log1p(squared_difference)` matrix in `[time, receiver, subcarrier]` order.
+Invalid samples are NaN. The memory-mapped loader derives validity from finite
+values, then zero fills and standardizes valid values before appending mask
+channels. `window_index.parquet` stores the 2/4/6-second slice boundaries,
+targets, coverage, grouping IDs, and recording provenance. `signals.parquet`
+records each file's logical length, byte size, and SHA-256; `manifest.json`
+records the schema version, source, parameters, coordinates, counts, and table
+hashes. Btrfs compression is disabled on newly written signal files; other
+filesystems use the same NPY format. Copy-on-write and checksums remain enabled.
+
+Intermediate preprocessing arrays retain amplitude, filtering, masks, phase,
+and timing needed for audit figures while the workflow runs. After a direct v2
+export, only the representative segment cache remains. Migrated datasets also
+retain their review tables, figures, and representative cache. The raw archives
+remain authoritative for regenerating other audit arrays. Full signal checksum
+scans require `load_exported(verify_hashes=True)`. The migration tool verifies
+overlap consistency while writing and compares every saved window with v1 in a
+separate pass. No training split is assigned here. The earlier v1 NPZ contract
+and run measurements remain in the dated v1 report.
+Stage figures show deterministic representative
+segments, while summary tables cover the complete datasets; figures are saved
+beside the derived reports in `reports/figures/`.
+
+Figure previews sample at most 1,200 time points and overlay at most 24 windows
+per duration. Availability is shown as the fraction of available source samples
+inside each display bin; preview thinning can omit short signal transients, but
+does not affect exported tensors or full-dataset summaries. Each stage reads
+only arrays needed for its figure. Saved PNGs and robust shared color scales are
+reused when their inputs and display settings match; `plot_stage(...,
+refresh=True)` forces a redraw. A new figure is rendered once and that PNG is
+embedded in the notebook, avoiding a second inline render. The notebook uses
+`ENABLE_PLOTS = True`; set it to `False` to skip rendering.
+
+Reproduce with:
+
+```bash
+uv sync --inexact --extra analysis --extra notebook --reinstall-package radio-fall-detection
+uv run --no-sync jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=1800 notebooks/latest/02_preprocess.ipynb
+```
+
+## Earlier per-recording workflow
+
+The earlier notebook, now `notebooks/latest/02_preprocess_old.ipynb`, used
 `analysis/amplitude_pipeline.py`. Polars selects accepted recordings and handles
 packet metadata. PyArrow's native Parquet reader reuses file metadata, projects
 17 required columns, and reads only candidate row groups. Rust decodes the
@@ -62,7 +163,7 @@ Install before starting the notebook kernel, or restart it after rebuilding:
 
 ```bash
 uv sync --inexact --extra analysis --reinstall-package radio-fall-detection
-uv run --no-sync python tools/benchmark_amplitude_pipeline.py data/raw/sessions/20261104T081805521126Z --output-dir data/interim/amplitude_preprocessed_v3/20261104T081805521126Z --verify-dir data/interim/amplitude_preprocessed_v2/20261104T081805521126Z
+uv run --no-sync python tools/processing/benchmark_amplitude_pipeline.py data/raw/sessions/20261104T081805521126Z --output-dir data/interim/amplitude_preprocessed_v3/20261104T081805521126Z --verify-dir data/interim/amplitude_preprocessed_v2/20261104T081805521126Z
 ```
 
 `--inexact` preserves separately installed notebook packages. The benchmark's
@@ -99,14 +200,14 @@ All three inspection plots executed using the native path.
 
 The previous isolated Hampel optimization measured roughly 23–25 times faster
 filtering, but left Python decoding dominant. The full pipeline above removes
-that bottleneck as well. `tools/benchmark_amplitude_preprocessing.py` retains
+that bottleneck as well. `tools/processing/benchmark_amplitude_preprocessing.py` retains
 the original batched NumPy Hampel implementation as an independent reference.
 
 Whole-recording scaling and centered filtering still use future samples.
 This optimization does not establish causal model inputs, a training/test
 scaling policy, or improved detection accuracy.
 
-The notebook can also generate 80 Hz overlapping windows in separate 2s, 4s,
+The earlier notebook also generated 80 Hz overlapping windows in separate 2s, 4s,
 and 6s directories. The stride is half the duration. Linear interpolation
 requires finite valid endpoints at most 25 ms apart; other values remain NaN
 with a false validity mask. Windows use the attempt clock and keep per-sample

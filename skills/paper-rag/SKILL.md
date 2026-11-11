@@ -11,18 +11,18 @@ Retrieve and reference the academic paper collection on fall detection and human
 
 - Papers: `Resources/Papers/md/` (converted Markdown)
 - Raw PDFs: `Resources/Papers/`
-- Metadata catalog: `tools/index.json` (`papers` entries)
-- Search index: built by `tools/rag.py` into `tools/.rag-index/`
+- Metadata catalog: `tools/papers/index.json` (`papers` entries)
+- Search index: built by `tools/papers/rag.py` into `tools/papers/.rag-index/`
 
 ## Retrieval Workflow
 
-1. **Scan metadata** — read `tools/index.json` to find candidate papers by title, methods, or keywords.
+1. **Scan metadata** — read `tools/papers/index.json` to find candidate papers by title, methods, or keywords.
 
 2. **Semantic search**:
 
 ```bash
-python3 tools/rag.py query "fall detection using WiFi channel state information"
-python3 tools/rag.py query "radar based human activity recognition" --top 10
+python3 tools/papers/rag.py query "fall detection using WiFi channel state information"
+python3 tools/papers/rag.py query "radar based human activity recognition" --top 10
 ```
 
 Queries work in English and Indonesian; results show source file, section heading, and context lines.
@@ -44,13 +44,13 @@ tail -50 Resources/Papers/md/<paper>.md
 5. **Index maintenance** — after adding or converting papers:
 
 ```bash
-python3 tools/rag.py index
-python3 tools/rag.py check
+python3 tools/papers/rag.py index
+python3 tools/papers/rag.py check
 ```
 
 ## Notes
 
 - Run all commands from the project root.
 - If search results are poor, try synonyms or re-index after adding files.
-- If `rag.py` reports no index, run `python3 tools/rag.py index` first.
-- `rag.py check` exits non-zero when converted Markdown is missing from `tools/index.json`; keep the catalog current.
+- If `rag.py` reports no index, run `python3 tools/papers/rag.py index` first.
+- `rag.py check` exits non-zero when converted Markdown is missing from `tools/papers/index.json`; keep the catalog current.

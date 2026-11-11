@@ -10,7 +10,7 @@ import sys
 import time
 from types import SimpleNamespace
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from fall_detection import _radio_native as core
 from fall_detection.detection.engine import DetectorEngine

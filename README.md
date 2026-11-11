@@ -33,9 +33,9 @@ BLE/USB recordings and research reports remain available.
 | `src/fall_detection/` | Python package: acquisition, radio processing, collection, evaluation |
 | `configs/` | One radio settings file, collection protocols and scenarios |
 | `tests/` | Unit tests mirroring the package modules |
-| [`docs/`](docs/README.md) | Current guides, engineering reports, figures and presentations |
+| [`docs/`](docs/README.md) | Current guides, engineering reports and presentations |
 | `draft/` | Local thesis drafts and exports; ignored by Git |
-| `Resources/Papers/` | Literature library (PDFs plus Markdown conversions) |
+| `Resources/Papers/` | Local, ignored literature library (PDFs plus Markdown conversions) |
 | [`tools/`](tools/README.md) | Paper, data, analysis, runtime, and draft tools |
 | `data/` | Local raw recordings and derived datasets; only directory guides are versioned |
 | [`notebooks/`](notebooks/README.md) | Current analysis and experiment notebooks |

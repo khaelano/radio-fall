@@ -76,13 +76,6 @@ rather than being hidden by the average.
 | rx-3 | 58 | 94 | 96 | 96 | 108 | 108 | 109 | 4 |
 | rx-4 | 54 | 84 | 96 | 96 | 108 | 108 | 109 | 11 |
 
-![Delivered rates, queues and finalized receiver masks](../figures/espnow-endurance-2026-11-03.png)
-
-The upper panel shows one-second usable rates and bold 30-second means. The
-middle panel shows queue medians and maxima in six successive five-minute
-windows. The lower panel shows finalized delivered-data masks, which are not
-physical RF channel occupancy.
-
 ## Queue behavior and delivery failures
 
 All receivers passed the existing queue criterion: no reported peak reached

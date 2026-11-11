@@ -13,6 +13,7 @@ tools/
 
 ## Papers and retrieval
 
+- See the [local library setup and catalog schema](papers/README.md).
 - `tools/papers/pdf2md.py` converts PDFs into `Resources/Papers/md/`.
 - `tools/papers/rag.py` indexes and searches those Markdown files using
   `tools/papers/index.json`. Rebuild its ignored `.rag-index/` with

@@ -15,9 +15,9 @@ Current layout:
 - `tests/` — unit tests mirroring the research modules under `src/fall_detection/`
 - `data/` — raw recordings, derived datasets, annotations, and dataset splits; session bundles are documented in `docs/dataset-format.md`; never commit large data files
 - `draft/` — local thesis chapter drafts and exports; ignored by Git
-- `docs/` — supporting notes, literature documentation, procedures, and figures
+- `docs/` — supporting notes, literature documentation, and procedures; regenerable figures are ignored
 - `docs/project-knowledge.md` — compact record of current implementation facts, decisions, limitations, and open questions
-- `Resources/Papers/` — literature library: raw PDFs plus converted Markdown in `Resources/Papers/md/`
+- `Resources/Papers/` — local, ignored literature library: raw PDFs plus converted Markdown in `Resources/Papers/md/`
 - `tools/papers/` — PDF conversion, paper catalog, and retrieval
 - `tools/processing/` — dataset processing, migration, benchmarks, and inspection
 - `tools/thesis/` — local draft export utilities
@@ -27,7 +27,7 @@ Current layout:
 
 ## Paper Processing & Retrieval
 
-The literature library lives in `Resources/Papers/` with a metadata catalog at `tools/papers/index.json`. Before working with papers, read the skills in `skills/pdf-to-markdown/` and `skills/paper-rag/`.
+The local literature library lives in `Resources/Papers/` with a metadata catalog at `tools/papers/index.json`. Before working with papers, read the skills in `skills/pdf-to-markdown/` and `skills/paper-rag/`.
 
 - Convert a PDF: `python3 tools/papers/pdf2md.py <paper.pdf>` (docling default; `--fast` for clean text, `--force-ocr` for scanned)
 - Rebuild the search index: `python3 tools/papers/rag.py index`

@@ -1,3 +1,4 @@
+# Local indexes, caches and test output
 tools/**/.rag-index/
 __pycache__/
 *.pyc
@@ -6,41 +7,36 @@ __pycache__/
 .coverage.*
 htmlcov/
 .ruff_cache/
+.pytest_cache/
 
-# ESP-IDF generated output and local configuration
-**/build/
+# ESP-IDF output and local configuration
+**/build*/
 **/sdkconfig
 **/sdkconfig.old
+**/sdkconfig.ble
+**/sdkconfig.ble.old
 
 # Python environments and generated metadata
 .venv/
-**/.venv/
-**/__pycache__/
-**/.pytest_cache/
 src/*.egg-info/
 
-# Thesis drafts and generated exports are local working files.
+# Local thesis drafts, data and literature
 /draft/
-
-# Local datasets and processed artifacts stay outside Git.
 /data/
+/Resources/
 
-# Codex local build and validation artifacts
+# Regenerable figures
+/docs/figures/
+
+# Codex artifacts
 .codex-build/
 .codex-finalizer/
 .jupyter-agent-bridge/
 
-# Rust build output (Cargo.lock is retained for reproducible native builds)
+# Rust build output and native extension
 **/target/
 src/fall_detection/_radio_native*.so
 
-# Re-include files ignored by the global gitignore (/home/khaelano/.gitignore)
+# Re-include repository guides hidden by the global ignore rules
 !AGENTS.md
 !docs/
-
-# ESP-IDF alternate build trees (build-c5, build-c6, ...)
-**/build-*/
-
-# Isolated BLE firmware configurations
-**/sdkconfig.ble
-**/sdkconfig.ble.old

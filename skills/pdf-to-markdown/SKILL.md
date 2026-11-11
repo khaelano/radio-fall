@@ -61,7 +61,7 @@ python3 tools/papers/pdf2md.py --force-ocr Resources/Papers/<scanned>.pdf
 
 ## Post-Conversion
 
-1. Add a metadata entry to `tools/papers/index.json` (see `Resources/Papers/README.md`).
+1. Add a metadata entry to `tools/papers/index.json` (see `tools/papers/README.md`).
 2. Rebuild the search index:
 
 ```bash

@@ -47,7 +47,10 @@ class RecordingIO:
     """
 
     def __init__(
-        self, *, interval_s: float = 5, capacity_bytes: int = 32 * 1024 * 1024,
+        self,
+        *,
+        interval_s: float = 5,
+        capacity_bytes: int = 32 * 1024 * 1024,
         compressed: bool = False,
     ) -> None:
         self.interval_s, self.capacity_bytes = interval_s, capacity_bytes
@@ -74,7 +77,9 @@ class RecordingIO:
         """Open a byte-preserving stream; text is encoded as UTF-8."""
         if self.compressed:
             if mode.rstrip("b") == "a" and path.exists():
-                raise ValueError("Cannot append compressed frames to a legacy plain file")
+                raise ValueError(
+                    "Cannot append compressed frames to a legacy plain file"
+                )
             path = Path(str(path) + ".zst")
         return _Stream(self._native.open(str(path), mode))
 

@@ -35,8 +35,9 @@ def test_archive_keeps_compressed_bytes_and_exposes_original_logical_files(tmp_p
     root = tmp_path / "session"
     receiver = root / "trials/001/attempt_01/receivers/rx-1"
     receiver.mkdir(parents=True)
-    (root / "session.json").write_text(json.dumps(dict(
-        artifact_schema_version=2, status="ended", session_id="test")))
+    (root / "session.json").write_text(
+        json.dumps(dict(artifact_schema_version=2, status="ended", session_id="test"))
+    )
     writer = RecordingIO(compressed=True)
     stream = writer.open(receiver / "csi.csv", "x")
     stream.write('id,data\n1,"[1,-2]"\n')
@@ -49,7 +50,11 @@ def test_archive_keeps_compressed_bytes_and_exposes_original_logical_files(tmp_p
         assert z.read(member) == (receiver / "csi.csv.zst").read_bytes()
     with Recording(archive) as recording:
         assert recording.manifest["version"] == 2
-        assert recording.read_table("trials/001/attempt_01/receivers/rx-1/csi.csv")["id"].to_pylist() == ["1"]
+        assert recording.read_table("trials/001/attempt_01/receivers/rx-1/csi.csv")[
+            "id"
+        ].to_pylist() == ["1"]
         recording.compare_source(root)
         destination = recording.extract(tmp_path / "extracted")
-        assert (destination / "trials/001/attempt_01/receivers/rx-1/csi.csv").read_text() == 'id,data\n1,"[1,-2]"\n'
+        assert (
+            destination / "trials/001/attempt_01/receivers/rx-1/csi.csv"
+        ).read_text() == 'id,data\n1,"[1,-2]"\n'

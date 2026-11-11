@@ -139,7 +139,9 @@ def test_protocol_loads_direction_manifest_and_expands_cartesian_product(tmp_pat
     assert len(parsed.blocks[0][2]) == 4
     assert len(parsed.trials) == 8
     assert parsed.blocks[0][2][0].id == "walk-to-sit__start_front__end_front"
-    assert parsed.blocks[0][2][0].attributes["direction_frame"] == "participant_relative"
+    assert (
+        parsed.blocks[0][2][0].attributes["direction_frame"] == "participant_relative"
+    )
     assert parsed.source["resolved_manifest_sources"][0]["path"] == manifest_path.name
     assert len(parsed.source_hash) == 64
 
@@ -261,7 +263,11 @@ def test_simplified_protocol_preserves_ids_for_unchanged_conditions():
     simple = load_protocol(Path("configs/collection/fall_simple.json"))
     full_ids = {s.id for _, _, scenarios in full.blocks for s in scenarios}
     shared_families = {
-        "walk-to-fall", "sit-to-fall", "stand-to-fall", "walk-to-sit", "sit-to-walk"
+        "walk-to-fall",
+        "sit-to-fall",
+        "stand-to-fall",
+        "walk-to-sit",
+        "sit-to-walk",
     }
 
     for block_id, _title, scenarios in simple.blocks:

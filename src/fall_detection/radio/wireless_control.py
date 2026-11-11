@@ -232,12 +232,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="csi-radio transmitter", description=__doc__)
     parser.add_argument("action", choices=("pair", "status", "provision"))
     parser.add_argument("--gateway-port")
-    parser.add_argument(
-        "--transmitter-link", choices=("ble", "espnow_uart")
-    )
-    parser.add_argument(
-        "--channel", type=int, help="paired ESP-NOW backhaul channel"
-    )
+    parser.add_argument("--transmitter-link", choices=("ble", "espnow_uart"))
+    parser.add_argument("--channel", type=int, help="paired ESP-NOW backhaul channel")
     parser.add_argument(
         "--port", help="initial pairing USB: C5 for BLE, companion C6 for espnow_uart"
     )
@@ -254,7 +250,9 @@ def main(argv: list[str] | None = None) -> int:
     if not args.gateway_port:
         parser.error("gateway port is required")
     if args.channel is not None and args.channel != settings.transport.channel:
-        parser.error("--channel must match transport.channel in the radio configuration")
+        parser.error(
+            "--channel must match transport.channel in the radio configuration"
+        )
     args.channel = settings.transport.channel
     if args.action == "pair":
         # Pairing uses the companion USB port, while USB fallback uses the C5.

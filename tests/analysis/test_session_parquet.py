@@ -33,25 +33,53 @@ def _csv(path, rows):
 @pytest.fixture
 def capture(tmp_path):
     root = tmp_path / "raw" / "sessions" / "test-session"
-    _json(root / "session.json", {
-        "artifact_schema_version": 2, "session_id": "test-session",
-        "status": "complete", "protocol_hash": "test-hash",
-        "participant_id": "participant-1",
-        "environment": {
-            "transport": "espnow_gateway", "nominal_rate_hz": 100,
-            "radio_inventory": {"transmitter": {"mac": "aa:bb:cc:dd:ee:ff"}},
+    _json(
+        root / "session.json",
+        {
+            "artifact_schema_version": 2,
+            "session_id": "test-session",
+            "status": "complete",
+            "protocol_hash": "test-hash",
+            "participant_id": "participant-1",
+            "environment": {
+                "transport": "espnow_gateway",
+                "nominal_rate_hz": 100,
+                "radio_inventory": {"transmitter": {"mac": "aa:bb:cc:dd:ee:ff"}},
+            },
         },
-    })
-    _json(root / "protocol.json", {
-        "schema_version": 1, "protocol_id": "test", "title": "Test",
-        "defaults": {"countdown_seconds": 1, "action_seconds": 1,
-                     "recovery_seconds": 1},
-        "blocks": [{"id": "test", "title": "Test", "scenarios": [{
-            "id": "walk", "activity_label": "walk", "title": "Walk",
-            "instruction": "Walk", "repetitions": 1,
-            "attributes": {"start_direction": "front", "end_direction": "front"},
-        }]}],
-    })
+    )
+    _json(
+        root / "protocol.json",
+        {
+            "schema_version": 1,
+            "protocol_id": "test",
+            "title": "Test",
+            "defaults": {
+                "countdown_seconds": 1,
+                "action_seconds": 1,
+                "recovery_seconds": 1,
+            },
+            "blocks": [
+                {
+                    "id": "test",
+                    "title": "Test",
+                    "scenarios": [
+                        {
+                            "id": "walk",
+                            "activity_label": "walk",
+                            "title": "Walk",
+                            "instruction": "Walk",
+                            "repetitions": 1,
+                            "attributes": {
+                                "start_direction": "front",
+                                "end_direction": "front",
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+    )
     events = []
     slots = np.asarray(HE20_COMPACT_SLOT_INDICES)
     values = 40 * np.exp(1j * (0.02 * slots + 0.3))
@@ -59,40 +87,71 @@ def capture(tmp_path):
     for number, status in ((1, "invalid"), (2, "accepted")):
         directory = root / "trials/001_walk" / f"attempt_{number:02d}"
         origin = number * 10_000_000_000
-        _json(directory / "attempt.json", {
-            "artifact_schema_version": 2, "session_id": "test-session",
-            "trial_ordinal": 1, "scenario_id": "walk", "repetition": 1,
-            "activity_label": "walk", "status": status,
-            "started_monotonic_ns": origin, "ended_monotonic_ns": origin + 30,
-        })
+        _json(
+            directory / "attempt.json",
+            {
+                "artifact_schema_version": 2,
+                "session_id": "test-session",
+                "trial_ordinal": 1,
+                "scenario_id": "walk",
+                "repetition": 1,
+                "activity_label": "walk",
+                "status": status,
+                "started_monotonic_ns": origin,
+                "ended_monotonic_ns": origin + 30,
+            },
+        )
         for phase, offset in (("countdown", 0), ("action", 10), ("recovery", 20)):
-            events.append({"kind": "phase_changed", "trial_ordinal": 1,
-                           "attempt": number, "state": phase,
-                           "monotonic_ns": origin + offset})
+            events.append(
+                {
+                    "kind": "phase_changed",
+                    "trial_ordinal": 1,
+                    "attempt": number,
+                    "state": phase,
+                    "monotonic_ns": origin + offset,
+                }
+            )
         for receiver_id in ("rx-1", "rx-2"):
             receiver = directory / "receivers" / receiver_id
             csi, timing, sidecar = [], [], []
             for index, offset in enumerate((0, 10, 20, 30)):
-                csi.append({
-                    "type": "CSI_DATA", "id": index,
-                    "mac": "aa:bb:cc:dd:ee:ff" if index < 3 else "foreign",
-                    "sig_mode": 4, "mcs": 0, "bandwidth": 0, "stbc": 0,
-                    "first_word": 1, "local_timestamp": index,
-                    "len": payload.size, "data": json.dumps(payload.ravel().tolist()),
-                    "rx_state": 0 if index != 1 else 65, "rssi": -50,
-                    "noise_floor": -95,
-                })
-                timing.append({
-                    "sequence": index, "rx_radio_timestamp_us": index,
-                    "host_receive_monotonic_ns": origin + offset + 1_000_000,
-                })
-                sidecar.append({
-                    "schema_version": 1, "sequence": index,
-                    "rx_radio_timestamp_us": index, "run_id": "18446744073709551615",
-                    "transmitter_boot_id": 4, "receiver_boot_id": 5,
-                    "capture_host_monotonic_ns": origin + offset,
-                    "clock_uncertainty_us": 100,
-                })
+                csi.append(
+                    {
+                        "type": "CSI_DATA",
+                        "id": index,
+                        "mac": "aa:bb:cc:dd:ee:ff" if index < 3 else "foreign",
+                        "sig_mode": 4,
+                        "mcs": 0,
+                        "bandwidth": 0,
+                        "stbc": 0,
+                        "first_word": 1,
+                        "local_timestamp": index,
+                        "len": payload.size,
+                        "data": json.dumps(payload.ravel().tolist()),
+                        "rx_state": 0 if index != 1 else 65,
+                        "rssi": -50,
+                        "noise_floor": -95,
+                    }
+                )
+                timing.append(
+                    {
+                        "sequence": index,
+                        "rx_radio_timestamp_us": index,
+                        "host_receive_monotonic_ns": origin + offset + 1_000_000,
+                    }
+                )
+                sidecar.append(
+                    {
+                        "schema_version": 1,
+                        "sequence": index,
+                        "rx_radio_timestamp_us": index,
+                        "run_id": "18446744073709551615",
+                        "transmitter_boot_id": 4,
+                        "receiver_boot_id": 5,
+                        "capture_host_monotonic_ns": origin + offset,
+                        "clock_uncertainty_us": 100,
+                    }
+                )
             _csv(receiver / "csi.csv", csi)
             _csv(receiver / "radio_timing.csv", timing)
             (receiver / "gateway_timing.jsonl").write_text(
@@ -106,8 +165,11 @@ def capture(tmp_path):
 
 def test_load_parquet_session_preserves_packets_and_capture_phase_boundaries(capture):
     root, destination = capture
-    before = {p: hashlib.sha256(p.read_bytes()).digest()
-              for p in root.rglob("*") if p.is_file()}
+    before = {
+        p: hashlib.sha256(p.read_bytes()).digest()
+        for p in root.rglob("*")
+        if p.is_file()
+    }
     exported = load_parquet_session(root, destination)
     packets = exported.read_packets()
     assert len(exported.attempts) == 2
@@ -116,7 +178,12 @@ def test_load_parquet_session_preserves_packets_and_capture_phase_boundaries(cap
     assert set(packets.receiver_id) == {"rx-1", "rx-2"}
     one = packets.loc[packets.attempt.eq(2) & packets.receiver_id.eq("rx-1")]
     assert one.phase.tolist() == ["preparation", "action", "resting", "unassigned"]
-    assert one.collection_phase.tolist() == ["countdown", "action", "recovery", "unassigned"]
+    assert one.collection_phase.tolist() == [
+        "countdown",
+        "action",
+        "recovery",
+        "unassigned",
+    ]
     assert one.driver_valid.tolist() == [True, False, True, True]
     assert one.is_sensing.tolist() == [True, True, True, False]
     assert one.run_id.iloc[0] == "18446744073709551615"
@@ -124,23 +191,29 @@ def test_load_parquet_session_preserves_packets_and_capture_phase_boundaries(cap
     payload = json.loads(next(csv.DictReader(source.open()))["data"])
     np.testing.assert_array_equal(one.iloc[0].csi_i, payload[1::2])
     np.testing.assert_array_equal(one.iloc[0].csi_q, payload[0::2])
-    assert all(hashlib.sha256(p.read_bytes()).digest() == digest
-               for p, digest in before.items())
+    assert all(
+        hashlib.sha256(p.read_bytes()).digest() == digest
+        for p, digest in before.items()
+    )
 
 
 def test_load_parquet_session_filters_before_loading_and_decodes_like_csv(capture):
     root, destination = capture
     exported = load_parquet_session(root, destination)
-    selected = exported.read_packets(filters=[
-        ("attempt", "==", 2), ("receiver_id", "==", "rx-1"),
-    ])
+    selected = exported.read_packets(
+        filters=[
+            ("attempt", "==", 2),
+            ("receiver_id", "==", "rx-1"),
+        ]
+    )
     actual = phase_signal_from_packets(selected)
     expected = load_phase_signal(root, "001/02", "rx-1")
     for name in ("time_seconds", "complex_csi", "raw_phase", "calibrated_phase"):
         np.testing.assert_allclose(getattr(actual, name), getattr(expected, name))
     action = exported.read_packets(
         filters=[("phase", "==", "action"), ("status", "==", "accepted")],
-        columns=["receiver_id", "csi_i"], arrow_backed=True,
+        columns=["receiver_id", "csi_i"],
+        arrow_backed=True,
     )
     assert len(action) == 2
     assert list(action) == ["receiver_id", "csi_i"]
@@ -150,9 +223,13 @@ def test_load_parquet_session_filters_before_loading_and_decodes_like_csv(captur
 def test_load_parquet_session_reuses_unchanged_export(capture, monkeypatch):
     root, destination = capture
     load_parquet_session(root, destination)
+
     def fail(*args):
         raise AssertionError("unchanged CSVs should not be read")
-    monkeypatch.setattr("fall_detection.analysis.phase_signals.load_capture_packets", fail)
+
+    monkeypatch.setattr(
+        "fall_detection.analysis.phase_signals.load_capture_packets", fail
+    )
     assert load_parquet_session(root, destination).manifest["packet_count"] == 16
 
 
@@ -160,12 +237,22 @@ def test_load_parquet_session_refreshes_review_fields(capture):
     root, destination = capture
     first = load_parquet_session(root, destination)
     key = first.attempts.iloc[1].attempt_key
-    _json(root / "session_review.json", {
-        "schema_version": 1, "session_id": "test-session", "protocol_hash": "test-hash",
-        "revision": 1, "attempts": {key: {
-            "activity_label": "corrected", "inclusion": "exclude", "quality": "bad",
-        }},
-    })
+    _json(
+        root / "session_review.json",
+        {
+            "schema_version": 1,
+            "session_id": "test-session",
+            "protocol_hash": "test-hash",
+            "revision": 1,
+            "attempts": {
+                key: {
+                    "activity_label": "corrected",
+                    "inclusion": "exclude",
+                    "quality": "bad",
+                }
+            },
+        },
+    )
     second = load_parquet_session(root, destination)
     assert second.manifest["source_fingerprint"] != first.manifest["source_fingerprint"]
     rows = second.read_packets(filters=[("attempt", "==", 2)])
@@ -189,7 +276,9 @@ def test_load_parquet_session_preserves_empty_phase_intervals(capture):
     assert exported.read_packets(filters=[("phase", "==", "action")]).empty
 
 
-@pytest.mark.parametrize("problem", ["missing_sidecar", "misaligned", "duplicate_phase"])
+@pytest.mark.parametrize(
+    "problem", ["missing_sidecar", "misaligned", "duplicate_phase"]
+)
 def test_load_parquet_session_refuses_invalid_input(capture, problem):
     root, destination = capture
     receiver = next(root.glob("trials/*/attempt_01/receivers/rx-1"))
@@ -221,7 +310,9 @@ def test_load_parquet_session_refuses_raw_destination_and_active_sessions(captur
         load_parquet_session(root, destination)
 
 
-def test_amplitude_session_reuses_valid_export_without_pandas_tables(capture, monkeypatch):
+def test_amplitude_session_reuses_valid_export_without_pandas_tables(
+    capture, monkeypatch
+):
     import pandas as pd
     import polars as pl
     from fall_detection.analysis.amplitude_pipeline import load_amplitude_session

@@ -301,9 +301,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--mode", choices=("qualify", "probe"), default="qualify")
     parser.add_argument("--port", help="verified C5 transmitter USB path")
-    parser.add_argument(
-        "--transmitter-link", choices=("usb", "ble", "espnow_uart")
-    )
+    parser.add_argument("--transmitter-link", choices=("usb", "ble", "espnow_uart"))
     parser.add_argument("--gateway-port", help="verified C6 gateway USB path")
     add_config_argument(parser)
     parser.add_argument(
@@ -332,7 +330,9 @@ def main(argv: list[str] | None = None) -> int:
         if not args.gateway_port or (args.transmitter_link == "usb" and not args.port):
             parser.error("gateway port is required; USB reference also requires --port")
         inventory, profile, config = (
-            settings.inventory, settings.profile, settings.transport
+            settings.inventory,
+            settings.profile,
+            settings.transport,
         )
         manager = GatewayReceiverManager(
             inventory,

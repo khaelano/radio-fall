@@ -16,9 +16,22 @@ import pyarrow.parquet as pq
 from .amplitude import hampel_subcarriers
 
 COLUMNS = [
-    "attempt_key", "attempt_id", "receiver_id", "is_sensing", "time_source",
-    "time_seconds", "capture_time_ns", "phase", "driver_valid",
-    "sig_mode", "bandwidth", "stbc", "first_word", "len", "csi_i", "csi_q",
+    "attempt_key",
+    "attempt_id",
+    "receiver_id",
+    "is_sensing",
+    "time_source",
+    "time_seconds",
+    "capture_time_ns",
+    "phase",
+    "driver_valid",
+    "sig_mode",
+    "bandwidth",
+    "stbc",
+    "first_word",
+    "len",
+    "csi_i",
+    "csi_q",
     "attempt_started_monotonic_ns",
 ]
 
@@ -33,19 +46,33 @@ class AmplitudeSession:
 
 
 def load_amplitude_session(
-    raw_dir: str | Path, parquet_dir: str | Path, *, progress=print,
+    raw_dir: str | Path,
+    parquet_dir: str | Path,
+    *,
+    progress=print,
 ) -> AmplitudeSession:
     """Validate/reuse the shared export and load the preprocessing table in Polars."""
-    from .session_parquet import SCHEMA_VERSION, _source_fingerprint, load_parquet_session
+    from .session_parquet import (
+        SCHEMA_VERSION,
+        _source_fingerprint,
+        load_parquet_session,
+    )
     from ..session_inspector.models import load_session
 
     raw_dir, parquet_dir = Path(raw_dir), Path(parquet_dir).resolve()
     if raw_dir.is_file():
-        manifest = load_parquet_session(raw_dir, parquet_dir, progress=progress).manifest
-        return AmplitudeSession(parquet_dir, manifest, pl.read_parquet(parquet_dir / "attempts.parquet"))
+        manifest = load_parquet_session(
+            raw_dir, parquet_dir, progress=progress
+        ).manifest
+        return AmplitudeSession(
+            parquet_dir, manifest, pl.read_parquet(parquet_dir / "attempts.parquet")
+        )
     raw_session = load_session(raw_dir)
-    raw_root = (raw_session.path.parent.parent
-                if raw_session.path.parent.name == "sessions" else raw_session.path)
+    raw_root = (
+        raw_session.path.parent.parent
+        if raw_session.path.parent.name == "sessions"
+        else raw_session.path
+    )
     if parquet_dir.is_relative_to(raw_root):
         raise ValueError("Place Parquet exports outside raw session data")
     if raw_session.active:
@@ -57,15 +84,24 @@ def load_amplitude_session(
     if not (
         manifest.get("schema_version") == SCHEMA_VERSION
         and manifest.get("source_fingerprint") == _source_fingerprint(raw_session)
-        and all((parquet_dir / name).is_file() for name in (
-            "attempts.parquet", "phases.parquet", "packets.parquet",
-        ))
+        and all(
+            (parquet_dir / name).is_file()
+            for name in (
+                "attempts.parquet",
+                "phases.parquet",
+                "packets.parquet",
+            )
+        )
     ):
         # Keep the shared raw CSV exporter as the only cache writer. Existing
         # valid exports take the Polars path without materializing pandas tables.
-        manifest = load_parquet_session(raw_dir, parquet_dir, progress=progress).manifest
+        manifest = load_parquet_session(
+            raw_dir, parquet_dir, progress=progress
+        ).manifest
     return AmplitudeSession(
-        parquet_dir, manifest, pl.read_parquet(parquet_dir / "attempts.parquet"),
+        parquet_dir,
+        manifest,
+        pl.read_parquet(parquet_dir / "attempts.parquet"),
     )
 
 
@@ -105,7 +141,12 @@ class AmplitudePacketReader:
             key = []
             for name in ("attempt_key", "receiver_id"):
                 stats = group.column(names.index(name)).statistics
-                if stats is None or not stats.has_min_max or stats.min != stats.max or stats.null_count:
+                if (
+                    stats is None
+                    or not stats.has_min_max
+                    or stats.min != stats.max
+                    or stats.null_count
+                ):
                     break
                 key.append(stats.min)
             if len(key) == 2:
@@ -116,9 +157,12 @@ class AmplitudePacketReader:
     def read(self, attempt_key: str, receiver_id: str) -> pl.DataFrame:
         """Read one recording, also supporting mixed/unknown row-group statistics."""
         groups = sorted(self.groups.get((attempt_key, receiver_id), []) + self.unknown)
-        table = self.file.read_row_groups(groups, columns=self.columns, use_threads=False)
+        table = self.file.read_row_groups(
+            groups, columns=self.columns, use_threads=False
+        )
         return pl.from_arrow(table).filter(
-            (pl.col("attempt_key") == attempt_key) & (pl.col("receiver_id") == receiver_id)
+            (pl.col("attempt_key") == attempt_key)
+            & (pl.col("receiver_id") == receiver_id)
         )
 
     def close(self) -> None:
@@ -126,7 +170,9 @@ class AmplitudePacketReader:
         self.file.close()
 
 
-def prepare_recording(packets: pl.DataFrame, *, magnitude_only: bool = False) -> AmplitudeRecording:
+def prepare_recording(
+    packets: pl.DataFrame, *, magnitude_only: bool = False
+) -> AmplitudeRecording:
     """Decode, physically align, mask and normalize a recording in Rust.
 
     Args:
@@ -150,16 +196,25 @@ def prepare_recording(packets: pl.DataFrame, *, magnitude_only: bool = False) ->
     if frame.is_empty():
         raise ValueError("No sensing-link CSI")
     required = [
-        "sig_mode", "bandwidth", "stbc", "len", "csi_i", "csi_q",
-        "first_word", "time_seconds", "capture_time_ns",
+        "sig_mode",
+        "bandwidth",
+        "stbc",
+        "len",
+        "csi_i",
+        "csi_q",
+        "first_word",
+        "time_seconds",
+        "capture_time_ns",
     ]
     if any(frame[name].null_count() for name in required):
         raise ValueError("Null CSI payload, layout or timestamp")
     if any(frame.schema[name] != pl.List(pl.Int16) for name in ("csi_i", "csi_q")):
         raise ValueError("CSI arrays must use the Parquet signed-int16 contract")
     if frame.filter(
-        (pl.col("sig_mode") != 4) | (pl.col("bandwidth") != 0)
-        | (pl.col("stbc") != 0) | ~pl.col("csi_i").list.len().is_in([245, 256])
+        (pl.col("sig_mode") != 4)
+        | (pl.col("bandwidth") != 0)
+        | (pl.col("stbc") != 0)
+        | ~pl.col("csi_i").list.len().is_in([245, 256])
     ).height:
         raise ValueError("Unsupported CSI layout; expected compact/full HE20")
     if frame.filter(
@@ -176,8 +231,14 @@ def prepare_recording(packets: pl.DataFrame, *, magnitude_only: bool = False) ->
     start, stop = int(i.offsets[0].as_py()), int(i.offsets[-1].as_py())
     qstart, qstop = int(q.offsets[0].as_py()), int(q.offsets[-1].as_py())
     result = (prepare_magnitude if magnitude_only else prepare_amplitude)(
-        i.values.slice(start, stop-start).to_numpy().astype(np.int16, copy=False).tobytes(),
-        q.values.slice(qstart, qstop-qstart).to_numpy().astype(np.int16, copy=False).tobytes(),
+        i.values.slice(start, stop - start)
+        .to_numpy()
+        .astype(np.int16, copy=False)
+        .tobytes(),
+        q.values.slice(qstart, qstop - qstart)
+        .to_numpy()
+        .astype(np.int16, copy=False)
+        .tobytes(),
         (i.offsets.to_numpy() - start).tolist(),
         frame["first_word"].cast(pl.Boolean).to_list(),
         frame["driver_valid"].fill_null(False).to_list(),
@@ -190,9 +251,13 @@ def prepare_recording(packets: pl.DataFrame, *, magnitude_only: bool = False) ->
     return AmplitudeRecording(
         frame,
         np.frombuffer(raw, dtype=np.float64).reshape(shape),
-        (None if magnitude_only else
-         np.frombuffer(normalized, dtype=np.float64).reshape(shape, order="F")),
-        np.frombuffer(lower, dtype=np.float64), np.frombuffer(upper, dtype=np.float64),
+        (
+            None
+            if magnitude_only
+            else np.frombuffer(normalized, dtype=np.float64).reshape(shape, order="F")
+        ),
+        np.frombuffer(lower, dtype=np.float64),
+        np.frombuffer(upper, dtype=np.float64),
     )
 
 
@@ -203,10 +268,14 @@ def save_recording(path: Path, arrays: dict, *, compression_level: int = 1) -> N
     try:
         with NamedTemporaryFile(dir=path.parent, suffix=".npz", delete=False) as stream:
             temporary = Path(stream.name)
-            with ZipFile(stream, "w", compression=ZIP_DEFLATED, compresslevel=compression_level) as archive:
+            with ZipFile(
+                stream, "w", compression=ZIP_DEFLATED, compresslevel=compression_level
+            ) as archive:
                 for name, array in arrays.items():
                     with archive.open(name + ".npy", "w", force_zip64=True) as member:
-                        np.lib.format.write_array(member, np.asanyarray(array), allow_pickle=False)
+                        np.lib.format.write_array(
+                            member, np.asanyarray(array), allow_pickle=False
+                        )
         os.replace(temporary, path)
     finally:
         if temporary is not None:
@@ -214,9 +283,15 @@ def save_recording(path: Path, arrays: dict, *, compression_level: int = 1) -> N
 
 
 def preprocess_dataset(
-    session, recordings: pl.DataFrame, output_dir: str | Path, *,
-    window_seconds: float = 0.1, min_periods: int = 5, threshold: float = 5.0,
-    compression_level: int = 1, progress=print,
+    session,
+    recordings: pl.DataFrame,
+    output_dir: str | Path,
+    *,
+    window_seconds: float = 0.1,
+    min_periods: int = 5,
+    threshold: float = 5.0,
+    compression_level: int = 1,
+    progress=print,
 ) -> pl.DataFrame:
     """Stream projected Polars recordings through Rust and overlap one NPZ save.
 
@@ -246,7 +321,9 @@ def preprocess_dataset(
     # A single bounded writer overlaps compression with the next read/native
     # computation. No unbounded future queue or nested per-recording CPU pool.
     try:
-        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="amplitude-save") as writer:
+        with ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="amplitude-save"
+        ) as writer:
             for row in recordings.iter_rows(named=True):
                 attempt_key, receiver = row["attempt_key"], row["receiver_ids"]
                 relative = Path(attempt_key) / f"{receiver}.npz"
@@ -258,45 +335,70 @@ def preprocess_dataset(
                 recording = prepare_recording(packets)
                 prepared = perf_counter()
                 filtered, replaced = hampel_subcarriers(
-                    recording.normalized, recording.time_seconds,
-                    window_seconds=window_seconds, min_periods=min_periods, threshold=threshold,
+                    recording.normalized,
+                    recording.time_seconds,
+                    window_seconds=window_seconds,
+                    min_periods=min_periods,
+                    threshold=threshold,
                 )
                 filtered_at = perf_counter()
                 metadata = recording.metadata
                 valid = np.isfinite(recording.masked)
                 provenance = {
-                    "session_id": session.manifest["session_id"], "attempt_key": attempt_key,
-                    "attempt_id": metadata["attempt_id"][0], "receiver_id": receiver,
-                    "activity_label": row["activity_label"], "scenario_id": row["scenario_id"],
-                    "quality": str(row["quality"]), "time_source": str(metadata["time_source"][0]),
+                    "session_id": session.manifest["session_id"],
+                    "attempt_key": attempt_key,
+                    "attempt_id": metadata["attempt_id"][0],
+                    "receiver_id": receiver,
+                    "activity_label": row["activity_label"],
+                    "scenario_id": row["scenario_id"],
+                    "quality": str(row["quality"]),
+                    "time_source": str(metadata["time_source"][0]),
                     "source_parquet": str(session.path),
                     "normalization": "per-recording, per-subcarrier min-max before Hampel",
                     "hampel_backend": "rust-rayon-runtime-simd-v1",
                     "preprocessing_backend": "polars-rust-he20-v1",
                     "compression_level": compression_level,
-                    "hampel_window_seconds": window_seconds, "hampel_min_periods": min_periods,
+                    "hampel_window_seconds": window_seconds,
+                    "hampel_min_periods": min_periods,
                     "hampel_threshold_scaled_mad": threshold,
                 }
                 arrays = dict(
-                    amplitude=filtered.astype(np.float32), valid=valid,
-                    hampel_replaced=replaced, time_seconds=recording.time_seconds,
-                    capture_time_ns=metadata["capture_time_ns"].to_numpy().astype(np.int64),
+                    amplitude=filtered.astype(np.float32),
+                    valid=valid,
+                    hampel_replaced=replaced,
+                    time_seconds=recording.time_seconds,
+                    capture_time_ns=metadata["capture_time_ns"]
+                    .to_numpy()
+                    .astype(np.int64),
                     phase=metadata["phase"].fill_null("unknown").to_numpy().astype(str),
-                    subcarriers=recording.subcarriers, scale_min=recording.lower,
-                    scale_max=recording.upper, provenance_json=np.asarray(json.dumps(provenance)),
+                    subcarriers=recording.subcarriers,
+                    scale_min=recording.lower,
+                    scale_max=recording.upper,
+                    provenance_json=np.asarray(json.dumps(provenance)),
                 )
                 if pending is not None:
                     pending.result()
                 path = output_dir / relative
-                pending = writer.submit(save_recording, path, arrays, compression_level=compression_level)
-                summary.append(dict(
-                    attempt=metadata["attempt_id"][0], receiver=receiver,
-                    packets=len(metadata), subcarriers=245,
-                    valid_values=int(valid.sum()), hampel_replaced=int(replaced.sum()),
-                    output=str(path), read_seconds=loaded-started,
-                    prepare_seconds=prepared-loaded, hampel_seconds=filtered_at-prepared,
-                ))
-                if progress and (len(summary) % 20 == 0 or len(summary) == len(recordings)):
+                pending = writer.submit(
+                    save_recording, path, arrays, compression_level=compression_level
+                )
+                summary.append(
+                    dict(
+                        attempt=metadata["attempt_id"][0],
+                        receiver=receiver,
+                        packets=len(metadata),
+                        subcarriers=245,
+                        valid_values=int(valid.sum()),
+                        hampel_replaced=int(replaced.sum()),
+                        output=str(path),
+                        read_seconds=loaded - started,
+                        prepare_seconds=prepared - loaded,
+                        hampel_seconds=filtered_at - prepared,
+                    )
+                )
+                if progress and (
+                    len(summary) % 20 == 0 or len(summary) == len(recordings)
+                ):
                     progress(f"Processed {len(summary)}/{len(recordings)} recordings")
             if pending is not None:
                 pending.result()

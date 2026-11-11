@@ -105,7 +105,9 @@ def encode_csi_datagram(
         csi_values.extend((int(value.imag), int(value.real)))
     payload = bytes(value & 0xFF for value in csi_values)
     if not payload or len(payload) > MAX_CSI_BYTES or len(payload) % 2:
-        raise CsiDatagramError("CSI payload must be non-empty, even, and at most 612 bytes")
+        raise CsiDatagramError(
+            "CSI payload must be non-empty, even, and at most 612 bytes"
+        )
     if not 0 <= transport_sequence <= 0xFFFFFFFF:
         raise CsiDatagramError("transport sequence is outside uint32 range")
 
@@ -118,12 +120,19 @@ def encode_csi_datagram(
         if not 0 <= record.tx_timestamp_us <= 0xFFFFFFFFFFFFFFFF:
             raise CsiDatagramError("transmitter timestamp is outside uint64 range")
         if not 0 <= record.rx_callback_timestamp_us <= 0xFFFFFFFFFFFFFFFF:
-            raise CsiDatagramError("receiver callback timestamp is outside uint64 range")
+            raise CsiDatagramError(
+                "receiver callback timestamp is outside uint64 range"
+            )
         flags |= CLOCK_TIMESTAMPS_VALID
     fingerprint = record.profile_fingerprint
     if fingerprint:
-        if len(fingerprint) != 16 or re.fullmatch(r"[0-9a-fA-F]{16}", fingerprint) is None:
-            raise CsiDatagramError("profile fingerprint must be 16 hexadecimal characters")
+        if (
+            len(fingerprint) != 16
+            or re.fullmatch(r"[0-9a-fA-F]{16}", fingerprint) is None
+        ):
+            raise CsiDatagramError(
+                "profile fingerprint must be 16 hexadecimal characters"
+            )
         header = PROFILE_HEADER.pack(
             MAGIC,
             PROFILE_VERSION,
@@ -160,36 +169,36 @@ def encode_csi_datagram(
         )
     else:
         header = HEADER.pack(
-        MAGIC,
-        VERSION,
-        flags,
-        HEADER_SIZE,
-        len(payload),
-        _mac_bytes(receiver_mac, "receiver"),
-        _mac_bytes(record.mac, "transmitter"),
-        transport_sequence,
-        record.sequence & 0xFFFFFFFF,
-        record.timestamp_us & 0xFFFFFFFF,
-        record.rssi,
-        record.noise_floor,
-        record.rate,
-        record.sig_mode,
-        record.mcs,
-        record.bandwidth,
-        record.smoothing,
-        record.not_sounding,
-        record.aggregation,
-        record.stbc,
-        record.fec_coding,
-        record.sgi,
-        record.ampdu_count,
-        record.channel,
-        record.secondary_channel,
-        record.antenna,
-        record.rx_state,
-        record.sig_len,
-        len(payload),
-        record.tx_timestamp_us if clocks_valid else 0,
+            MAGIC,
+            VERSION,
+            flags,
+            HEADER_SIZE,
+            len(payload),
+            _mac_bytes(receiver_mac, "receiver"),
+            _mac_bytes(record.mac, "transmitter"),
+            transport_sequence,
+            record.sequence & 0xFFFFFFFF,
+            record.timestamp_us & 0xFFFFFFFF,
+            record.rssi,
+            record.noise_floor,
+            record.rate,
+            record.sig_mode,
+            record.mcs,
+            record.bandwidth,
+            record.smoothing,
+            record.not_sounding,
+            record.aggregation,
+            record.stbc,
+            record.fec_coding,
+            record.sgi,
+            record.ampdu_count,
+            record.channel,
+            record.secondary_channel,
+            record.antenna,
+            record.rx_state,
+            record.sig_len,
+            len(payload),
+            record.tx_timestamp_us if clocks_valid else 0,
             record.rx_callback_timestamp_us if clocks_valid else 0,
         )
     return header + payload
@@ -254,9 +263,10 @@ def decode_csi_datagram(data: bytes) -> DecodedCsiDatagram:
         profile_fingerprint = fingerprint_bytes.split(b"\0", 1)[0].decode(
             "ascii", errors="strict"
         )
-        if len(profile_fingerprint) != 16 or re.fullmatch(
-            r"[0-9a-fA-F]{16}", profile_fingerprint
-        ) is None:
+        if (
+            len(profile_fingerprint) != 16
+            or re.fullmatch(r"[0-9a-fA-F]{16}", profile_fingerprint) is None
+        ):
             raise CsiDatagramError("invalid profile fingerprint")
         clock_values = clock_values[:2]
     if flags & ~allowed_flags:
@@ -276,8 +286,12 @@ def decode_csi_datagram(data: bytes) -> DecodedCsiDatagram:
     transmitter_mac = _mac_text(transmitter_bytes)
     raw_values = data[header_length:]
     raw_csi = tuple(
-        complex(raw_values[index + 1] - 256 if raw_values[index + 1] > 127 else raw_values[index + 1],
-                raw_values[index] - 256 if raw_values[index] > 127 else raw_values[index])
+        complex(
+            raw_values[index + 1] - 256
+            if raw_values[index + 1] > 127
+            else raw_values[index + 1],
+            raw_values[index] - 256 if raw_values[index] > 127 else raw_values[index],
+        )
         for index in range(0, len(raw_values), 2)
     )
     csi = list(raw_csi)

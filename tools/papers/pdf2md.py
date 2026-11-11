@@ -48,7 +48,9 @@ def extract_text_fast(pdf_path: str) -> str:
     """pdftotext -layout; returns '' on failure."""
     r = subprocess.run(
         ["pdftotext", "-layout", pdf_path, "-"],
-        capture_output=True, text=True, timeout=120,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     return r.stdout if r.returncode == 0 else ""
 
@@ -81,10 +83,23 @@ def is_clean_text(text: str) -> bool:
 # Heading promotion (pdftotext -> markdown)
 # ---------------------------------------------------------------------------
 KNOWN_HEADINGS = {
-    "abstract", "introduction", "conclusion", "conclusions", "references",
-    "acknowledgment", "acknowledgments", "appendix", "results", "discussion",
-    "experiments", "experimental setup", "methodology", "related work",
-    "background", "summary", "future work",
+    "abstract",
+    "introduction",
+    "conclusion",
+    "conclusions",
+    "references",
+    "acknowledgment",
+    "acknowledgments",
+    "appendix",
+    "results",
+    "discussion",
+    "experiments",
+    "experimental setup",
+    "methodology",
+    "related work",
+    "background",
+    "summary",
+    "future work",
 }
 
 # Section numbering: "3", "3.1", "4.2.3", "A", "A.1", "I", "II".
@@ -107,8 +122,11 @@ def _looks_like_heading(stripped: str) -> bool:
         return True
     if TITLE_CASE_HEADING.match(stripped) and 5 <= len(stripped) <= 60:
         words = stripped.split()
-        if len(words) >= 2 and all(len(w) >= 2 for w in words) \
-                and any(len(w) >= 5 for w in words):
+        if (
+            len(words) >= 2
+            and all(len(w) >= 2 for w in words)
+            and any(len(w) >= 5 for w in words)
+        ):
             return True
     return False
 
@@ -151,18 +169,28 @@ def promote_headings(lines: list[str]) -> list[str]:
 def convert_with_docling(pdf_path: str, out_dir: Path, force_ocr: bool = False) -> bool:
     """Convert with docling. Returns True on success (output written by docling)."""
     if not shutil.which("docling"):
-        print("[error] docling not found. Install: uv tool install docling", file=sys.stderr)
+        print(
+            "[error] docling not found. Install: uv tool install docling",
+            file=sys.stderr,
+        )
         return False
     cmd = [
-        "docling", "convert", pdf_path,
-        "--to", "md",
-        "--output", str(out_dir),
-        "--image-export-mode", "placeholder",
+        "docling",
+        "convert",
+        pdf_path,
+        "--to",
+        "md",
+        "--output",
+        str(out_dir),
+        "--image-export-mode",
+        "placeholder",
     ]
     if force_ocr:
         cmd.append("--force-ocr")
-    print(f"[docling] converting {Path(pdf_path).name} (OCR={'on' if force_ocr else 'off'})...",
-          file=sys.stderr)
+    print(
+        f"[docling] converting {Path(pdf_path).name} (OCR={'on' if force_ocr else 'off'})...",
+        file=sys.stderr,
+    )
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     if r.returncode != 0:
         print(f"[docling] failed: {r.stderr[-500:]}", file=sys.stderr)
@@ -181,8 +209,9 @@ def find_docling_output(out_dir: Path, pdf_stem: str) -> Path | None:
 # ---------------------------------------------------------------------------
 # Main conversion
 # ---------------------------------------------------------------------------
-def convert_one(pdf_path: Path, out_dir: Path, force_ocr: bool = False,
-                fast: bool = False) -> bool:
+def convert_one(
+    pdf_path: Path, out_dir: Path, force_ocr: bool = False, fast: bool = False
+) -> bool:
     """Convert one PDF. Defaults to docling; `fast` tries pdftotext first."""
     pdf_stem = pdf_path.stem
     out_file = out_dir / f"{pdf_stem}.md"
@@ -200,7 +229,10 @@ def convert_one(pdf_path: Path, out_dir: Path, force_ocr: bool = False,
             n = len(md)
             print(f"[ok] {pdf_stem} -> {out_file.name} ({n} lines, pdftotext)")
             return True
-        print(f"[garbled] {pdf_stem}: text layer unusable, falling back to docling", file=sys.stderr)
+        print(
+            f"[garbled] {pdf_stem}: text layer unusable, falling back to docling",
+            file=sys.stderr,
+        )
     elif force_ocr:
         print(f"[force-ocr] {pdf_stem}")
 
@@ -222,11 +254,17 @@ def convert_one(pdf_path: Path, out_dir: Path, force_ocr: bool = False,
         md = promote_headings(lines)
         out_dir.mkdir(parents=True, exist_ok=True)
         out_file.write_text("\n".join(md) + "\n", encoding="utf-8")
-        print(f"[warn] {pdf_stem}: docling failed; wrote pdftotext fallback "
-              f"({len(md)} lines)", file=sys.stderr)
+        print(
+            f"[warn] {pdf_stem}: docling failed; wrote pdftotext fallback "
+            f"({len(md)} lines)",
+            file=sys.stderr,
+        )
         return True
 
-    print(f"[error] {pdf_stem}: docling failed and no usable text layer exists", file=sys.stderr)
+    print(
+        f"[error] {pdf_stem}: docling failed and no usable text layer exists",
+        file=sys.stderr,
+    )
     return False
 
 
@@ -243,10 +281,15 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Hybrid PDF -> Markdown converter")
     ap.add_argument("pdfs", nargs="+", help="PDF file(s) to convert")
     ap.add_argument("--out", default=str(DEFAULT_OUT), help="output directory")
-    ap.add_argument("--fast", action="store_true",
-                    help="try pdftotext first, fall back to docling")
-    ap.add_argument("--force-ocr", action="store_true", help="skip pdftotext, force OCR")
-    ap.add_argument("--check", action="store_true", help="only report text-layer quality")
+    ap.add_argument(
+        "--fast", action="store_true", help="try pdftotext first, fall back to docling"
+    )
+    ap.add_argument(
+        "--force-ocr", action="store_true", help="skip pdftotext, force OCR"
+    )
+    ap.add_argument(
+        "--check", action="store_true", help="only report text-layer quality"
+    )
     args = ap.parse_args()
 
     out_dir = Path(args.out)

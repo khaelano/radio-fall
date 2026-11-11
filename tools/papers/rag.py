@@ -42,9 +42,10 @@ SOURCE_DIRS = [
 
 # Chunking
 MAX_CHUNK_LINES = 150  # Split long docs by this many lines
-MIN_CHUNK_LINES = 20   # Below this, keep as whole doc
-TOP_K = 5              # Default results
-SNIPPET_LINES = 8      # Lines of context per result
+MIN_CHUNK_LINES = 20  # Below this, keep as whole doc
+TOP_K = 5  # Default results
+SNIPPET_LINES = 8  # Lines of context per result
+
 
 # ---------------------------------------------------------------------------
 # Tokenizer
@@ -65,7 +66,7 @@ def tokenize_with_ngrams(text: str, n: int = 3) -> list[str]:
     for t in tokens:
         if len(t) >= n:
             for i in range(len(t) - n + 1):
-                grams.add(f"__gram_{t[i:i+n]}")
+                grams.add(f"__gram_{t[i : i + n]}")
     return tokens + list(grams)
 
 
@@ -85,12 +86,14 @@ def find_markdown_files() -> list[dict]:
             size = fpath.stat().st_size
             if size == 0:
                 continue
-            docs.append({
-                "path": str(fpath),
-                "rel": str(rel),
-                "label": label,
-                "size": size,
-            })
+            docs.append(
+                {
+                    "path": str(fpath),
+                    "rel": str(rel),
+                    "label": label,
+                    "size": size,
+                }
+            )
     return docs
 
 
@@ -104,14 +107,16 @@ def chunk_document(text: str, source: dict) -> list[dict]:
 
     # Small doc: keep as one chunk
     if total_lines <= MAX_CHUNK_LINES:
-        return [{
-            "text": text,
-            "source": source["rel"],
-            # For display, use first meaningful line
-            "heading": extract_heading(lines) or source["rel"],
-            "line_start": 0,
-            "line_end": total_lines,
-        }]
+        return [
+            {
+                "text": text,
+                "source": source["rel"],
+                # For display, use first meaningful line
+                "heading": extract_heading(lines) or source["rel"],
+                "line_start": 0,
+                "line_end": total_lines,
+            }
+        ]
 
     # Large doc: split by sections (## headings) or line blocks
     chunks = []
@@ -133,25 +138,31 @@ def chunk_document(text: str, source: dict) -> list[dict]:
 
         if end - start <= MAX_CHUNK_LINES:
             chunk_text = "\n".join(lines[start:end])
-            chunks.append({
-                "text": chunk_text,
-                "source": source["rel"],
-                "heading": extract_heading(lines[start:start+3]) or source["rel"],
-                "line_start": start,
-                "line_end": end,
-            })
+            chunks.append(
+                {
+                    "text": chunk_text,
+                    "source": source["rel"],
+                    "heading": extract_heading(lines[start : start + 3])
+                    or source["rel"],
+                    "line_start": start,
+                    "line_end": end,
+                }
+            )
         else:
             # Subdivide long section
             for sub_start in range(start, end, MAX_CHUNK_LINES):
                 sub_end = min(sub_start + MAX_CHUNK_LINES, end)
                 chunk_text = "\n".join(lines[sub_start:sub_end])
-                chunks.append({
-                    "text": chunk_text,
-                    "source": source["rel"],
-                    "heading": extract_heading(lines[sub_start:sub_start+3]) or source["rel"],
-                    "line_start": sub_start,
-                    "line_end": sub_end,
-                })
+                chunks.append(
+                    {
+                        "text": chunk_text,
+                        "source": source["rel"],
+                        "heading": extract_heading(lines[sub_start : sub_start + 3])
+                        or source["rel"],
+                        "line_start": sub_start,
+                        "line_end": sub_end,
+                    }
+                )
 
     return chunks
 
@@ -286,12 +297,22 @@ def build_index():
 
     # Save
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(str(INDEX_FILE), matrix=matrix, vocab_ids=np.array(list(vec.vocab.values())), idf=vec.idf)
+    np.savez_compressed(
+        str(INDEX_FILE),
+        matrix=matrix,
+        vocab_ids=np.array(list(vec.vocab.values())),
+        idf=vec.idf,
+    )
 
     meta = {
         "vocab": list(vec.vocab.keys()),
         "chunks": [
-            {"source": c["source"], "heading": c["heading"], "line_start": c["line_start"], "line_end": c["line_end"]}
+            {
+                "source": c["source"],
+                "heading": c["heading"],
+                "line_start": c["line_start"],
+                "line_end": c["line_end"],
+            }
             for c in chunks
         ],
         "build_time": time.time(),
@@ -302,7 +323,10 @@ def build_index():
     with open(META_FILE, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
 
-    print(f"Index saved: {len(chunks)} chunks, {len(vec.vocab)} terms, {len(sources)} files.", file=sys.stderr)
+    print(
+        f"Index saved: {len(chunks)} chunks, {len(vec.vocab)} terms, {len(sources)} files.",
+        file=sys.stderr,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +335,10 @@ def build_index():
 def load_index():
     """Load saved index, return (vectorizer, chunks, matrix)."""
     if not INDEX_FILE.exists() or not META_FILE.exists():
-        print("No index found. Run 'python3 tools/papers/rag.py index' first.", file=sys.stderr)
+        print(
+            "No index found. Run 'python3 tools/papers/rag.py index' first.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     data = np.load(str(INDEX_FILE))
@@ -351,7 +378,10 @@ def query(search_text: str, top_k: int = TOP_K, show_snippet: bool = True):
     # Filter zero-score results
     top_indices = [i for i in top_indices if scores[i] > 0]
     if not top_indices:
-        print("No relevant results found. Try different keywords or run 'python3 tools/papers/rag.py index'.", file=sys.stderr)
+        print(
+            "No relevant results found. Try different keywords or run 'python3 tools/papers/rag.py index'.",
+            file=sys.stderr,
+        )
         return
 
     print(f"Query: {search_text}")
@@ -469,7 +499,9 @@ def cmd_check():
 
     missing = [s["rel"] for s in sources if s["rel"] not in cataloged]
     if missing:
-        print(f"{len(missing)} markdown file(s) not cataloged in tools/papers/index.json:")
+        print(
+            f"{len(missing)} markdown file(s) not cataloged in tools/papers/index.json:"
+        )
         for rel in missing:
             print(f"  {rel}")
         return 1
@@ -492,7 +524,7 @@ def main():
 
     elif cmd == "query":
         if len(sys.argv) < 3:
-            print("Usage: python3 tools/papers/rag.py query \"your question\"")
+            print('Usage: python3 tools/papers/rag.py query "your question"')
             return
         query_text = sys.argv[2]
 

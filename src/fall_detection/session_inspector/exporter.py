@@ -25,9 +25,7 @@ def session_size(session: SessionBundle) -> int:
     """Return the total size in bytes of regular files in ``session``."""
 
     return sum(
-        path.stat().st_size
-        for path in session.path.rglob("*")
-        if path.is_file()
+        path.stat().st_size for path in session.path.rglob("*") if path.is_file()
     )
 
 

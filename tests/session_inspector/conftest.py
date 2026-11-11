@@ -65,7 +65,12 @@ def session_factory(tmp_path: Path):
             },
         )
         for ordinal, attempt_number, attempt_status in attempts:
-            attempt = root / "trials" / f"{ordinal:03d}_walk" / f"attempt_{attempt_number:02d}"
+            attempt = (
+                root
+                / "trials"
+                / f"{ordinal:03d}_walk"
+                / f"attempt_{attempt_number:02d}"
+            )
             write_json(
                 attempt / "attempt.json",
                 {

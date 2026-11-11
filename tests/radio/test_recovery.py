@@ -40,11 +40,16 @@ def test_recovery_preserves_terminal_failures(reason, expected):
     assert can_recover(reason) is expected
 
 
-@pytest.mark.parametrize("reason", [
-    "transmitter restarted; start a new run",
-    "gateway ingestion failed: gateway USB receive buffer age exceeded",
-])
-def test_live_recovery_replaces_run_clock_and_buffers_after_retiring_worker(tmp_path, reason):
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "transmitter restarted; start a new run",
+        "gateway ingestion failed: gateway USB receive buffer age exceeded",
+    ],
+)
+def test_live_recovery_replaces_run_clock_and_buffers_after_retiring_worker(
+    tmp_path, reason
+):
     managers = []
     resumed = Event()
     interruptions = []

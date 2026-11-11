@@ -519,9 +519,12 @@ class GatewayReceiverManager:
                             time.monotonic_ns() - chunk.arrival_ns
                             > self._usb_buffer.maximum_age_ns
                         ):
-                            raise TimeoutError("gateway USB receive buffer age exceeded")
+                            raise TimeoutError(
+                                "gateway USB receive buffer age exceeded"
+                            )
                         frames.extend(
-                            (chunk.arrival_ns, frame) for frame in decoder.feed(chunk.data)
+                            (chunk.arrival_ns, frame)
+                            for frame in decoder.feed(chunk.data)
                         )
                 for arrival, frame in frames:
                     if self.failure:
@@ -580,7 +583,9 @@ class GatewayReceiverManager:
                         if self._native_pipeline is not None:
                             from .native import gateway_batch
 
-                            batch = gateway_batch(frame.batch, frame.processed_ns, payload)
+                            batch = gateway_batch(
+                                frame.batch, frame.processed_ns, payload
+                            )
                         else:
                             batch = None
                         if self.transmitter_link != "usb":
@@ -675,7 +680,8 @@ class GatewayReceiverManager:
                         capacity_chunks=self._usb_buffer.capacity_chunks,
                         maximum_age_ns=self._usb_buffer.maximum_age_ns,
                         processing_group_max_chunks=8
-                        if os.name == "posix" and self.serial_factory is None else 4,
+                        if os.name == "posix" and self.serial_factory is None
+                        else 4,
                         native_decoder_workers=2,
                         native_completed_capacity_bytes=16 * 1024 * 1024,
                         maximum_read_bytes=4096,
@@ -858,6 +864,7 @@ class GatewayReceiverManager:
         )
         if os.name == "posix" and self.serial_factory is None:
             from .native import require_native, PipelineStats
+
             self._native_pipeline = require_native().Pipeline(
                 self.connection.fileno(), maximum_age_ns=self._usb_buffer.maximum_age_ns
             )
@@ -867,7 +874,9 @@ class GatewayReceiverManager:
         )
         if self._native_pipeline is None:
             self._usb_drain_thread = Thread(
-                target=self._drain_gateway_usb, name="csi-gateway-usb-drain", daemon=True
+                target=self._drain_gateway_usb,
+                name="csi-gateway-usb-drain",
+                daemon=True,
             )
             self._usb_drain_thread.start()
         self._usb_thread.start()

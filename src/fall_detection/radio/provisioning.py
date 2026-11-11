@@ -430,7 +430,8 @@ def provision(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="csi-radio provision", description="Provision a selectable CSI radio profile"
+        prog="csi-radio provision",
+        description="Provision a selectable CSI radio profile",
     )
     from .settings import add_config_argument, resolve_settings
 
@@ -499,6 +500,8 @@ def main(argv: list[str] | None = None) -> int:
     if arguments and arguments[0] in actions:
         return actions[arguments[0]](arguments[1:])
     parser = argparse.ArgumentParser(description="Manage CSI radios")
-    parser.add_argument("command", choices=(*actions, "transmitter"), help="radio operation")
+    parser.add_argument(
+        "command", choices=(*actions, "transmitter"), help="radio operation"
+    )
     parser.parse_args(arguments)
     return 2

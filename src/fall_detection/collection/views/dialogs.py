@@ -31,7 +31,9 @@ def choose_protocol(QtWidgets: Any, initial_path: Path) -> CollectionProtocol | 
 class MetadataDialog:
     """Session metadata plus the scenario blocks this session will collect."""
 
-    def __init__(self, QtWidgets: Any, protocol: CollectionProtocol, *, continuous: bool = False) -> None:
+    def __init__(
+        self, QtWidgets: Any, protocol: CollectionProtocol, *, continuous: bool = False
+    ) -> None:
         self.continuous = continuous
         self.QtWidgets = QtWidgets
         self.protocol = protocol

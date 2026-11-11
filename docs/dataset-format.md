@@ -582,8 +582,9 @@ import pandas as pd
 
 frame = pd.read_csv("csi.csv")
 frame["csi"] = frame["data"].map(
-    lambda text: np.array(json.loads(text)[1::2])
-    + 1j * np.array(json.loads(text)[0::2])
+    lambda text: (
+        np.array(json.loads(text)[1::2]) + 1j * np.array(json.loads(text)[0::2])
+    )
 )
 ```
 

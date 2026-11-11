@@ -15,7 +15,9 @@ import tempfile
 from typing import Iterator
 
 
-def iter_table(path: str | Path, *, batch_size: int = 2048) -> Iterator[list[list[str]]]:
+def iter_table(
+    path: str | Path, *, batch_size: int = 2048
+) -> Iterator[list[list[str]]]:
     """Yield rows from a CSV or string-valued Parquet table in bounded batches.
 
     Args:
@@ -35,7 +37,10 @@ def iter_table(path: str | Path, *, batch_size: int = 2048) -> Iterator[list[lis
             columns = batch.to_pydict()
             yield [list(row) for row in zip(*columns.values())]
     else:
-        with open_binary(path) as raw, io.TextIOWrapper(raw, encoding="utf-8", newline="") as stream:
+        with (
+            open_binary(path) as raw,
+            io.TextIOWrapper(raw, encoding="utf-8", newline="") as stream,
+        ):
             reader = csv.reader(stream, strict=True)
             next(reader)
             rows = []
@@ -64,7 +69,10 @@ def convert_csv_to_parquet(source: str | Path, destination: str | Path) -> int:
     source, destination = Path(source), Path(destination)
     if destination.exists():
         raise FileExistsError(destination)
-    with open_binary(source) as raw, io.TextIOWrapper(raw, encoding="utf-8", newline="") as stream:
+    with (
+        open_binary(source) as raw,
+        io.TextIOWrapper(raw, encoding="utf-8", newline="") as stream,
+    ):
         header = next(csv.reader(stream, strict=True))
     if not header or len(set(header)) != len(header):
         raise ValueError("CSV header must contain unique columns")
@@ -81,17 +89,21 @@ def convert_csv_to_parquet(source: str | Path, destination: str | Path) -> int:
                 if any(len(row) != len(header) for row in rows):
                     raise ValueError("CSV row does not match header width")
                 columns = list(zip(*rows))
-                writer.write_table(pa.Table.from_arrays(
-                    [pa.array(column, type=pa.string()) for column in columns],
-                    schema=schema,
-                ))
+                writer.write_table(
+                    pa.Table.from_arrays(
+                        [pa.array(column, type=pa.string()) for column in columns],
+                        schema=schema,
+                    )
+                )
                 count += len(rows)
         from itertools import chain, zip_longest
 
         original = chain.from_iterable(iter_table(source))
         # The temporary filename is not a format indicator.
         batches = pq.ParquetFile(temporary).iter_batches(batch_size=2048)
-        converted = (list(row) for batch in batches for row in zip(*batch.to_pydict().values()))
+        converted = (
+            list(row) for batch in batches for row in zip(*batch.to_pydict().values())
+        )
         sentinel = object()
         if any(a != b for a, b in zip_longest(original, converted, fillvalue=sentinel)):
             raise ValueError("Parquet verification failed")

@@ -243,7 +243,9 @@ def _load_attempt(session_root: Path, path: Path) -> RecordedAttempt:
     )
 
 
-def _trial_from_protocol(trial: Trial, attempts: Iterable[RecordedAttempt]) -> RecordedTrial:
+def _trial_from_protocol(
+    trial: Trial, attempts: Iterable[RecordedAttempt]
+) -> RecordedTrial:
     scenario = trial.scenario
     return RecordedTrial(
         ordinal=trial.ordinal,
@@ -303,11 +305,11 @@ def load_session(path: Path) -> SessionBundle:
     else:
         warnings.append("missing protocol.json")
 
-    attempt_paths = sorted(
-        item
-        for item in (root / "trials").glob("*/attempt_*")
-        if item.is_dir()
-    ) if (root / "trials").is_dir() else []
+    attempt_paths = (
+        sorted(item for item in (root / "trials").glob("*/attempt_*") if item.is_dir())
+        if (root / "trials").is_dir()
+        else []
+    )
     attempts = tuple(_load_attempt(root, item) for item in attempt_paths)
     for attempt in attempts:
         warnings.extend(attempt.warnings)
@@ -323,7 +325,9 @@ def load_session(path: Path) -> SessionBundle:
     if protocol is not None:
         for trial in protocol.trials:
             planned_ordinals.add(trial.ordinal)
-            trials.append(_trial_from_protocol(trial, by_ordinal.get(trial.ordinal, ())))
+            trials.append(
+                _trial_from_protocol(trial, by_ordinal.get(trial.ordinal, ()))
+            )
     for ordinal in sorted(set(by_ordinal) - planned_ordinals):
         trials.append(_orphan_trial(ordinal, by_ordinal[ordinal]))
     trials.sort(key=lambda item: item.ordinal)
@@ -353,7 +357,9 @@ def scan_sessions(path: Path) -> tuple[SessionBundle, ...]:
     if not root.is_dir():
         raise SessionReadError(f"sessions directory does not exist: {root}")
     sessions: list[SessionBundle] = []
-    for child in sorted((item for item in root.iterdir() if item.is_dir()), reverse=True):
+    for child in sorted(
+        (item for item in root.iterdir() if item.is_dir()), reverse=True
+    ):
         if not (child / "session.json").is_file():
             continue
         try:

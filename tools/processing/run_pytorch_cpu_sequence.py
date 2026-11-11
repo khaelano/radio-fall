@@ -30,8 +30,12 @@ def main() -> None:
     parser.add_argument("--cpu-threads", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="cpu")
-    parser.add_argument("--data-root", type=Path,
-                        default=Path(__file__).resolve().parents[2] / "data/processed/amplitude_sequence_v2")
+    parser.add_argument(
+        "--data-root",
+        type=Path,
+        default=Path(__file__).resolve().parents[2]
+        / "data/processed/amplitude_sequence_v2",
+    )
     args = parser.parse_args()
     if args.cpu_threads < 1 or args.batch_size < 1:
         parser.error("--cpu-threads and --batch-size must be positive")
@@ -44,21 +48,42 @@ def main() -> None:
         allowed = sorted(os.sched_getaffinity(0))
         if len(allowed) < args.cpu_threads:
             parser.error("Fewer CPUs are available than requested threads")
-        os.sched_setaffinity(0, set(allowed[:args.cpu_threads]))
+        os.sched_setaffinity(0, set(allowed[: args.cpu_threads]))
     config = replace(
-        CpuPilotConfig(), duration=args.duration, epochs=args.epochs,
-        patience=args.patience, cpu_threads=args.cpu_threads, device=args.device,
+        CpuPilotConfig(),
+        duration=args.duration,
+        epochs=args.epochs,
+        patience=args.patience,
+        cpu_threads=args.cpu_threads,
+        device=args.device,
         batch_size=args.batch_size,
     )
     if pilot:
-        result = run_cpu_pilot(args.tinygrad_run, args.output, config, data_root=args.data_root)
+        result = run_cpu_pilot(
+            args.tinygrad_run, args.output, config, data_root=args.data_root
+        )
     else:
-        result = run_cpu_training(args.frame, args.normalizer, args.output, config, data_root=args.data_root)
-    print("device", result["runtime"]["device"], "GPU", result["runtime"]["gpu_name"], flush=True)
+        result = run_cpu_training(
+            args.frame, args.normalizer, args.output, config, data_root=args.data_root
+        )
+    print(
+        "device",
+        result["runtime"]["device"],
+        "GPU",
+        result["runtime"]["gpu_name"],
+        flush=True,
+    )
     for kind, model in result["models"].items():
-        print(kind, "training_seconds", round(model["training_seconds"], 3),
-              "peak_rss_bytes", model["peak_rss_bytes"],
-              "peak_cuda_allocated_bytes", model["peak_cuda_allocated_bytes"], flush=True)
+        print(
+            kind,
+            "training_seconds",
+            round(model["training_seconds"], 3),
+            "peak_rss_bytes",
+            model["peak_rss_bytes"],
+            "peak_cuda_allocated_bytes",
+            model["peak_cuda_allocated_bytes"],
+            flush=True,
+        )
 
 
 if __name__ == "__main__":

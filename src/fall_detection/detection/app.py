@@ -25,11 +25,16 @@ def parser() -> argparse.ArgumentParser:
     )
     phase_default = Path("data/experiments/phase_models_v1/20261104T081805521126Z")
     result.add_argument(
-        "--phase-models", type=Path, default=phase_default if phase_default.is_dir() else None,
+        "--phase-models",
+        type=Path,
+        default=phase_default if phase_default.is_dir() else None,
         help="Trusted directory containing 2s/4s/6s phase model files",
     )
-    result.add_argument("--no-phase-models", action="store_true",
-                        help="Disable experimental phase-model scores")
+    result.add_argument(
+        "--no-phase-models",
+        action="store_true",
+        help="Disable experimental phase-model scores",
+    )
     result.add_argument("--phase-hop-ms", type=int, default=2000)
     result.add_argument("--export-model", type=Path, metavar="NEW_DIRECTORY")
     result.add_argument(
@@ -88,17 +93,31 @@ def _gui(args, radio, engine, tick) -> int:
         layout.addWidget(phase_title)
         phase_table = QtWidgets.QTableWidget(0, 7)
         phase_table.setHorizontalHeaderLabels(
-            ["Receiver", "Window", "Model", "Preparation", "Action", "Resting", "Coverage"]
+            [
+                "Receiver",
+                "Window",
+                "Model",
+                "Preparation",
+                "Action",
+                "Resting",
+                "Coverage",
+            ]
         )
-        phase_table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
-        phase_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        phase_table.horizontalHeader().setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.Stretch
+        )
+        phase_table.setEditTriggers(
+            QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers
+        )
         for receiver in phase_engine.receivers.values():
             for duration in (2, 4, 6):
                 for model in ("cnn", "lstm", "gru", "random_forest"):
                     row = phase_table.rowCount()
                     phase_table.insertRow(row)
                     phase_rows[(receiver, duration, model)] = row
-                    for col, value in enumerate((receiver, f"{duration} s", model, "—", "—", "—", "—")):
+                    for col, value in enumerate(
+                        (receiver, f"{duration} s", model, "—", "—", "—", "—")
+                    ):
                         phase_table.setItem(row, col, QtWidgets.QTableWidgetItem(value))
         phase_table.setMinimumHeight(220)
         layout.addWidget(phase_table)
@@ -138,26 +157,39 @@ def _gui(args, radio, engine, tick) -> int:
             )
             if phase_engine is not None:
                 phase_state = phase_engine.status(
-                    radio_ready=radio.manager.preflight_ready and not radio.manager.failure
+                    radio_ready=radio.manager.preflight_ready
+                    and not radio.manager.failure
                 )
                 for row in phase_rows.values():
                     for column in range(3, 7):
                         phase_table.item(row, column).setText("—")
                 for item in phase_state["models"]:
-                    row = phase_rows[(item["receiver"], item["duration_seconds"], item["model"])]
+                    row = phase_rows[
+                        (item["receiver"], item["duration_seconds"], item["model"])
+                    ]
                     probabilities = item["probabilities"]
                     missing = item.get("absent_training_classes", [])
-                    phase_table.item(row, 2).setText(item["model"] + (" *" if missing else ""))
-                    phase_table.item(row, 2).setToolTip(
-                        "Absent training classes: " + ", ".join(missing) if missing else ""
+                    phase_table.item(row, 2).setText(
+                        item["model"] + (" *" if missing else "")
                     )
-                    for column, label in enumerate(("preparation", "action", "resting"), 3):
+                    phase_table.item(row, 2).setToolTip(
+                        "Absent training classes: " + ", ".join(missing)
+                        if missing
+                        else ""
+                    )
+                    for column, label in enumerate(
+                        ("preparation", "action", "resting"), 3
+                    ):
                         phase_table.item(row, column).setText(
-                            f"{probabilities[label]:.3f}" if probabilities is not None else "insufficient data"
+                            f"{probabilities[label]:.3f}"
+                            if probabilities is not None
+                            else "insufficient data"
                         )
                     phase_table.item(row, 6).setText(f"{item['coverage']:.1%}")
                 if phase_state["failure"]:
-                    phase_title.setText(f"Experimental phase scores unavailable: {phase_state['failure']}")
+                    phase_title.setText(
+                        f"Experimental phase scores unavailable: {phase_state['failure']}"
+                    )
                 else:
                     phase_title.setText(
                         "Experimental phase scores at window center · rolling-window approximation"
@@ -291,9 +323,14 @@ def main(argv: list[str] | None = None) -> int:
             phase_engine = None
             if args.phase_models and not args.no_phase_models:
                 from .phase_models import PhaseModelEngine
+
                 phase_engine = PhaseModelEngine(
-                    args.phase_models, bundle.metadata["radio"], bundle.metadata["receivers"],
-                    threads=args.inference_threads, grace_ms=args.grace_ms, hop_ms=args.phase_hop_ms,
+                    args.phase_models,
+                    bundle.metadata["radio"],
+                    bundle.metadata["receivers"],
+                    threads=args.inference_threads,
+                    grace_ms=args.grace_ms,
+                    hop_ms=args.phase_hop_ms,
                 )
                 resources.callback(phase_engine.close)
             engine.phase_engine = phase_engine
@@ -328,8 +365,12 @@ def main(argv: list[str] | None = None) -> int:
                 json.dumps(
                     dict(
                         model=bundle.metadata,
-                        phase_models=(str(args.phase_models) if phase_engine is not None else None),
-                        phase_preprocessing="rolling-window approximation" if phase_engine is not None else None,
+                        phase_models=(
+                            str(args.phase_models) if phase_engine is not None else None
+                        ),
+                        phase_preprocessing="rolling-window approximation"
+                        if phase_engine is not None
+                        else None,
                         runtime=dict(
                             hop_ms=args.hop_ms,
                             grace_ms=args.grace_ms,
@@ -361,10 +402,15 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if phase_engine is not None:
                     state = phase_engine.status(
-                        radio_ready=radio.manager.preflight_ready and not radio.manager.failure
+                        radio_ready=radio.manager.preflight_ready
+                        and not radio.manager.failure
                     )
                     for item in state["models"]:
-                        key = (item["receiver"], item["duration_seconds"], item["model"])
+                        key = (
+                            item["receiver"],
+                            item["duration_seconds"],
+                            item["model"],
+                        )
                         identity = (item["generation"], item["end_ns"])
                         if logged_phase.get(key) != identity:
                             logged_phase[key] = identity
@@ -397,8 +443,14 @@ def main(argv: list[str] | None = None) -> int:
                                     kind="status",
                                     radio_ready=radio.manager.preflight_ready,
                                     **engine.status(),
-                                    phase=(phase_engine.status(radio.manager.preflight_ready and
-                                           not radio.manager.failure) if phase_engine else None),
+                                    phase=(
+                                        phase_engine.status(
+                                            radio.manager.preflight_ready
+                                            and not radio.manager.failure
+                                        )
+                                        if phase_engine
+                                        else None
+                                    ),
                                 ),
                                 allow_nan=False,
                             ),

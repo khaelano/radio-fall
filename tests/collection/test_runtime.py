@@ -90,9 +90,7 @@ def test_presenter_checks_health_each_tick_without_reprobing_storage(
         video=video,
     )
     presenter.refresh(now=0)
-    assert previews[-1] == (
-        "new image", {"ready": True, "detail": "video ready"}
-    )
+    assert previews[-1] == ("new image", {"ready": True, "detail": "video ready"})
     controller.dispatch(OperatorCommand.START_TRIAL)
     # Planned upload gaps must not interrupt an active attempt.
     reader.all_live = reader.any_recent_record = False
@@ -122,9 +120,7 @@ def test_presenter_checks_health_each_tick_without_reprobing_storage(
     assert controller.tick().attempt_status == "invalid"
     video.ready, video.detail = False, "camera worker stopped"
     presenter.refresh(now=2.2)
-    assert previews[-1] == (
-        None, {"ready": False, "detail": "camera worker stopped"}
-    )
+    assert previews[-1] == (None, {"ready": False, "detail": "camera worker stopped"})
 
 
 def test_output_writable_checks_actual_output_and_nearest_existing_parent(

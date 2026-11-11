@@ -21,7 +21,7 @@ from fall_detection.radio.acquisition.wire import (
 
 
 LINE = (
-    'CSI_DATA,10,1a:00:00:00:00:00,-40,11,1,2,0,1,1,0,1,0,1,-95,3,11,0,'
+    "CSI_DATA,10,1a:00:00:00:00:00,-40,11,1,2,0,1,1,0,1,0,1,-95,3,11,0,"
     '1234,1,36,7,6,1,"[3,4,0,-5,127,-128]"'
 )
 
@@ -77,10 +77,18 @@ def test_binary_wire_round_trip_preserves_metadata_and_csv():
 
 
 def test_binary_wire_handles_maximum_csi_payload():
-    values = [complex((index % 255) - 128, ((index * 3) % 255) - 128) for index in range(306)]
+    values = [
+        complex((index % 255) - 128, ((index * 3) % 255) - 128) for index in range(306)
+    ]
     record = parse_csi_line(
         'CSI_DATA,2,1a:00:00:00:00:00,-40,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,100,0,36,0,612,0,"'
-        + str([component for value in values for component in (int(value.imag), int(value.real))]).replace("'", "")
+        + str(
+            [
+                component
+                for value in values
+                for component in (int(value.imag), int(value.real))
+            ]
+        ).replace("'", "")
         + '"'
     )
 
@@ -100,7 +108,7 @@ def test_binary_wire_handles_maximum_csi_payload():
         lambda packet: b"BAD!" + packet[4:],
         lambda packet: packet[:4] + bytes([9]) + packet[5:],
         lambda packet: packet[:-1],
-        lambda packet: packet[:HEADER_SIZE - 1] + packet[HEADER_SIZE:],
+        lambda packet: packet[: HEADER_SIZE - 1] + packet[HEADER_SIZE:],
     ],
 )
 def test_binary_wire_rejects_corrupt_datagrams(mutator):
@@ -162,8 +170,7 @@ def test_batch_round_trip_preserves_four_records_and_stats():
 
 def test_batch_accepts_two_large_clocked_records_below_payload_limit():
     values = [
-        complex((index % 255) - 128, ((index * 3) % 255) - 128)
-        for index in range(290)
+        complex((index % 255) - 128, ((index * 3) % 255) - 128) for index in range(290)
     ]
     record = parse_csi_line(
         'CSI_DATA,2,1a:00:00:00:00:00,-40,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,100,0,36,0,580,0,"'

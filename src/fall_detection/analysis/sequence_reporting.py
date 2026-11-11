@@ -118,7 +118,9 @@ def _plot_identity(workflow, stage, scales, max_points, max_window_overlays, dpi
         "hampel": ("hampel",),
         "difference": (),
         "windows": ("index",),
-        "export": ("index", "signals") if getattr(workflow, "format_version", 1) == 2 else ("index", "shards"),
+        "export": ("index", "signals")
+        if getattr(workflow, "format_version", 1) == 2
+        else ("index", "shards"),
     }[stage]
     inputs = {name: _frame_identity(getattr(workflow, name)) for name in frames}
     if stage in _STAGE_ARRAYS:
@@ -130,7 +132,9 @@ def _plot_identity(workflow, stage, scales, max_points, max_window_overlays, dpi
     elif stage == "export":
         inputs["timings"] = workflow.timings
         if len(workflow.index):
-            column = "signal" if getattr(workflow, "format_version", 1) == 2 else "shard"
+            column = (
+                "signal" if getattr(workflow, "format_version", 1) == 2 else "shard"
+            )
             path = workflow.output / workflow.index[column][0]
             inputs["example"] = dict(path=str(path), **stamp(path))
     return fingerprint(
@@ -394,7 +398,9 @@ def plot_stage(
             files = workflow.signals if v2 else workflow.shards
             axes[0].hist(files["bytes"].to_numpy() / 2**20, bins=25)
             axes[0].set(
-                xlabel="Signal file size (MiB)" if v2 else "Compressed shard size (MiB)",
+                xlabel="Signal file size (MiB)"
+                if v2
+                else "Compressed shard size (MiB)",
                 ylabel="Files",
             )
             axes[1].barh(list(workflow.timings), list(workflow.timings.values()))
@@ -402,20 +408,24 @@ def plot_stage(
             example = workflow.index.row(0, named=True)
             if v2:
                 amplitude = np.load(workflow.output / example["signal"], mmap_mode="r")
-                amplitude = amplitude[example["start"]:example["stop"]]
+                amplitude = amplitude[example["start"] : example["stop"]]
                 source_name = example["signal"]
             else:
                 with np.load(workflow.output / example["shard"]) as reloaded:
                     amplitude = reloaded["amplitude"][example["shard_row"]]
                 source_name = example["shard"]
             positions = np.linspace(
-                0, amplitude.shape[0] - 1,
+                0,
+                amplitude.shape[0] - 1,
                 min(max_points, amplitude.shape[0]),
                 dtype=int,
             )
             a = amplitude[positions, 0, :]
-            norm = (Normalize(0, max(1e-6, float(np.nanquantile(a, 0.99))))
-                    if v2 else Normalize(*scales))
+            norm = (
+                Normalize(0, max(1e-6, float(np.nanquantile(a, 0.99))))
+                if v2
+                else Normalize(*scales)
+            )
             image = axes[2].imshow(
                 np.ma.masked_invalid(a.T),
                 aspect="auto",
@@ -423,15 +433,21 @@ def plot_stage(
                 extent=(0, example["duration"], -122, 122),
                 norm=norm,
             )
-            print(f"Reloaded {source_name}: signal {amplitude.shape}, target={example['target']}")
+            print(
+                f"Reloaded {source_name}: signal {amplitude.shape}, target={example['target']}"
+            )
             axes[2].set(
                 xlabel="Window time (s)",
                 ylabel="Physical subcarrier",
                 title="Reloaded example, rx-1",
             )
-            fig.colorbar(image, ax=axes[2], label="Log difference" if v2 else "Raw magnitude")
-            columns = ("segment_id", "samples", "bytes") if v2 else (
-                "duration", "shape", "bytes"
+            fig.colorbar(
+                image, ax=axes[2], label="Log difference" if v2 else "Raw magnitude"
+            )
+            columns = (
+                ("segment_id", "samples", "bytes")
+                if v2
+                else ("duration", "shape", "bytes")
             )
             display(files.select(*columns).head(6))
         else:

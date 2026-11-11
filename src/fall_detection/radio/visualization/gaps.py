@@ -21,9 +21,10 @@ def gap_values(snapshot: AvailabilitySnapshot, now_ns: int) -> np.ndarray:
     counts = np.asarray(snapshot.packet_counts, dtype=np.float64)
     if counts.size == 0:
         return np.empty((len(snapshot.receivers), 0), dtype=np.uint8)
-    ends = snapshot.first_bin_start_ns + (
-        np.arange(counts.shape[1], dtype=np.int64) + 1
-    ) * snapshot.width_ns
+    ends = (
+        snapshot.first_bin_start_ns
+        + (np.arange(counts.shape[1], dtype=np.int64) + 1) * snapshot.width_ns
+    )
     values = np.where(ends + snapshot.grace_ns <= now_ns, GAP, PENDING)
     values = np.broadcast_to(values, counts.shape).copy()
     values[counts > 0] = RECEIVED
@@ -62,18 +63,27 @@ class CsiGapPanel:
         self.plot.getViewBox().invertY(True)
         self.plot.enableAutoRange(False)
         self.image = pg.ImageItem(axisOrder="row-major")
-        self.image.setLookupTable(np.array([
-            pg.mkColor(color).getRgb() for color in GAP_COLORS
-        ], dtype=np.uint8))
+        self.image.setLookupTable(
+            np.array(
+                [pg.mkColor(color).getRgb() for color in GAP_COLORS], dtype=np.uint8
+            )
+        )
         self.plot.addItem(self.image)
         layout.addWidget(self.canvas, 1)
-        legend = QtWidgets.QLabel(" &nbsp; ".join(
-            f'<span style="color:{color}">■</span> {label}'
-            for color, label in zip(GAP_COLORS, (
-                "No timing / before run", "Empty after deadline",
-                "CSI received by deadline", "Awaiting delivery deadline",
-            ))
-        ))
+        legend = QtWidgets.QLabel(
+            " &nbsp; ".join(
+                f'<span style="color:{color}">■</span> {label}'
+                for color, label in zip(
+                    GAP_COLORS,
+                    (
+                        "No timing / before run",
+                        "Empty after deadline",
+                        "CSI received by deadline",
+                        "Awaiting delivery deadline",
+                    ),
+                )
+            )
+        )
         legend.setWordWrap(True)
         layout.addWidget(legend)
 
@@ -83,7 +93,8 @@ class CsiGapPanel:
         """Update a bounded snapshot, including advancing time during silence."""
         now_ns = time.monotonic_ns() if now_ns is None else now_ns
         if (
-            not force and self._rendered_ns is not None
+            not force
+            and self._rendered_ns is not None
             and now_ns - self._rendered_ns < GAP_REFRESH_NS
         ):
             return False
@@ -104,12 +115,12 @@ class CsiGapPanel:
                 "Empty bins can include scheduled sensing/upload pauses."
             )
         self.image.setImage(values, autoLevels=False, levels=(0, 3))
-        self.image.setRect(self._QtCore.QRectF(
-            left, -0.5, width, max(1, len(receivers))
-        ))
-        self.plot.getAxis("left").setTicks([
-            [(index, receiver) for index, receiver in enumerate(receivers)]
-        ])
+        self.image.setRect(
+            self._QtCore.QRectF(left, -0.5, width, max(1, len(receivers)))
+        )
+        self.plot.getAxis("left").setTicks(
+            [[(index, receiver) for index, receiver in enumerate(receivers)]]
+        )
         self.plot.setXRange(-seconds, 0, padding=0)
         self.plot.setYRange(-0.5, max(1, len(receivers)) - 0.5, padding=0)
         self._rendered_ns = now_ns

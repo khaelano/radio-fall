@@ -83,7 +83,9 @@ def set_run_font(
         run.italic = italic
 
 
-def set_style_font(style, *, name: str = "Calibri", size: float = 11, color: str = "000000") -> None:
+def set_style_font(
+    style, *, name: str = "Calibri", size: float = 11, color: str = "000000"
+) -> None:
     style.font.name = name
     style.font.size = Pt(size)
     style.font.color.rgb = RGBColor.from_string(color)
@@ -97,7 +99,9 @@ def set_style_font(style, *, name: str = "Calibri", size: float = 11, color: str
     r_fonts.set(qn("w:eastAsia"), name)
 
 
-def set_paragraph_spacing(style, *, before: float = 0, after: float = 8, line: float = 1.333) -> None:
+def set_paragraph_spacing(
+    style, *, before: float = 0, after: float = 8, line: float = 1.333
+) -> None:
     fmt = style.paragraph_format
     fmt.space_before = Pt(before)
     fmt.space_after = Pt(after)
@@ -324,7 +328,9 @@ def configure_template() -> Document:
     header_p.alignment = WD_ALIGN_PARAGRAPH.LEFT
     header_p.paragraph_format.space_after = Pt(0)
     header_p.paragraph_format.line_spacing = 1
-    header_run = header_p.add_run("Draf Bab 1–3  |  Deteksi Jatuh Berbasis Radar Doppler")
+    header_run = header_p.add_run(
+        "Draf Bab 1–3  |  Deteksi Jatuh Berbasis Radar Doppler"
+    )
     set_run_font(header_run, size=8.5, color=MUTED)
 
     footer = section.footer
@@ -415,7 +421,9 @@ def export_csl_json(keys: list[str], destination: Path, zotero_db: Path) -> None
             continue
         values = field_map(con, item_id)
         item_type = type_rows.get(
-            con.execute("SELECT itemTypeID FROM items WHERE itemID = ?", (item_id,)).fetchone()[0],
+            con.execute(
+                "SELECT itemTypeID FROM items WHERE itemID = ?", (item_id,)
+            ).fetchone()[0],
             "journalArticle",
         )
         creator_rows = con.execute(
@@ -453,7 +461,11 @@ def export_csl_json(keys: list[str], destination: Path, zotero_db: Path) -> None
         year_match = re.search(r"(\d{4})", date_value)
         if year_match:
             entry["issued"] = {"date-parts": [[int(year_match.group(1))]]}
-        venue = values.get("publicationTitle") or values.get("proceedingsTitle") or values.get("conferenceName")
+        venue = (
+            values.get("publicationTitle")
+            or values.get("proceedingsTitle")
+            or values.get("conferenceName")
+        )
         if venue:
             entry["container-title"] = venue
         for source_field, csl_field in (
@@ -470,8 +482,12 @@ def export_csl_json(keys: list[str], destination: Path, zotero_db: Path) -> None
         entries.append(entry)
     con.close()
     if missing:
-        raise RuntimeError(f"Citation key tidak ditemukan di Zotero: {', '.join(missing)}")
-    destination.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+        raise RuntimeError(
+            f"Citation key tidak ditemukan di Zotero: {', '.join(missing)}"
+        )
+    destination.write_text(
+        json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def make_combined_markdown(
@@ -487,7 +503,7 @@ def make_combined_markdown(
         f"title: {json.dumps(title, ensure_ascii=False)}",
         f"subtitle: {json.dumps(subtitle, ensure_ascii=False)}",
         "lang: id-ID",
-        "reference-section-title: \"Daftar Pustaka\"",
+        'reference-section-title: "Daftar Pustaka"',
         "---",
         "",
     ]

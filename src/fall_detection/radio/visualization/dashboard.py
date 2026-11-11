@@ -236,8 +236,11 @@ class CsiDashboardPanel:
         phase_detail_layout.addWidget(self.phase_detail_canvas)
         self.tabs.addTab(phase_detail_tab, "Phase by subcarrier")
         self.gaps = CsiGapPanel(
-            QtCore, QtWidgets, pg,
-            receivers=receivers or (), snapshot=gap_snapshot,
+            QtCore,
+            QtWidgets,
+            pg,
+            receivers=receivers or (),
+            snapshot=gap_snapshot,
         )
         self.tabs.addTab(self.gaps.widget, "CSI gaps")
         self._gap_config_version = -1

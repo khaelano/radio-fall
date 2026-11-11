@@ -49,9 +49,7 @@ def test_parse_csi_line_rejects_invalid_input(line):
 
 
 def test_parse_csi_line_masks_invalid_first_word_without_shifting_subcarriers():
-    line = (
-        'CSI_DATA,2,aa:bb:cc:dd:ee:ff,-40,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,100,0,36,0,6,1,"[9,9,3,4,0,5]"'
-    )
+    line = 'CSI_DATA,2,aa:bb:cc:dd:ee:ff,-40,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,100,0,36,0,6,1,"[9,9,3,4,0,5]"'
 
     record = parse_csi_line(line)
 
@@ -65,8 +63,10 @@ def test_parse_csi_line_masks_invalid_first_word_without_shifting_subcarriers():
 
 
 def test_parse_csi_line_rejects_trailing_mac_garbage():
-    line = FIXTURE.read_text(encoding="utf-8").splitlines()[1].replace(
-        "00,-42", "00:garbage,-42"
+    line = (
+        FIXTURE.read_text(encoding="utf-8")
+        .splitlines()[1]
+        .replace("00,-42", "00:garbage,-42")
     )
     with pytest.raises(ValueError, match="MAC"):
         parse_csi_line(line)

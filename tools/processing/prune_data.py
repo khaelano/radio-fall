@@ -122,7 +122,9 @@ def collect(args: argparse.Namespace) -> list[tuple[str, Path, int, str]]:
     if args.viewer_captures and VIEWER.is_dir():
         for path in sorted(VIEWER.iterdir()):
             if older_than(path, args.keep_days):
-                found.append(("viewer-capture", path, size_of(path), "ad-hoc viewer capture"))
+                found.append(
+                    ("viewer-capture", path, size_of(path), "ad-hoc viewer capture")
+                )
 
     return found
 
@@ -138,9 +140,13 @@ def main(argv: list[str] | None = None) -> int:
         default=7.0,
         help="skip paths modified more recently than this (default 7; 0 disables)",
     )
-    parser.add_argument("--apply", action="store_true", help="delete instead of reporting")
     parser.add_argument(
-        "--verbose", action="store_true", help="list every path, not just category totals"
+        "--apply", action="store_true", help="delete instead of reporting"
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="list every path, not just category totals",
     )
     args = parser.parse_args(argv)
 
@@ -169,7 +175,9 @@ def main(argv: list[str] | None = None) -> int:
             for _, path, item_size, detail in items:
                 rel = path.relative_to(ROOT)
                 print(f"  {human(item_size):>9s}  {rel}  ({detail})")
-    print(f"\n{'would free' if not args.apply else 'freed'}: {human(total)} across {len(entries)} entries")
+    print(
+        f"\n{'would free' if not args.apply else 'freed'}: {human(total)} across {len(entries)} entries"
+    )
 
     if not args.apply:
         print("dry run; pass --apply to delete")

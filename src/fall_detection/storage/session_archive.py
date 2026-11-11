@@ -30,7 +30,10 @@ def _inventory(root: Path) -> dict[str, tuple[int, int, int, int]]:
                 raise ValueError(f"not a regular file: {path}")
             stat = path.stat()
             result[path.relative_to(root).as_posix()] = (
-                stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
+                stat.st_dev,
+                stat.st_ino,
+                stat.st_size,
+                stat.st_mtime_ns,
             )
     return result
 
@@ -63,8 +66,14 @@ def verify_archive(path: str | Path) -> dict:
         for entry in entries:
             name = entry["path"]
             parts = PurePosixPath(name).parts
-            if (not parts or name.startswith("/") or ".." in parts or "." in parts
-                    or "\\" in name or name != PurePosixPath(name).as_posix()):
+            if (
+                not parts
+                or name.startswith("/")
+                or ".." in parts
+                or "." in parts
+                or "\\" in name
+                or name != PurePosixPath(name).as_posix()
+            ):
                 raise ValueError("unsafe member path")
             declared.append(name)
             digest = hashlib.sha256()
@@ -75,16 +84,22 @@ def verify_archive(path: str | Path) -> dict:
                     digest.update(data)
             if size != entry["size"] or digest.hexdigest() != entry["sha256"]:
                 raise ValueError(f"checksum mismatch: {name}")
-        if len(set(declared)) != len(declared) or set(names) != set(declared) | {"manifest.json"}:
+        if len(set(declared)) != len(declared) or set(names) != set(declared) | {
+            "manifest.json"
+        }:
             raise ValueError("archive inventory mismatch")
         original = set()
         for entry in manifest["files"]:
             logical = entry.get("logical_path", entry["path"].removeprefix("original/"))
-            if (not entry["path"].startswith("original/") or not logical
-                    or logical.startswith("/") or "\\" in logical
-                    or ".." in PurePosixPath(logical).parts
-                    or logical != PurePosixPath(logical).as_posix()
-                    or "original/" + logical in original):
+            if (
+                not entry["path"].startswith("original/")
+                or not logical
+                or logical.startswith("/")
+                or "\\" in logical
+                or ".." in PurePosixPath(logical).parts
+                or logical != PurePosixPath(logical).as_posix()
+                or "original/" + logical in original
+            ):
                 raise ValueError("invalid original path")
             original.add("original/" + logical)
             if entry.get("encoding") == "zstd":
@@ -94,7 +109,10 @@ def verify_archive(path: str | Path) -> dict:
                     while data := stream.read(_CHUNK):
                         size += len(data)
                         digest.update(data)
-                if size != entry["logical_size"] or digest.hexdigest() != entry["logical_sha256"]:
+                if (
+                    size != entry["logical_size"]
+                    or digest.hexdigest() != entry["logical_sha256"]
+                ):
                     raise ValueError("logical checksum mismatch")
             elif entry.get("encoding") is not None:
                 raise ValueError("unsupported member encoding")
@@ -104,12 +122,17 @@ def verify_archive(path: str | Path) -> dict:
         if session.get("session_id") != manifest.get("session_id"):
             raise ValueError("session identity mismatch")
         for entry in manifest["tables"]:
-            if not entry["path"].startswith("tables/") or "original/" + entry["source"] not in original:
+            if (
+                not entry["path"].startswith("tables/")
+                or "original/" + entry["source"] not in original
+            ):
                 raise ValueError("invalid table mapping")
         return manifest
 
 
-def create_archive(source: str | Path, destination: str | Path, *, progress=None) -> dict:
+def create_archive(
+    source: str | Path, destination: str | Path, *, progress=None
+) -> dict:
     """Export and fully verify a closed session without modifying its files."""
     events = physical_path(Path(source) / "events.jsonl")
     if not events.exists():
@@ -121,11 +144,15 @@ def create_archive(source: str | Path, destination: str | Path, *, progress=None
             try:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
-                raise ValueError("session is open in another collector or exporter") from exc
+                raise ValueError(
+                    "session is open in another collector or exporter"
+                ) from exc
         return _create_archive(source, destination, progress=progress)
 
 
-def _create_archive(source: str | Path, destination: str | Path, *, progress=None) -> dict:
+def _create_archive(
+    source: str | Path, destination: str | Path, *, progress=None
+) -> dict:
     source = Path(source).resolve()
     destination = Path(destination).resolve()
     if destination.exists():
@@ -133,25 +160,46 @@ def _create_archive(source: str | Path, destination: str | Path, *, progress=Non
     if destination.is_relative_to(source):
         raise ValueError("destination must be outside the session")
     session = json.loads((source / "session.json").read_text(encoding="utf-8"))
-    if session.get("artifact_schema_version") != 2 or session.get("status") in {None, "open", "recording"}:
+    if session.get("artifact_schema_version") != 2 or session.get("status") in {
+        None,
+        "open",
+        "recording",
+    }:
         raise ValueError("expected a closed schema-2 session")
     initial = _inventory(source)
-    manifest = {"format": _FORMAT, "version": 2 if any(p.endswith(".zst") for p in initial) else 1, "session_id": session["session_id"],
-                "files": [], "tables": []}
-    fd, name = tempfile.mkstemp(prefix=".session-archive-", suffix=".tmp", dir=destination.parent)
+    manifest = {
+        "format": _FORMAT,
+        "version": 2 if any(p.endswith(".zst") for p in initial) else 1,
+        "session_id": session["session_id"],
+        "files": [],
+        "tables": [],
+    }
+    fd, name = tempfile.mkstemp(
+        prefix=".session-archive-", suffix=".tmp", dir=destination.parent
+    )
     os.close(fd)
     temporary = Path(name)
     try:
-        with tempfile.TemporaryDirectory(prefix=".table-", dir=destination.parent) as staging:
+        with tempfile.TemporaryDirectory(
+            prefix=".table-", dir=destination.parent
+        ) as staging:
             table_path = Path(staging) / "table.parquet"
             with zipfile.ZipFile(temporary, "w", allowZip64=True) as archive:
                 for index, relative in enumerate(sorted(initial), 1):
                     path = source / relative
                     if progress:
                         progress(index, len(initial), relative)
-                    method = zipfile.ZIP_STORED if path.suffix.lower() in {".mp4", ".zst"} else zipfile.ZIP_DEFLATED
+                    method = (
+                        zipfile.ZIP_STORED
+                        if path.suffix.lower() in {".mp4", ".zst"}
+                        else zipfile.ZIP_DEFLATED
+                    )
                     entry = _add_file(archive, path, "original/" + relative, method)
-                    logical = relative.removesuffix(".zst") if path.suffix == ".zst" else relative
+                    logical = (
+                        relative.removesuffix(".zst")
+                        if path.suffix == ".zst"
+                        else relative
+                    )
                     if path.suffix == ".zst":
                         digest = hashlib.sha256()
                         size = 0
@@ -159,17 +207,28 @@ def _create_archive(source: str | Path, destination: str | Path, *, progress=Non
                             while data := decoded.read(_CHUNK):
                                 digest.update(data)
                                 size += len(data)
-                        entry.update(encoding="zstd", logical_path=logical,
-                                     logical_sha256=digest.hexdigest(), logical_size=size)
+                        entry.update(
+                            encoding="zstd",
+                            logical_path=logical,
+                            logical_sha256=digest.hexdigest(),
+                            logical_size=size,
+                        )
                     manifest["files"].append(entry)
                     if Path(logical).name in _TABLES and "receivers" in path.parts:
                         rows = convert_csv_to_parquet(path, table_path)
-                        member = "tables/" + str(PurePosixPath(logical).with_suffix(".parquet"))
-                        entry = _add_file(archive, table_path, member, zipfile.ZIP_STORED)
+                        member = "tables/" + str(
+                            PurePosixPath(logical).with_suffix(".parquet")
+                        )
+                        entry = _add_file(
+                            archive, table_path, member, zipfile.ZIP_STORED
+                        )
                         entry.update(source=logical, rows=rows)
                         manifest["tables"].append(entry)
                         table_path.unlink()
-                archive.writestr("manifest.json", json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+                archive.writestr(
+                    "manifest.json",
+                    json.dumps(manifest, sort_keys=True, indent=2) + "\n",
+                )
         if _inventory(source) != initial:
             raise ValueError("session changed during export")
         verify_archive(temporary)

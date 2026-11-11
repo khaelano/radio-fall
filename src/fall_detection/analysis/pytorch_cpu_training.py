@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import platform
 import random
+
 try:
     import resource
 except ImportError:  # Windows does not provide resource.getrusage.
@@ -104,8 +105,9 @@ def _cpu_name() -> str:
     return platform.processor()
 
 
-def _evaluate(model: nn.Module, dataset: SequenceDataset, batch_size: int,
-              device: torch.device) -> dict:
+def _evaluate(
+    model: nn.Module, dataset: SequenceDataset, batch_size: int, device: torch.device
+) -> dict:
     model.eval()
     targets, probabilities = [], []
     started = perf_counter()
@@ -150,7 +152,9 @@ def run_cpu_training(
         Runtime and validation summaries for CNN, LSTM, and GRU.
     """
     frame_path, normalizer_path, output = (
-        frame_path.resolve(), normalizer_path.resolve(), output.resolve()
+        frame_path.resolve(),
+        normalizer_path.resolve(),
+        output.resolve(),
     )
     frame = pl.read_parquet(frame_path).filter(pl.col("duration") == config.duration)
     if data_root is not None:
@@ -162,9 +166,11 @@ def run_cpu_training(
                 raise ValueError("Signal path escapes the dataset root")
             return str(path)
 
-        frame = frame.with_columns(pl.struct("dataset", "signal").map_elements(
-            signal_path, return_dtype=pl.String
-        ).alias("path"))
+        frame = frame.with_columns(
+            pl.struct("dataset", "signal")
+            .map_elements(signal_path, return_dtype=pl.String)
+            .alias("path")
+        )
     if frame.is_empty() or not normalizer_path.is_file():
         raise ValueError("A matching split and normalizer are required")
     if set(frame["split"]) != {"train", "validation", "test"}:
@@ -176,7 +182,11 @@ def run_cpu_training(
         raise ValueError("Expected the same 980 signal features")
     if config.device not in ("auto", "cpu", "cuda"):
         raise ValueError("Device must be auto, cpu, or cuda")
-    device_name = ("cuda" if torch.cuda.is_available() else "cpu") if config.device == "auto" else config.device
+    device_name = (
+        ("cuda" if torch.cuda.is_available() else "cpu")
+        if config.device == "auto"
+        else config.device
+    )
     if device_name == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but PyTorch cannot access an NVIDIA GPU")
     device = torch.device(device_name)
@@ -190,7 +200,9 @@ def run_cpu_training(
     output.mkdir(parents=True, exist_ok=True)
     store = SegmentStore()
     datasets = {
-        split: SequenceDataset(frame.filter(pl.col("split") == split), normalizer, store)
+        split: SequenceDataset(
+            frame.filter(pl.col("split") == split), normalizer, store
+        )
         for split in ("train", "validation", "test")
     }
     counts = {split: len(dataset) for split, dataset in datasets.items()}
@@ -204,7 +216,9 @@ def run_cpu_training(
         "selection_sha256": hashlib.sha256(frame_path.read_bytes()).hexdigest(),
         "normalizer_sha256": hashlib.sha256(normalizer_path.read_bytes()).hexdigest(),
         "code_sha256": {
-            name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
+            name: hashlib.sha256(
+                (Path(__file__).parent / name).read_bytes()
+            ).hexdigest()
             for name in ("pytorch_cpu_training.py", "sequence_training_data.py")
         },
         "counts": counts,
@@ -214,12 +228,16 @@ def run_cpu_training(
             "torch": torch.__version__,
             "device": str(device),
             "cuda_version": torch.version.cuda,
-            "gpu_name": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
+            "gpu_name": torch.cuda.get_device_name(device)
+            if device.type == "cuda"
+            else None,
             "cpu": _cpu_name(),
             "cpu_threads": torch.get_num_threads(),
             "interop_threads": torch.get_num_interop_threads(),
             "mkldnn_enabled": torch.backends.mkldnn.enabled,
-            "affinity_cpus": len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None,
+            "affinity_cpus": len(os.sched_getaffinity(0))
+            if hasattr(os, "sched_getaffinity")
+            else None,
         },
         "models": {},
     }
@@ -232,7 +250,9 @@ def run_cpu_training(
             torch.cuda.synchronize(device)
             torch.cuda.reset_peak_memory_stats(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-        criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(positive_weight, device=device))
+        criterion = nn.BCEWithLogitsLoss(
+            pos_weight=torch.tensor(positive_weight, device=device)
+        )
         history = []
         model_started = perf_counter()
         best_f1 = -1.0
@@ -249,7 +269,9 @@ def run_cpu_training(
                 load_wait += perf_counter() - waiting
                 step_started = perf_counter()
                 inputs = torch.from_numpy(values).to(device)
-                labels = torch.tensor([row["target"] for row in rows], dtype=torch.float32, device=device)
+                labels = torch.tensor(
+                    [row["target"] for row in rows], dtype=torch.float32, device=device
+                )
                 optimizer.zero_grad(set_to_none=True)
                 loss = criterion(model(inputs), labels)
                 loss.backward()
@@ -262,7 +284,9 @@ def run_cpu_training(
                 seen += len(rows)
                 waiting = perf_counter()
             train_seconds = perf_counter() - started
-            validation = _evaluate(model, datasets["validation"], config.batch_size, device)
+            validation = _evaluate(
+                model, datasets["validation"], config.batch_size, device
+            )
             checkpoint_started = perf_counter()
             if validation["fall_f1"] > best_f1:
                 best_f1, stale = validation["fall_f1"], 0
@@ -279,22 +303,32 @@ def run_cpu_training(
                 "validation_seconds": validation["seconds"],
                 "validation_f1": validation["fall_f1"],
                 "checkpoint_seconds": checkpoint_seconds,
-                "epoch_seconds": train_seconds + validation["seconds"] + checkpoint_seconds,
+                "epoch_seconds": train_seconds
+                + validation["seconds"]
+                + checkpoint_seconds,
             }
             history.append(epoch_result)
-            print(f"{kind.upper()} {device.type.upper()} epoch {epoch}/{config.epochs}: "
-                  f"{epoch_result['epoch_seconds']:.3f}s", flush=True)
+            print(
+                f"{kind.upper()} {device.type.upper()} epoch {epoch}/{config.epochs}: "
+                f"{epoch_result['epoch_seconds']:.3f}s",
+                flush=True,
+            )
             if stale >= config.patience:
                 break
         training_seconds = perf_counter() - model_started
-        model.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
+        model.load_state_dict(
+            torch.load(checkpoint, map_location="cpu", weights_only=True)
+        )
         test = _evaluate(model, datasets["test"], config.batch_size, device)
         result["models"][kind] = {
             "history": history,
             "training_seconds": training_seconds,
             "peak_rss_bytes": _rss_bytes(),
-            "peak_cuda_allocated_bytes": (torch.cuda.max_memory_allocated(device)
-                                          if device.type == "cuda" else None),
+            "peak_cuda_allocated_bytes": (
+                torch.cuda.max_memory_allocated(device)
+                if device.type == "cuda"
+                else None
+            ),
             "test_windows": test["windows"],
             "test_f1": test["fall_f1"],
             "test_seconds": test["seconds"],
@@ -304,8 +338,11 @@ def run_cpu_training(
 
 
 def run_cpu_pilot(
-    tinygrad_run: Path, output: Path, config: CpuPilotConfig = CpuPilotConfig(),
-    *, data_root: Path | None = None,
+    tinygrad_run: Path,
+    output: Path,
+    config: CpuPilotConfig = CpuPilotConfig(),
+    *,
+    data_root: Path | None = None,
 ) -> dict:
     """Reuse the exact saved tinygrad `akmal` pilot split and normalizer.
 

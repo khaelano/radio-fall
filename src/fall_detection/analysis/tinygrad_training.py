@@ -351,9 +351,7 @@ class RecurrentStep:
             sample_weights = np.zeros(micro_size, dtype=np.float32)
             sample_weights[:present] = 1
             if present < micro_size:
-                part = np.pad(
-                    part, ((0, micro_size - present), (0, 0), (0, 0))
-                )
+                part = np.pad(part, ((0, micro_size - present), (0, 0), (0, 0)))
                 labels = np.pad(labels, (0, micro_size - present))
             states = [
                 tuple(
@@ -487,23 +485,29 @@ class ModelPredictor:
                 return self.schedules[x.shape](x)
             # JIT signatures include DETACH views. Match the representation of
             # replayed chunk outputs even at a fresh window's zero boundary.
-            state = tuple(s.realize().detach() for s in
-                          self.model.initial_state(x.shape[0], x.device))
+            state = tuple(
+                s.realize().detach()
+                for s in self.model.initial_state(x.shape[0], x.device)
+            )
             for start in range(0, x.shape[1], self.chunk_steps):
                 chunk = x[:, start : start + self.chunk_steps].contiguous().realize()
                 if chunk.shape not in self.schedules:
+
                     @TinyJit
                     def encode(inputs: Tensor, *boundary: Tensor):
                         result = self.model.encode(inputs, boundary)
                         Tensor.realize(*result)
                         return tuple(s.detach() for s in result)
+
                     self.schedules[chunk.shape] = encode
                 state = self.schedules[chunk.shape](chunk, *state)
             return self.head(state[0])
 
 
 def evaluate_model(
-    model: Model, dataset: SequenceDataset, batch_size: int,
+    model: Model,
+    dataset: SequenceDataset,
+    batch_size: int,
     predictor: ModelPredictor | None = None,
 ) -> tuple[dict, pl.DataFrame]:
     """Return metrics and identity-preserving predictions in evaluation order."""
@@ -668,10 +672,14 @@ def smoke_models(
             (np.logaddexp(0, reference_logits) - targets * reference_logits).mean()
         )
         step = make_training_step(
-            model, optimizer, 1.0, TrainingConfig(
-                hidden_size=hidden, batch_size=batch_size,
+            model,
+            optimizer,
+            1.0,
+            TrainingConfig(
+                hidden_size=hidden,
+                batch_size=batch_size,
                 micro_batch_size=min(batch_size, 32),
-            )
+            ),
         )
         loss = step(x, targets)
         np.testing.assert_allclose(loss, expected_loss, rtol=1e-4, atol=1e-5)

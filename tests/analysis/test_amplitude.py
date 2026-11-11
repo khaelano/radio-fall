@@ -24,7 +24,9 @@ def reference(values, times, window=0.1, minimum=5, threshold=5.0):
     return output, mask
 
 
-@pytest.mark.parametrize("parallel,simd", [(False, False), (False, True), (True, False), (True, True)])
+@pytest.mark.parametrize(
+    "parallel,simd", [(False, False), (False, True), (True, False), (True, True)]
+)
 def test_hampel_subcarriers_matches_reference(parallel, simd):
     rng = np.random.default_rng(42)
     values = rng.normal(size=(121, 11))
@@ -55,7 +57,9 @@ def test_hampel_subcarriers_boundaries_and_noncontiguous_input():
     values[4, 1] = 1000
     times = np.arange(9) / 32
     expected, mask = reference(values, times, window=0.25, minimum=2, threshold=1)
-    actual, replaced = hampel_subcarriers(values, times, window_seconds=0.25, min_periods=2, threshold=1)
+    actual, replaced = hampel_subcarriers(
+        values, times, window_seconds=0.25, min_periods=2, threshold=1
+    )
     np.testing.assert_array_equal(actual, expected)
     np.testing.assert_array_equal(replaced, mask)
 
@@ -66,10 +70,16 @@ def test_hampel_subcarriers_rejects_invalid_times(times):
         hampel_subcarriers(np.zeros((2, 3)), times)
 
 
-@pytest.mark.parametrize("kwargs", [
-    {"window_seconds": 0}, {"window_seconds": np.nan},
-    {"min_periods": 0}, {"threshold": -1}, {"threshold": np.inf},
-])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"window_seconds": 0},
+        {"window_seconds": np.nan},
+        {"min_periods": 0},
+        {"threshold": -1},
+        {"threshold": np.inf},
+    ],
+)
 def test_hampel_subcarriers_rejects_invalid_parameters(kwargs):
     with pytest.raises(ValueError):
         hampel_subcarriers(np.zeros((2, 3)), [0, 1], **kwargs)
@@ -85,7 +95,10 @@ def test_hampel_subcarriers_zero_mad_and_exact_threshold():
     # All timestamps equal: inclusive windows contain every sample. Column
     # zero has zero MAD; column one has a center exactly at the threshold.
     actual, replaced = hampel_subcarriers(
-        values, np.zeros(5), min_periods=5, threshold=1,
+        values,
+        np.zeros(5),
+        min_periods=5,
+        threshold=1,
     )
     np.testing.assert_array_equal(actual, values)
     assert not replaced.any()
@@ -103,6 +116,8 @@ def test_hampel_subcarriers_rejects_infinity_and_truncated_bytes():
 def test_normalize_subcarriers_preserves_masks_and_constants():
     values = np.array([[np.nan, 3, 0], [np.nan, 3, 5], [np.nan, np.nan, 10]])
     actual, lower, upper = normalize_subcarriers(values)
-    np.testing.assert_array_equal(actual, [[np.nan, 0, -1], [np.nan, 0, 0], [np.nan, np.nan, 1]])
+    np.testing.assert_array_equal(
+        actual, [[np.nan, 0, -1], [np.nan, 0, 0], [np.nan, np.nan, 1]]
+    )
     np.testing.assert_array_equal(lower, [np.nan, 3, 0])
     np.testing.assert_array_equal(upper, [np.nan, 3, 10])

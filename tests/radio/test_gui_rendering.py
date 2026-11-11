@@ -396,11 +396,19 @@ def test_preview_defers_records_arriving_after_budgeted_preparation(monkeypatch)
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     state = LiveState(120)
     record = CsiRecord(
-        0, "02:00:00:00:00:01", -40, -95, 0, (4 + 2j,) * 245,
-        sig_mode=4, csi_length=490,
+        0,
+        "02:00:00:00:00:01",
+        -40,
+        -95,
+        0,
+        (4 + 2j,) * 245,
+        sig_mode=4,
+        csi_length=490,
     )
     state.buffer.append(record)
-    arrivals = [replace(record, sequence=i, timestamp_us=i * 8333) for i in range(1, 33)]
+    arrivals = [
+        replace(record, sequence=i, timestamp_us=i * 8333) for i in range(1, 33)
+    ]
     warm = state.buffer.prepare_phase_views
     injected = False
 
@@ -416,7 +424,9 @@ def test_preview_defers_records_arriving_after_budgeted_preparation(monkeypatch)
     monkeypatch.setattr(state.buffer, "prepare_phase_views", prepare)
     panel = CsiDashboardPanel(state, fps=24)
     try:
-        assert not panel.refresh(), "new radio burst bypassed preview preparation budget"
+        assert not panel.refresh(), (
+            "new radio burst bypassed preview preparation budget"
+        )
         assert not any(item.phase_views_ready for item in arrivals)
         assert not panel.refresh()
         assert sum(item.phase_views_ready for item in arrivals) == 16

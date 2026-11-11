@@ -38,7 +38,7 @@ class _Decoded(io.RawIOBase):
                 self.complete = self.decoder.eof
                 data = self.decoder.unused_data
         count = min(len(target), len(self.buffer) - self.offset)
-        target[:count] = self.buffer[self.offset:self.offset + count]
+        target[:count] = self.buffer[self.offset : self.offset + count]
         self.offset += count
         return count
 

@@ -3,8 +3,10 @@
 Training remains in the notebook; keep these definitions compatible with its
 saved parameter names. These models predict collection phases, not falls.
 """
+
 from tinygrad import Tensor, nn
 from ..analysis.window_data import LABELS
+
 
 class CNNModel:
     def __init__(self, features, hidden):

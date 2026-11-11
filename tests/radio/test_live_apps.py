@@ -133,7 +133,9 @@ def test_canceling_collection_setup_releases_unstarted_camera(tmp_path, monkeypa
         ),
     )
     monkeypatch.setattr(
-        command, "MetadataDialog", lambda *args, **kwargs: SimpleNamespace(get=lambda: None)
+        command,
+        "MetadataDialog",
+        lambda *args, **kwargs: SimpleNamespace(get=lambda: None),
     )
     monkeypatch.setattr(
         command,

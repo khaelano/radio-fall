@@ -37,8 +37,10 @@ class CsiRecorder:
         self._lock = Lock()
 
     def _open(self, path: Path):
-        return self._io.open(path, "w") if self._io else path.open(
-            "w", encoding="utf-8", buffering=1
+        return (
+            self._io.open(path, "w")
+            if self._io
+            else path.open("w", encoding="utf-8", buffering=1)
         )
 
     def write(self, line: str) -> None:
@@ -60,7 +62,9 @@ class CsiRecorder:
             if self._timing_file is None:
                 self._timing_file = self._open(self.timing_path)
                 self._timing_file.write(TIMING_HEADER + "\n")
-            tx_timestamp = "" if record.tx_timestamp_us is None else record.tx_timestamp_us
+            tx_timestamp = (
+                "" if record.tx_timestamp_us is None else record.tx_timestamp_us
+            )
             rx_callback = (
                 ""
                 if record.rx_callback_timestamp_us is None

@@ -41,9 +41,23 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="scenario protocol JSON; omit to choose a file at startup",
     )
-    parser.add_argument("--continuous", action="store_true", help="automatically record activity in segments")
-    parser.add_argument("--segment-seconds", type=float, default=300, help="continuous segment duration (default: 300 s)")
-    parser.add_argument("--segments", type=int, default=288, help="maximum number of segments (default: 288)")
+    parser.add_argument(
+        "--continuous",
+        action="store_true",
+        help="automatically record activity in segments",
+    )
+    parser.add_argument(
+        "--segment-seconds",
+        type=float,
+        default=300,
+        help="continuous segment duration (default: 300 s)",
+    )
+    parser.add_argument(
+        "--segments",
+        type=int,
+        default=288,
+        help="maximum number of segments (default: 288)",
+    )
     add_live_arguments(parser)
     parser.add_argument(
         "--manual-confirmation",
@@ -52,10 +66,15 @@ def _parser() -> argparse.ArgumentParser:
         help="require operator confirmation during ACTION before recovery",
     )
     parser.add_argument("--output-dir", type=Path, default=Path("data/raw/sessions"))
-    parser.add_argument("--recording-flush-seconds", type=float, default=5,
-                        help="interval between background recording writes (default: 5 s)")
     parser.add_argument(
-        "--resume-session", type=Path,
+        "--recording-flush-seconds",
+        type=float,
+        default=5,
+        help="interval between background recording writes (default: 5 s)",
+    )
+    parser.add_argument(
+        "--resume-session",
+        type=Path,
         help="resume a saved session directory using its protocol and remaining trials",
     )
     parser.add_argument(
@@ -95,7 +114,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             archive = finalize_recording(controller.session_root)
         except Exception as exc:
-            print(f"Raw archive finalization failed; working session retained: {exc}", file=sys.stderr)
+            print(
+                f"Raw archive finalization failed; working session retained: {exc}",
+                file=sys.stderr,
+            )
             return 1
         print(f"Saved raw recording: {archive}")
     return result
@@ -159,8 +181,10 @@ def _run(
             return 0
 
     try:
-        recording_io = RecordingIO(interval_s=args.recording_flush_seconds,
-                                   compressed=not (saved and (saved.root / "events.jsonl").exists()))
+        recording_io = RecordingIO(
+            interval_s=args.recording_flush_seconds,
+            compressed=not (saved and (saved.root / "events.jsonl").exists()),
+        )
     except ValueError as exc:
         parser.error(str(exc))
     resources.callback(recording_io.close)
@@ -218,9 +242,11 @@ def _run(
         environment={
             **radio.environment(),
             "video": video.config.metadata() if video else None,
-            "recording_io": {"flush_interval_s": args.recording_flush_seconds,
-                             "compression": "zstd" if recording_io.compressed else "none",
-                             "capacity_bytes": recording_io.capacity_bytes},
+            "recording_io": {
+                "flush_interval_s": args.recording_flush_seconds,
+                "compression": "zstd" if recording_io.compressed else "none",
+                "capacity_bytes": recording_io.capacity_bytes,
+            },
         },
         telemetry_provider=lambda: radio.manager.telemetry_snapshot(),
         video_recorder=video,
@@ -278,8 +304,9 @@ def _run(
         app.quit()
 
     operator.window.closeEvent = close_operator
-    with running_collection(controller, radio, metadata, video=video,
-                            resume_session=args.resume_session):
+    with running_collection(
+        controller, radio, metadata, video=video, resume_session=args.resume_session
+    ):
         timer.start()
         operator.window.show()
         return app.exec()

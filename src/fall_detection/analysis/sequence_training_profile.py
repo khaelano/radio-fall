@@ -14,7 +14,11 @@ import numpy as np
 import polars as pl
 
 from .sequence_training_data import (
-    DURATIONS, Normalizer, SequenceDataset, SegmentStore, fit_normalizer,
+    DURATIONS,
+    Normalizer,
+    SequenceDataset,
+    SegmentStore,
+    fit_normalizer,
 )
 
 if TYPE_CHECKING:
@@ -36,10 +40,12 @@ def prepare_profile(root: Path, per_stratum: int = 4, seed: int = 42) -> dict:
         ["duration", "split", "dataset", "activity_label", "target"],
         maintain_order=True,
     )
-    subset = pl.concat([
-        part.sample(n=min(len(part), per_stratum), seed=seed).sort("window_id")
-        for part in parts
-    ]).sort("duration", "split", "path", "start")
+    subset = pl.concat(
+        [
+            part.sample(n=min(len(part), per_stratum), seed=seed).sort("window_id")
+            for part in parts
+        ]
+    ).sort("duration", "split", "path", "start")
     subset.write_parquet(folder / "window_split.parquet")
     preparation = {}
     for duration in DURATIONS:
@@ -51,18 +57,21 @@ def prepare_profile(root: Path, per_stratum: int = 4, seed: int = 42) -> dict:
         preparation[str(duration)] = perf_counter() - started
         store.clear()
     metadata = {
-        "seed": seed, "per_stratum": per_stratum,
+        "seed": seed,
+        "per_stratum": per_stratum,
         "selection": "Within existing duration/split/dataset/activity/target strata",
         "window_split_sha256": hashlib.sha256(
             (folder / "window_split.parquet").read_bytes()
         ).hexdigest(),
         "preparation_seconds": preparation,
-        "subset_counts": subset.group_by("duration", "split").len().sort(
-            "duration", "split"
-        ).to_dicts(),
-        "full_counts": full.group_by("duration", "split").len().sort(
-            "duration", "split"
-        ).to_dicts(),
+        "subset_counts": subset.group_by("duration", "split")
+        .len()
+        .sort("duration", "split")
+        .to_dicts(),
+        "full_counts": full.group_by("duration", "split")
+        .len()
+        .sort("duration", "split")
+        .to_dicts(),
     }
     (folder / "selection.json").write_text(json.dumps(metadata, indent=2) + "\n")
     return metadata
@@ -86,22 +95,35 @@ def profile_run(
     store = SegmentStore()
     store.read(frame["path"][0])
     datasets = {
-        split: SequenceDataset(frame.filter(pl.col("split") == split), normalizer, store)
+        split: SequenceDataset(
+            frame.filter(pl.col("split") == split), normalizer, store
+        )
         for split in ("train", "validation", "test")
     }
     if len(datasets["train"]) < config.batch_size:
-        raise ValueError("Pilot needs a full training batch; increase per_stratum or reduce batch_size")
+        raise ValueError(
+            "Pilot needs a full training batch; increase per_stratum or reduce batch_size"
+        )
     # Three epochs separate initial schedule construction from repeat execution.
     # A pilot never early-stops before the steady epoch has been measured.
     config = replace(config, epochs=3, patience=3, inference_windows=8)
     code_sha256 = {
         name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
-        for name in ("sequence_training_data.py", "tinygrad_training.py",
-                     "sequence_training_worker.py", "sequence_training_profile.py")
+        for name in (
+            "sequence_training_data.py",
+            "tinygrad_training.py",
+            "sequence_training_worker.py",
+            "sequence_training_profile.py",
+        )
     }
     result = train_run(
-        kind, duration, datasets, folder / f"{duration}s" / kind, config,
-        {"pilot": selection, "code_sha256": code_sha256}, runtime,
+        kind,
+        duration,
+        datasets,
+        folder / f"{duration}s" / kind,
+        config,
+        {"pilot": selection, "code_sha256": code_sha256},
+        runtime,
         selection["preparation_seconds"][str(duration)],
     )
     result["code_sha256"] = code_sha256
@@ -114,8 +136,11 @@ def profile_run(
         for h in steady
     ]
     epoch_seconds = float(np.median(epoch_estimates))
-    warmup_seconds = max(0.0, result["history"][0]["epoch_seconds"]
-                         - float(np.median([h["epoch_seconds"] for h in steady])))
+    warmup_seconds = max(
+        0.0,
+        result["history"][0]["epoch_seconds"]
+        - float(np.median([h["epoch_seconds"] for h in steady])),
+    )
     # Final validation/test throughput is measured on the same pilot. This is
     # distinct from repeated per-epoch validation and the batch-one benchmark.
     final_seconds = result["final_evaluation_seconds"] * (
@@ -125,7 +150,10 @@ def profile_run(
     result["projection"] = {
         "full_counts": counts,
         "steady_epoch_seconds": epoch_seconds,
-        "observed_epoch_rate_range_seconds": [min(epoch_estimates), max(epoch_estimates)],
+        "observed_epoch_rate_range_seconds": [
+            min(epoch_estimates),
+            max(epoch_estimates),
+        ],
         "initial_schedule_overhead_seconds": warmup_seconds,
         "final_evaluation_seconds": final_seconds,
         "training_30_epochs_seconds": warmup_seconds + 30 * epoch_seconds,
@@ -143,19 +171,24 @@ def profile_run(
 
 def profile_table(results: list[dict]) -> pl.DataFrame:
     """Summarize measured pilot time and inferred full-data runtime in minutes."""
-    return pl.DataFrame([
-        {
-            "model": r["model"], "duration": r["duration_seconds"],
-            "pilot_train_windows": r["counts"]["train"],
-            "pilot_training_seconds": r["training_seconds"],
-            "full_epoch_minutes": r["projection"]["steady_epoch_seconds"] / 60,
-            "full_30_epochs_minutes": r["projection"]["training_30_epochs_seconds"] / 60,
-            "projection_basis": "measured full loading" if "phase_budgets" in r["projection"]
-            else "subset only: provisional",
-            "worker_peak_GB": r.get("worker_memory_peak_bytes", 0) / 1e9,
-        }
-        for r in results
-    ]).sort("duration", "model")
+    return pl.DataFrame(
+        [
+            {
+                "model": r["model"],
+                "duration": r["duration_seconds"],
+                "pilot_train_windows": r["counts"]["train"],
+                "pilot_training_seconds": r["training_seconds"],
+                "full_epoch_minutes": r["projection"]["steady_epoch_seconds"] / 60,
+                "full_30_epochs_minutes": r["projection"]["training_30_epochs_seconds"]
+                / 60,
+                "projection_basis": "measured full loading"
+                if "phase_budgets" in r["projection"]
+                else "subset only: provisional",
+                "worker_peak_GB": r.get("worker_memory_peak_bytes", 0) / 1e9,
+            }
+            for r in results
+        ]
+    ).sort("duration", "model")
 
 
 def measure_loading(root: Path, duration: int, batch_size: int = 32) -> dict:
@@ -173,15 +206,21 @@ def measure_loading(root: Path, duration: int, batch_size: int = 32) -> dict:
     result = {"duration": duration, "batch_size": batch_size, "splits": {}}
     for split in ("train", "validation", "test"):
         store = SegmentStore()
-        dataset = SequenceDataset(frame.filter(pl.col("split") == split), normalizer, store)
+        dataset = SequenceDataset(
+            frame.filter(pl.col("split") == split), normalizer, store
+        )
         started, seen = perf_counter(), 0
         for _, rows in dataset.batches(batch_size, 45 if split == "train" else None):
             seen += len(rows)
         seconds = perf_counter() - started
         result["splits"][split] = {"windows": seen, "seconds": seconds}
         store.clear()
-        print(f"LOADING {duration}s {split}: {seen} windows / {seconds:.2f}s", flush=True)
-    (folder / f"loading-{duration}s.json").write_text(json.dumps(result, indent=2) + "\n")
+        print(
+            f"LOADING {duration}s {split}: {seen} windows / {seconds:.2f}s", flush=True
+        )
+    (folder / f"loading-{duration}s.json").write_text(
+        json.dumps(result, indent=2) + "\n"
+    )
     return result
 
 
@@ -196,12 +235,17 @@ def project_runtime(result: dict, loading: dict) -> dict:
     # Exclude a partial training batch when estimating full-batch throughput.
     full_batches = result["counts"]["train"] // batch_size
     if full_batches < 1:
-        raise ValueError("A full pilot training batch is required to estimate throughput")
-    train_rate = float(np.median([
-        seconds for h in steady for seconds in h["step_seconds"][:full_batches]
-    ]))
-    val_times = [seconds for h in steady
-                 for seconds in h.get("validation_forward_seconds", [])]
+        raise ValueError(
+            "A full pilot training batch is required to estimate throughput"
+        )
+    train_rate = float(
+        np.median(
+            [seconds for h in steady for seconds in h["step_seconds"][:full_batches]]
+        )
+    )
+    val_times = [
+        seconds for h in steady for seconds in h.get("validation_forward_seconds", [])
+    ]
     if not val_times:
         raise ValueError("Repeat this pilot with per-batch validation timings")
     validation_rate = float(np.median(val_times))
@@ -213,13 +257,19 @@ def project_runtime(result: dict, loading: dict) -> dict:
         )
         io = loading["splits"][split]["seconds"]
         budgets[split] = {
-            "windows": count, "compute_seconds": compute, "loading_seconds": io,
-            "overlap_seconds": max(compute, io), "serial_seconds": compute + io,
+            "windows": count,
+            "compute_seconds": compute,
+            "loading_seconds": io,
+            "overlap_seconds": max(compute, io),
+            "serial_seconds": compute + io,
         }
     low = sum(budgets[s]["overlap_seconds"] for s in ("train", "validation"))
     high = sum(budgets[s]["serial_seconds"] for s in ("train", "validation"))
-    overhead = max(0.0, result["history"][0]["epoch_seconds"]
-                   - float(np.median([h["epoch_seconds"] for h in steady])))
+    overhead = max(
+        0.0,
+        result["history"][0]["epoch_seconds"]
+        - float(np.median([h["epoch_seconds"] for h in steady])),
+    )
     projection = result["projection"]
     projection.pop("observed_epoch_rate_range_seconds", None)
     projection.update(
@@ -229,8 +279,9 @@ def project_runtime(result: dict, loading: dict) -> dict:
         initial_schedule_overhead_seconds=overhead,
         training_30_epochs_seconds=overhead + 30 * (low + high) / 2,
         training_30_epochs_range_seconds=[overhead + 30 * low, overhead + 30 * high],
-        final_evaluation_seconds=sum(budgets[s]["serial_seconds"]
-                                     for s in ("validation", "test")),
+        final_evaluation_seconds=sum(
+            budgets[s]["serial_seconds"] for s in ("validation", "test")
+        ),
         method="Measured full input streaming plus repeat-pilot batch compute; overlap/serial bounds",
         limits=[
             "Runtime estimates only; accuracy/F1 and stopping epoch cannot be extrapolated",
@@ -287,10 +338,13 @@ def compare_forward(root: Path, kind: str, duration: int) -> dict:
                 np.testing.assert_allclose(logits, expected, rtol=1e-4, atol=1e-5)
             times[name] = samples
     result = {
-        "model": kind, "duration": duration, "batch_size": len(x),
+        "model": kind,
+        "duration": duration,
+        "batch_size": len(x),
         "seconds": times,
-        "steady_speedup": float(np.median(times["uncaptured"][2:])
-                                / np.median(times["cached"][2:])),
+        "steady_speedup": float(
+            np.median(times["uncaptured"][2:]) / np.median(times["cached"][2:])
+        ),
         "scope": "Evaluation forward plus input transfer and host logits; decoding excluded",
     }
     write_json(folder / "forward_comparison.json", result)

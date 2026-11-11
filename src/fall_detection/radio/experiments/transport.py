@@ -189,9 +189,7 @@ def transmitter_counter_delta(
     return TransmitterTelemetry(
         uptime_ms=end.uptime_ms - start.uptime_ms,
         attempts=_u32_delta(start.attempts, end.attempts),
-        immediate_errors=_u32_delta(
-            start.immediate_errors, end.immediate_errors
-        ),
+        immediate_errors=_u32_delta(start.immediate_errors, end.immediate_errors),
         asynchronous_successes=_u32_delta(
             start.asynchronous_successes, end.asynchronous_successes
         ),
@@ -232,18 +230,14 @@ def build_run_summary(
     issues = list(telemetry_issues or [])
     expected_mode = CONDITION_MODES[condition]
     if receiver_start.mode != expected_mode or receiver_end.mode != expected_mode:
-        issues.append(
-            f"condition {condition} requires receiver mode {expected_mode}"
-        )
+        issues.append(f"condition {condition} requires receiver mode {expected_mode}")
     try:
         receiver = receiver_counter_delta(receiver_start, receiver_end)
     except ValueError as exc:
         issues.append(str(exc))
         receiver = ReceiverStats(*(0 for _ in fields(ReceiverStats)))
     try:
-        transmitter = transmitter_counter_delta(
-            transmitter_start, transmitter_end
-        )
+        transmitter = transmitter_counter_delta(transmitter_start, transmitter_end)
     except ValueError as exc:
         issues.append(str(exc))
         transmitter = TransmitterTelemetry(0, 0, 0, 0, 0)
@@ -433,12 +427,8 @@ def summarize_experiments(runs: list[dict[str, Any]]) -> dict[str, Any]:
     transport_received = sum(run["udp_delta"]["records"] for run in active_runs)
     transport_total = transport_missing + transport_received
     transport_upper = wilson_upper(transport_missing, transport_total)
-    records_sent = sum(
-        run["receiver_delta"]["records_sent"] for run in active_runs
-    )
-    batches_sent = sum(
-        run["receiver_delta"]["batches_sent"] for run in active_runs
-    )
+    records_sent = sum(run["receiver_delta"]["records_sent"] for run in active_runs)
+    batches_sent = sum(run["receiver_delta"]["batches_sent"] for run in active_runs)
     batch_reduction = 1 - batches_sent / records_sent if records_sent else None
 
     gates = {
@@ -595,9 +585,7 @@ def _capture(args: argparse.Namespace) -> int:
 
 
 def _summarize(args: argparse.Namespace) -> int:
-    runs = [
-        json.loads(path.read_text(encoding="utf-8")) for path in args.summaries
-    ]
+    runs = [json.loads(path.read_text(encoding="utf-8")) for path in args.summaries]
     report = summarize_experiments(runs)
     text = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output is None:

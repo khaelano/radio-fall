@@ -44,11 +44,17 @@ def load_sequence_index(root: Path) -> tuple[pl.DataFrame, dict]:
         index_path = folder / "window_index.parquet"
         shard_path = folder / "signals.parquet"
         for filename in ("window_index.parquet", "segments.parquet", "signals.parquet"):
-            if hashlib.sha256((folder / filename).read_bytes()).hexdigest() != manifest["metadata_sha256"][filename]:
+            if (
+                hashlib.sha256((folder / filename).read_bytes()).hexdigest()
+                != manifest["metadata_sha256"][filename]
+            ):
                 raise ValueError(f"Metadata hash differs: {folder / filename}")
         index = pl.read_parquet(index_path)
         shards = pl.read_parquet(shard_path)
-        if len(shards) != manifest["counts"]["segments"] or len(index) != manifest["counts"]["windows"]:
+        if (
+            len(shards) != manifest["counts"]["segments"]
+            or len(index) != manifest["counts"]["windows"]
+        ):
             raise ValueError(f"Export counts differ: {folder}")
         if set(index["signal"]) != set(shards["signal"]):
             raise ValueError(f"Signal ledger differs: {folder}")
@@ -81,7 +87,10 @@ def load_sequence_index(root: Path) -> tuple[pl.DataFrame, dict]:
         raise ValueError("Expected binary targets")
     if set(index["duration"].unique()) != set(DURATIONS):
         raise ValueError("Expected 2/4/6-second windows")
-    if index.select("dataset", "segment_id", "duration", "start").unique().height != index.height:
+    if (
+        index.select("dataset", "segment_id", "duration", "start").unique().height
+        != index.height
+    ):
         raise ValueError("Duplicate window bounds")
     return index.with_row_index("window_id"), sources
 
@@ -176,13 +185,19 @@ class SegmentStore:
     """Map segment NPY files without a second Python signal cache."""
 
     def __init__(self) -> None:
-        self.coordinates = (np.asarray([f"rx-{i}" for i in range(1, 5)]),
-                            np.arange(-122, 123))
+        self.coordinates = (
+            np.asarray([f"rx-{i}" for i in range(1, 5)]),
+            np.arange(-122, 123),
+        )
 
     def read(self, path: str) -> np.memmap:
         """Map one segment; the operating system owns the page cache."""
         signal = np.load(path, mmap_mode="r", allow_pickle=False)
-        if signal.dtype != np.float32 or signal.ndim != 3 or signal.shape[1:] != (4, 245):
+        if (
+            signal.dtype != np.float32
+            or signal.ndim != 3
+            or signal.shape[1:] != (4, 245)
+        ):
             raise ValueError(f"Invalid segment signal: {path}")
         return signal
 
@@ -219,10 +234,14 @@ def _selected(
 ) -> tuple[np.ndarray, np.ndarray]:
     if isinstance(store, SegmentStore):
         signal = store.read(path)
-        if any(r["stop"] > len(signal) or r["start"] < 0 or
-               r["stop"] - r["start"] != r["duration"] * 96 for r in rows):
+        if any(
+            r["stop"] > len(signal)
+            or r["start"] < 0
+            or r["stop"] - r["start"] != r["duration"] * 96
+            for r in rows
+        ):
             raise ValueError(f"Window bounds differ: {path}")
-        values = np.stack([signal[r["start"]:r["stop"]] for r in rows]).reshape(
+        values = np.stack([signal[r["start"] : r["stop"]] for r in rows]).reshape(
             len(rows), rows[0]["duration"] * 96, -1
         )
         mask = np.isfinite(values)
@@ -266,11 +285,18 @@ def fit_normalizer(frame: pl.DataFrame, store: ShardStore | SegmentStore) -> Nor
 class SequenceDataset:
     """Stream complete windows and preserve row identities through shuffling."""
 
-    def __init__(self, frame: pl.DataFrame, normalizer: Normalizer,
-                 store: ShardStore | SegmentStore):
+    def __init__(
+        self,
+        frame: pl.DataFrame,
+        normalizer: Normalizer,
+        store: ShardStore | SegmentStore,
+    ):
         self.frame, self.normalizer, self.store = frame, normalizer, store
         self.parts = [
-            (p["path"][0], p.sort("start").to_dicts() if "start" in p.columns else p.to_dicts())
+            (
+                p["path"][0],
+                p.sort("start").to_dicts() if "start" in p.columns else p.to_dicts(),
+            )
             for p in frame.partition_by("path", maintain_order=True)
         ]
 
@@ -284,11 +310,15 @@ class SequenceDataset:
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
         rng = np.random.default_rng(seed)
-        groups = [
-            (path, rows[offset:offset + 16])
-            for path, rows in self.parts
-            for offset in range(0, len(rows), 16)
-        ] if isinstance(self.store, SegmentStore) else self.parts
+        groups = (
+            [
+                (path, rows[offset : offset + 16])
+                for path, rows in self.parts
+                for offset in range(0, len(rows), 16)
+            ]
+            if isinstance(self.store, SegmentStore)
+            else self.parts
+        )
         paths = np.arange(len(groups))
         if seed is not None:
             rng.shuffle(paths)

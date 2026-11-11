@@ -47,7 +47,15 @@ def run_worker(
     A worker limit failure terminates the job and raises in the notebook. There
     is no uncapped fallback. Keyboard interruption stops the complete scope.
     """
-    if action not in ("probe", "smoke", "train", "predict", "profile", "loading", "compare"):
+    if action not in (
+        "probe",
+        "smoke",
+        "train",
+        "predict",
+        "profile",
+        "loading",
+        "compare",
+    ):
         raise ValueError("Unknown GPU worker action")
     if memory_bytes < 64 * 1024**2 or memory_bytes > MEMORY_LIMIT:
         raise ValueError("Worker memory must be between 64 MiB and 4 GB")
@@ -176,12 +184,19 @@ def main() -> None:
         from .sequence_training_profile import profile_run
 
         result = profile_run(
-            root, request["kind"], request["duration"],
-            TrainingConfig(**request["config"]), runtime,
+            root,
+            request["kind"],
+            request["duration"],
+            TrainingConfig(**request["config"]),
+            runtime,
         )
         result["worker_memory_peak_bytes"] = int((cgroup / "memory.peak").read_text())
         write_json(
-            root / "profile" / f"{request['duration']}s" / request["kind"] / "metrics.json",
+            root
+            / "profile"
+            / f"{request['duration']}s"
+            / request["kind"]
+            / "metrics.json",
             result,
         )
     elif request["action"] == "predict":

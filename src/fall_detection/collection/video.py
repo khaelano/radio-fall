@@ -53,9 +53,7 @@ class _VideoPreview:
         if not self._lock.acquire(False):
             return
         try:
-            scale = min(
-                PREVIEW_WIDTH / frame.width, PREVIEW_HEIGHT / frame.height, 1
-            )
+            scale = min(PREVIEW_WIDTH / frame.width, PREVIEW_HEIGHT / frame.height, 1)
             width = max(1, int(frame.width * scale))
             height = max(1, int(frame.height * scale))
             rgb = frame.reformat(width=width, height=height, format="rgb24")
@@ -370,7 +368,13 @@ class VideoRecorder:
         self._preview_seen_ns = 0
         self._process = context.Process(
             target=_video_worker,
-            args=(config, self._commands, self._events, self._last_frame, self._preview),
+            args=(
+                config,
+                self._commands,
+                self._events,
+                self._last_frame,
+                self._preview,
+            ),
             daemon=True,
         )
         self.failure: str | None = None

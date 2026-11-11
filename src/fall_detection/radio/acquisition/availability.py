@@ -115,8 +115,7 @@ class AvailabilityGrid:
                     (
                         index,
                         tuple(
-                            row["receivers"][r]["packet_count"]
-                            for r in self.receivers
+                            row["receivers"][r]["packet_count"] for r in self.receivers
                         ),
                     )
                 )

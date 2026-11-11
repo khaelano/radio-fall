@@ -36,7 +36,16 @@ TYPE_WIRELESS_PAIR = 28
 TYPE_WIRELESS_PAIR_ACK = 29
 TYPE_RELAY_RECOVER = 31
 KNOWN_TYPES = {
-    20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
     TYPE_CSI_PACKET,
     TYPE_TRANSMITTER_STATS,
     TYPE_GATEWAY_STATS,
@@ -151,7 +160,7 @@ def decode_serial_frame(encoded: bytes) -> SerialFrame:
     expected_length = HEADER.size + payload_length + CRC.size
     if len(raw) != expected_length:
         raise SerialFrameError("serial frame length does not match its header")
-    body = raw[:-CRC.size]
+    body = raw[: -CRC.size]
     (received_crc,) = CRC.unpack_from(raw, len(body))
     if received_crc != (zlib.crc32(body) & 0xFFFFFFFF):
         raise SerialFrameError("serial frame CRC mismatch")

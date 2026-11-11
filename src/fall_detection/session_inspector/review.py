@@ -40,7 +40,10 @@ class AttemptReview:
         """Validate fields before persistence or export."""
 
         if self.activity_label is not None:
-            if not isinstance(self.activity_label, str) or not self.activity_label.strip():
+            if (
+                not isinstance(self.activity_label, str)
+                or not self.activity_label.strip()
+            ):
                 raise ReviewError("corrected activity label must be non-empty")
             self.activity_label = self.activity_label.strip()
         if self.inclusion not in INCLUSION_VALUES:
@@ -103,9 +106,7 @@ class ReviewDocument:
             raise ReviewError("session_id must be non-empty")
         if not isinstance(self.revision, int) or self.revision < 0:
             raise ReviewError("revision must be a non-negative integer")
-        if self.updated_at_utc is not None and not isinstance(
-            self.updated_at_utc, str
-        ):
+        if self.updated_at_utc is not None and not isinstance(self.updated_at_utc, str):
             raise ReviewError("updated_at_utc must be text or null")
         unknown_metadata = sorted(set(self.metadata) - set(METADATA_FIELDS))
         if unknown_metadata:
@@ -114,10 +115,16 @@ class ReviewDocument:
             )
         if not all(isinstance(value, str) for value in self.metadata.values()):
             raise ReviewError("metadata overrides must be text")
-        known_attempts = {attempt.key for attempt in session.attempts} if session else None
+        known_attempts = (
+            {attempt.key for attempt in session.attempts} if session else None
+        )
         for key, review in self.attempts.items():
             pure = PurePosixPath(key)
-            if pure.is_absolute() or ".." in pure.parts or not key.startswith("trials/"):
+            if (
+                pure.is_absolute()
+                or ".." in pure.parts
+                or not key.startswith("trials/")
+            ):
                 raise ReviewError(f"invalid attempt key: {key!r}")
             if known_attempts is not None and key not in known_attempts:
                 raise ReviewError(f"review references unknown attempt: {key}")
@@ -233,7 +240,9 @@ def _flatten(value: Any, prefix: str = "") -> dict[str, Any]:
     return {prefix: value}
 
 
-def _changes(before: Mapping[str, Any], after: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _changes(
+    before: Mapping[str, Any], after: Mapping[str, Any]
+) -> list[dict[str, Any]]:
     left = _flatten(before)
     right = _flatten(after)
     return [
@@ -269,7 +278,9 @@ class ReviewStore:
             _token(raw),
         )
 
-    def save(self, document: ReviewDocument, expected_token: str | None) -> LoadedReview:
+    def save(
+        self, document: ReviewDocument, expected_token: str | None
+    ) -> LoadedReview:
         """Save a changed review, rejecting concurrent modifications."""
 
         if not self.session.editable:

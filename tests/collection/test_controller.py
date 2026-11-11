@@ -398,8 +398,13 @@ def test_video_finalization_failure_prevents_accepted_metadata(tmp_path):
     assert metadata["status"] == "invalid"
 
 
-@pytest.mark.parametrize("command", [OperatorCommand.RETRY, OperatorCommand.SKIP, OperatorCommand.END_SESSION])
-def test_queued_accept_can_be_cancelled_without_later_accepting(tmp_path, monkeypatch, command):
+@pytest.mark.parametrize(
+    "command",
+    [OperatorCommand.RETRY, OperatorCommand.SKIP, OperatorCommand.END_SESSION],
+)
+def test_queued_accept_can_be_cancelled_without_later_accepting(
+    tmp_path, monkeypatch, command
+):
     from fall_detection.collection.capture import TrialCapture
 
     clock = FakeClock()
@@ -417,7 +422,9 @@ def test_queued_accept_can_be_cancelled_without_later_accepting(tmp_path, monkey
     assert not c.dispatch(command).accept_pending
     monkeypatch.setattr(TrialCapture, "writes_complete", property(lambda self: True))
     assert not c.tick().accept_pending
-    assert json.loads((capture.path / "attempt.json").read_text())["status"] != "accepted"
+    assert (
+        json.loads((capture.path / "attempt.json").read_text())["status"] != "accepted"
+    )
     c._recording_io = None
     c.dispatch(OperatorCommand.END_SESSION)
 
@@ -445,6 +452,9 @@ def test_queued_accept_reports_background_storage_failure(tmp_path, monkeypatch)
     assert not result.accept_pending
     assert result.attempt_status == "invalid"
     assert "disk full" in result.message
-    assert json.loads((capture.path / "attempt.json").read_text())["status"] == "pending_review"
+    assert (
+        json.loads((capture.path / "attempt.json").read_text())["status"]
+        == "pending_review"
+    )
     c._recording_io = None
     c.dispatch(OperatorCommand.END_SESSION)

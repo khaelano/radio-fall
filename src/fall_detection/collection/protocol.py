@@ -188,9 +188,7 @@ def _expand_manifest(
         raise ProtocolError(f"{path}.schema_version: only version 1 is supported")
     family_id = _string(manifest.get("family_id"), f"{path}.family_id")
     title = _string(manifest.get("title"), f"{path}.title")
-    activity_label = _string(
-        manifest.get("activity_label"), f"{path}.activity_label"
-    )
+    activity_label = _string(manifest.get("activity_label"), f"{path}.activity_label")
     template = manifest.get("instruction_template", manifest.get("instruction"))
     template = _string(template, f"{path}.instruction_template")
     start_directions = _directions(
@@ -203,9 +201,7 @@ def _expand_manifest(
         end_directions = _directions(
             raw_end_directions, f"{path}.end_directions", allow_null=True
         )
-    repetitions = _positive_count(
-        manifest.get("repetitions", 1), f"{path}.repetitions"
-    )
+    repetitions = _positive_count(manifest.get("repetitions", 1), f"{path}.repetitions")
     direction_frame = _string(
         manifest.get("direction_frame", "participant_relative"),
         f"{path}.direction_frame",
@@ -242,7 +238,9 @@ def _expand_manifest(
                 raise ProtocolError(
                     f"{path}.instruction_template: unsupported placeholder: {exc}"
                 ) from exc
-            scenario_id = f"{family_id}__start_{_slug(start_label)}__end_{_slug(end_label)}"
+            scenario_id = (
+                f"{family_id}__start_{_slug(start_label)}__end_{_slug(end_label)}"
+            )
             scenario_title = f"{title} ({start_label} → {end_label})"
             attributes: dict[str, Any] = {
                 "family_id": family_id,
@@ -374,12 +372,18 @@ def _load_source(
     defaults = _mapping(source.get("defaults"), "protocol.defaults")
     _check_keys(defaults, _DEFAULT_KEYS, "protocol.defaults")
     timing = TimingDefaults(
-        _duration(defaults.get("countdown_seconds"), "protocol.defaults.countdown_seconds"),
+        _duration(
+            defaults.get("countdown_seconds"), "protocol.defaults.countdown_seconds"
+        ),
         _duration(defaults.get("action_seconds"), "protocol.defaults.action_seconds"),
-        _duration(defaults.get("recovery_seconds"), "protocol.defaults.recovery_seconds"),
+        _duration(
+            defaults.get("recovery_seconds"), "protocol.defaults.recovery_seconds"
+        ),
     )
     if timing.action_seconds <= 0:
-        raise ProtocolError("protocol.defaults.action_seconds: must be greater than zero")
+        raise ProtocolError(
+            "protocol.defaults.action_seconds: must be greater than zero"
+        )
 
     blocks_value = source.get("blocks")
     resolved_source: dict[str, Any] = dict(source)
@@ -446,12 +450,16 @@ def _load_source(
                 attributes=dict(attributes),
             )
             if scenario.action_seconds <= 0:
-                raise ProtocolError(f"{scenario_path}.action_seconds: must be greater than zero")
+                raise ProtocolError(
+                    f"{scenario_path}.action_seconds: must be greater than zero"
+                )
             scenarios.append(scenario)
         blocks.append((block_id, block_title, tuple(scenarios)))
 
     trials = _ordered_trials(blocks, source.get("trial_order", "declared"))
-    canonical = json.dumps(resolved_source, sort_keys=True, separators=(",", ":")).encode()
+    canonical = json.dumps(
+        resolved_source, sort_keys=True, separators=(",", ":")
+    ).encode()
     return CollectionProtocol(
         schema_version=1,
         protocol_id=protocol_id,
@@ -526,9 +534,7 @@ def select_blocks(
         }
         for block_id, title, scenarios in selected
     ]
-    canonical = json.dumps(
-        source, sort_keys=True, separators=(",", ":")
-    ).encode()
+    canonical = json.dumps(source, sort_keys=True, separators=(",", ":")).encode()
     return CollectionProtocol(
         schema_version=protocol.schema_version,
         protocol_id=protocol.protocol_id,

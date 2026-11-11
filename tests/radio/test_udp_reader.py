@@ -14,7 +14,7 @@ from fall_detection.radio.acquisition.wire import (
 
 
 LINE = (
-    'CSI_DATA,10,1a:00:00:00:00:00,-40,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,'
+    "CSI_DATA,10,1a:00:00:00:00:00,-40,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,"
     '1000,0,36,0,4,0,"[3,4,0,5]"'
 )
 
@@ -63,8 +63,11 @@ def test_udp_reader_ingests_records_and_preserves_csv(tmp_path: Path):
 
     captures = list(tmp_path.glob("csi_*.csv"))
     assert len(captures) == 1
-    assert captures[0].read_text(encoding="utf-8").splitlines()[1].startswith(
-        "CSI_DATA,10,1a:00:00:00:00:00"
+    assert (
+        captures[0]
+        .read_text(encoding="utf-8")
+        .splitlines()[1]
+        .startswith("CSI_DATA,10,1a:00:00:00:00:00")
     )
     assert reader.transport_missing == 0
 
@@ -145,12 +148,8 @@ def test_udp_reader_ingests_batches_and_tracks_batch_gaps(tmp_path: Path):
     first = DecodedCsiDatagram(source, "24:6f:28:aa:bb:cc", 10)
     second = DecodedCsiDatagram(source, "24:6f:28:aa:bb:cc", 11)
     packets = [
-        encode_csi_batch(
-            (first,), boot_id=55, batch_sequence=3, receiver_stats=STATS
-        ),
-        encode_csi_batch(
-            (second,), boot_id=55, batch_sequence=5, receiver_stats=STATS
-        ),
+        encode_csi_batch((first,), boot_id=55, batch_sequence=3, receiver_stats=STATS),
+        encode_csi_batch((second,), boot_id=55, batch_sequence=5, receiver_stats=STATS),
     ]
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
         for packet in packets:

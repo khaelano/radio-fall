@@ -32,13 +32,17 @@ def test_evaluate_moves_inputs_and_returns_host_metrics(device_name):
 
 def test_requested_cuda_fails_when_unavailable(tmp_path, monkeypatch):
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    frame = pl.DataFrame([
-        {"duration": 2, "split": split, "dataset": "synthetic"}
-        for split in ("train", "validation", "test")
-    ])
+    frame = pl.DataFrame(
+        [
+            {"duration": 2, "split": split, "dataset": "synthetic"}
+            for split in ("train", "validation", "test")
+        ]
+    )
     frame_path = tmp_path / "split.parquet"
     frame.write_parquet(frame_path)
     normalizer = tmp_path / "normalizer.npz"
     Normalizer(np.zeros(980), np.ones(980), np.ones(980)).save(normalizer)
     with pytest.raises(RuntimeError, match="CUDA was requested"):
-        run_cpu_training(frame_path, normalizer, tmp_path / "out", CpuPilotConfig(device="cuda"))
+        run_cpu_training(
+            frame_path, normalizer, tmp_path / "out", CpuPilotConfig(device="cuda")
+        )

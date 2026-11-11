@@ -6,9 +6,7 @@ from fall_detection.radio.acquisition.recorder import CsiRecorder
 
 
 def test_recorder_writes_header_and_valid_csi_line(tmp_path: Path):
-    line = (
-        'CSI_DATA,1,aa:bb:cc:dd:ee:ff,-40,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,1000,0,36,0,4,0,"[3,4,0,5]"'
-    )
+    line = 'CSI_DATA,1,aa:bb:cc:dd:ee:ff,-40,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,1000,0,36,0,4,0,"[3,4,0,5]"'
     parse_csi_line(line)
     recorder = CsiRecorder(tmp_path)
     try:
@@ -23,9 +21,7 @@ def test_recorder_writes_header_and_valid_csi_line(tmp_path: Path):
 
 
 def test_recorder_writes_cross_clock_timing_sidecar(tmp_path: Path):
-    line = (
-        'CSI_DATA,1,aa:bb:cc:dd:ee:ff,-40,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,1000,0,36,0,4,0,"[3,4,0,5]"'
-    )
+    line = 'CSI_DATA,1,aa:bb:cc:dd:ee:ff,-40,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,1000,0,36,0,4,0,"[3,4,0,5]"'
     record = replace(
         parse_csi_line(line),
         receiver_mac="24:6f:28:aa:bb:cc",

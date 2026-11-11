@@ -17,15 +17,36 @@ def test_direct_export_preserves_values_and_invalidity(tmp_path):
     raw = np.full((192, 4, 245), 3.0)
     raw[0, 0, 0] = np.nan
     valid = np.isfinite(raw)
-    save_segment(path, dict(squared_difference=raw, difference_valid=valid,
-                            receivers=np.asarray([f"rx-{i}" for i in range(1, 5)]),
-                            subcarriers=np.arange(-122, 123)))
-    index = pl.DataFrame([dict(segment_id="one", duration=2, start=0, stop=192,
-                               target=1, group="attempt")])
+    save_segment(
+        path,
+        dict(
+            squared_difference=raw,
+            difference_valid=valid,
+            receivers=np.asarray([f"rx-{i}" for i in range(1, 5)]),
+            subcarriers=np.arange(-122, 123),
+        ),
+    )
+    index = pl.DataFrame(
+        [
+            dict(
+                segment_id="one",
+                duration=2,
+                start=0,
+                stop=192,
+                target=1,
+                group="attempt",
+            )
+        ]
+    )
     segments = pl.DataFrame([dict(segment_id="one", path=str(path), samples=192)])
-    export_cached_segments(source, destination, index, segments,
-                           source_metadata={"source_fingerprint": "fixture"},
-                           parameters={"target_hz": 96})
+    export_cached_segments(
+        source,
+        destination,
+        index,
+        segments,
+        source_metadata={"source_fingerprint": "fixture"},
+        parameters={"target_hz": 96},
+    )
     manifest = json.loads((destination / "manifest.json").read_text())
     assert manifest["schema"] == "amplitude_sequence_v2"
     row = pl.read_parquet(destination / "window_index.parquet").row(0, named=True)

@@ -74,12 +74,12 @@ def test_trial_capture_writes_receiver_split_schema_two(tmp_path: Path):
 
     receiver = attempt / "receivers" / "rx-1"
     csi_lines = (receiver / "csi.csv").read_text(encoding="utf-8").splitlines()
-    timing_lines = (receiver / "radio_timing.csv").read_text(
-        encoding="utf-8"
-    ).splitlines()
-    clock_lines = (receiver / "usb_clock_sync.csv").read_text(
-        encoding="utf-8"
-    ).splitlines()
+    timing_lines = (
+        (receiver / "radio_timing.csv").read_text(encoding="utf-8").splitlines()
+    )
+    clock_lines = (
+        (receiver / "usb_clock_sync.csv").read_text(encoding="utf-8").splitlines()
+    )
     assert csi_lines[0] == CSI_HEADER
     assert csi_lines[1].startswith("CSI_DATA,7,1a:00:00:00:00:00")
     assert timing_lines[1].split(",")[0] == "7"

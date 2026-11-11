@@ -25,7 +25,7 @@ def digest(path: Path) -> str:
 
 
 def test_review_save_is_atomic_versioned_and_does_not_rewrite_acquisition(
-    session_factory
+    session_factory,
 ):
     root = session_factory(attempts=((1, 1, "accepted"),))
     session = load_session(root)
@@ -69,9 +69,7 @@ def test_review_store_detects_optimistic_conflict(session_factory):
 def test_review_validation_rejects_unknown_attempt_and_empty_label(session_factory):
     session = load_session(session_factory())
     review = ReviewDocument.empty(session)
-    review.attempts["trials/missing/attempt_01"] = AttemptReview(
-        activity_label=""
-    )
+    review.attempts["trials/missing/attempt_01"] = AttemptReview(activity_label="")
 
     with pytest.raises(ReviewError):
         review.validate(session)
@@ -118,7 +116,10 @@ def test_curated_export_applies_review_and_keeps_raw_files_identical(
     assert attempt["review"]["inclusion"] == "exclude"
     assert raw_export.exists()
     assert digest(raw_export) == digest(raw_source)
-    assert json.loads((root / "session.json").read_text())["participant_id"] == "participant-1"
+    assert (
+        json.loads((root / "session.json").read_text())["participant_id"]
+        == "participant-1"
+    )
 
     with pytest.raises(FileExistsError):
         export_curated_bundle(session, review, destination)

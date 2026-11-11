@@ -55,6 +55,7 @@ fall-detect = "fall_detection.detection.app:main"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.17.4",
 ]
 
 [tool.pytest.ini_options]

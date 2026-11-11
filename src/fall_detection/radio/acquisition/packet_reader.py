@@ -149,8 +149,14 @@ class BinaryCsiPacketReader:
     def _ingest_packet(self, data: bytes) -> bool:
         return self.ingest_packet(data)
 
-    def ingest_packet(self, data: bytes, *, host_receive_monotonic_ns: int | None = None,
-                      context: dict | None = None, capture_clock: Callable[[int], int | None] | None = None) -> bool:
+    def ingest_packet(
+        self,
+        data: bytes,
+        *,
+        host_receive_monotonic_ns: int | None = None,
+        context: dict | None = None,
+        capture_clock: Callable[[int], int | None] | None = None,
+    ) -> bool:
         """Accept a complete packet, returning false for validation rejection.
 
         Storage exceptions propagate so a transport cannot ACK unaccepted data.
@@ -199,22 +205,24 @@ class BinaryCsiPacketReader:
 
         if self.profile_fingerprint:
             for decoded in packet.records:
-                if (
-                    decoded.record.profile_fingerprint != self.profile_fingerprint
-                    and (
-                        self.require_profile_fingerprint
-                        or decoded.record.profile_fingerprint != ""
-                    )
+                if decoded.record.profile_fingerprint != self.profile_fingerprint and (
+                    self.require_profile_fingerprint
+                    or decoded.record.profile_fingerprint != ""
                 ):
                     self.foreign_packets += 1
                     return False
         elif self.require_profile_fingerprint:
-            if any(not decoded.record.profile_fingerprint for decoded in packet.records):
+            if any(
+                not decoded.record.profile_fingerprint for decoded in packet.records
+            ):
                 self.foreign_packets += 1
                 return False
 
         if context is not None:
-            identity = tuple(context.get(k) for k in ("run_id", "transmitter_boot_id", "receiver_boot_id"))
+            identity = tuple(
+                context.get(k)
+                for k in ("run_id", "transmitter_boot_id", "receiver_boot_id")
+            )
             if identity != self._identity_context:
                 self._recent_keys.clear()
                 self._recent_key_set.clear()
@@ -256,8 +264,14 @@ class BinaryCsiPacketReader:
                 # Include the receiver so two receivers observing the same
                 # transmitted frame can never deduplicate each other, even if
                 # this state were ever shared between readers.
-                key = (record.run_id, record.transmitter_boot_id, record.receiver_boot_id,
-                       record.receiver_mac, record.sequence, record.tx_timestamp_us)
+                key = (
+                    record.run_id,
+                    record.transmitter_boot_id,
+                    record.receiver_boot_id,
+                    record.receiver_mac,
+                    record.sequence,
+                    record.tx_timestamp_us,
+                )
                 if key in self._recent_key_set:
                     self.duplicate_records += 1
                     continue

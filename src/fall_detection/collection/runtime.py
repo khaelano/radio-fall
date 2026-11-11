@@ -105,8 +105,10 @@ class CollectionPresenter:
             self._storage_at = now
         health = HealthSnapshot(
             radio_live=radio_live,
-            storage_ready=self._storage_ready and not getattr(
-                getattr(self.controller, "_recording_io", None), "failure", None),
+            storage_ready=self._storage_ready
+            and not getattr(
+                getattr(self.controller, "_recording_io", None), "failure", None
+            ),
             clock_sync_ready=clock_ready,
             radio_detail=self.radio.state.get_status()[0],
             video_ready=self.video.ready if self.video else True,

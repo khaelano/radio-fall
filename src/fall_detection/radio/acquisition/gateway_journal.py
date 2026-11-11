@@ -22,7 +22,9 @@ class GatewayJournal:
     guarantee. A filesystem error propagates and prevents acknowledgement.
     """
 
-    def __init__(self, session_root: Path, run_id: int, metadata: dict, *, recording_io=None) -> None:
+    def __init__(
+        self, session_root: Path, run_id: int, metadata: dict, *, recording_io=None
+    ) -> None:
         self.root = session_root / "transport" / "gateway" / f"{run_id:016x}"
         self.root.mkdir(parents=True, exist_ok=False)
         (self.root / "manifest.json").write_text(
@@ -30,9 +32,11 @@ class GatewayJournal:
             + "\n"
         )
         self._io = recording_io
+
         def open_file(name, mode):
             path = self.root / name
             return recording_io.open(path, mode) if recording_io else path.open(mode)
+
         self._data = open_file("envelopes.bin", "xb")
         self._events = open_file("events.jsonl", "x")
         self._bins = open_file("availability.jsonl", "x")

@@ -22,14 +22,21 @@ FEATURES = 4 * 245
 
 def _no_btrfs_compression(path: Path) -> bool:
     """Disable compression on a new file when its filesystem supports it."""
-    if subprocess.run(
-        ["stat", "-f", "-c", "%T", str(path.parent)],
-        capture_output=True, text=True, check=False,
-    ).stdout.strip() != "btrfs":
+    if (
+        subprocess.run(
+            ["stat", "-f", "-c", "%T", str(path.parent)],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        != "btrfs"
+    ):
         return False
     result = subprocess.run(
         ["btrfs", "property", "set", "-ti", str(path), "compression", "none"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if result.returncode:
         raise OSError(f"Cannot disable Btrfs compression for {path}: {result.stderr}")
@@ -51,8 +58,10 @@ def write_signal(path: Path, signal: np.ndarray) -> dict:
     finally:
         temporary.unlink(missing_ok=True)
     return dict(
-        signal=str(path.relative_to(path.parent.parent)), samples=len(signal),
-        bytes=path.stat().st_size, sha256=file_hash(path),
+        signal=str(path.relative_to(path.parent.parent)),
+        samples=len(signal),
+        bytes=path.stat().st_size,
+        sha256=file_hash(path),
         btrfs_compression_disabled=uncompressed,
     )
 
@@ -91,52 +100,90 @@ def _atomic_json(value: dict, path: Path) -> None:
 
 
 def publish_export(
-    source: Path, destination: Path, index: pl.DataFrame, segments: pl.DataFrame,
-    signal_rows: list[dict], *, method: str, seconds: float,
-    source_metadata: dict | None = None, parameters: dict | None = None,
+    source: Path,
+    destination: Path,
+    index: pl.DataFrame,
+    segments: pl.DataFrame,
+    signal_rows: list[dict],
+    *,
+    method: str,
+    seconds: float,
+    source_metadata: dict | None = None,
+    parameters: dict | None = None,
 ) -> None:
     """Write metadata only after every signal has been published."""
-    v1 = json.loads((source / "manifest.json").read_text()) if (source / "manifest.json").exists() else {}
+    v1 = (
+        json.loads((source / "manifest.json").read_text())
+        if (source / "manifest.json").exists()
+        else {}
+    )
     if v1.get("schema") != "amplitude_sequence_v1":
         v1 = {}
     format_parameters = dict(parameters or v1.get("parameters") or {})
-    for obsolete in ("max_windows_per_shard", "npy_storage_order", "compression",
-                     "bounded_writer_tasks", "writer_memory_budget_mb",
-                     "reload_verification"):
+    for obsolete in (
+        "max_windows_per_shard",
+        "npy_storage_order",
+        "compression",
+        "bounded_writer_tasks",
+        "writer_memory_budget_mb",
+        "reload_verification",
+    ):
         format_parameters.pop(obsolete, None)
     format_parameters.update(dtype="float32", tensor_order="time,receiver,subcarrier")
-    ledger = pl.DataFrame([{k: v for k, v in row.items() if k != "subcarriers"}
-                           for row in signal_rows]).sort("segment_id")
+    ledger = pl.DataFrame(
+        [{k: v for k, v in row.items() if k != "subcarriers"} for row in signal_rows]
+    ).sort("segment_id")
     _atomic_table(index, destination / "window_index.parquet")
     _atomic_table(segments, destination / "segments.parquet")
     _atomic_table(ledger, destination / "signals.parquet")
     _atomic_json(
         dict(
-            schema=SCHEMA, dataset=destination.name, version=2,
+            schema=SCHEMA,
+            dataset=destination.name,
+            version=2,
             source=source_metadata or v1.get("source"),
             parameters=format_parameters,
-            provenance=dict(method=method, v1_manifest_sha256=(
-                file_hash(source / "manifest.json") if v1 else None
-            ), export_code_sha256={
-                name: file_hash(Path(__file__).with_name(name))
-                for name in ("sequence_segments.py", "sequence_preprocessing.py")
-            }),
-            coordinates=dict(receivers=["rx-1", "rx-2", "rx-3", "rx-4"],
-                             subcarriers=signal_rows[0]["subcarriers"]),
+            provenance=dict(
+                method=method,
+                v1_manifest_sha256=(
+                    file_hash(source / "manifest.json") if v1 else None
+                ),
+                export_code_sha256={
+                    name: file_hash(Path(__file__).with_name(name))
+                    for name in ("sequence_segments.py", "sequence_preprocessing.py")
+                },
+            ),
+            coordinates=dict(
+                receivers=["rx-1", "rx-2", "rx-3", "rx-4"],
+                subcarriers=signal_rows[0]["subcarriers"],
+            ),
             representation="float32 log1p(squared_difference); NaN means invalid",
-            labels=dict(fall=1, non_fall=0,
-                        rule="fall window center in action cue; other fall windows omitted"),
-            counts=dict(segments=len(ledger), windows=len(index),
-                        classes=index.group_by("duration", "target").len().sort(
-                            "duration", "target"
-                        ).to_dicts()),
+            labels=dict(
+                fall=1,
+                non_fall=0,
+                rule="fall window center in action cue; other fall windows omitted",
+            ),
+            counts=dict(
+                segments=len(ledger),
+                windows=len(index),
+                classes=index.group_by("duration", "target")
+                .len()
+                .sort("duration", "target")
+                .to_dicts(),
+            ),
             signal_bytes=int(ledger["bytes"].sum()),
             conversion_seconds=seconds,
             timings_seconds=dict(v1.get("timings_seconds", {}), v2_conversion=seconds),
-            metadata_sha256={name: file_hash(destination / name) for name in (
-                "window_index.parquet", "segments.parquet", "signals.parquet"
-            )},
-        ), destination / "manifest.json",
+            metadata_sha256={
+                name: file_hash(destination / name)
+                for name in (
+                    "window_index.parquet",
+                    "segments.parquet",
+                    "signals.parquet",
+                )
+            },
+        ),
+        destination / "manifest.json",
     )
 
 
@@ -173,73 +220,133 @@ def migrate_v1_dataset(source: Path, destination: Path) -> dict:
                 position = row["shard_row"]
                 if int(targets[position]) != row["target"]:
                     raise ValueError(f"Target differs in {shard}")
-                if row["stop"] > length or row["stop"] - row["start"] != row["duration"] * 96:
+                if (
+                    row["stop"] > length
+                    or row["stop"] - row["start"] != row["duration"] * 96
+                ):
                     raise ValueError(f"Window bounds differ in {shard}")
                 values = log_signal(raw[position], valid[position])
-                view = signal[row["start"]:row["stop"]]
-                used = covered[row["start"]:row["stop"]]
+                view = signal[row["start"] : row["stop"]]
+                used = covered[row["start"] : row["stop"]]
                 if not np.array_equal(view[used], values[used], equal_nan=True):
                     raise ValueError(f"Overlapping windows disagree: {shard}")
                 view[~used] = values[~used]
                 used[:] = True
         receipt = write_signal(path, signal)
-        ledger.append(dict(segment_id=segment["segment_id"], **receipt,
-                           subcarriers=coordinates[1]))
+        ledger.append(
+            dict(
+                segment_id=segment["segment_id"], **receipt, subcarriers=coordinates[1]
+            )
+        )
     if not ledger:
         raise ValueError("No indexed segments")
     new_index = index.drop("shard", "shard_row").with_columns(
-        pl.col("segment_id").map_elements(
+        pl.col("segment_id")
+        .map_elements(
             lambda identifier: f"signals/{identifier}.npy", return_dtype=pl.String
-        ).alias("signal")
+        )
+        .alias("signal")
     )
-    new_segments = segments.with_columns(pl.col("segment_id").map_elements(
-        lambda identifier: str(destination / "segments" / f"{identifier}.npz"),
-        return_dtype=pl.String,
-    ).alias("path"))
-    publish_export(source, destination, new_index, new_segments, ledger,
-                   method="verified-v1-window-migration", seconds=perf_counter()-started)
+    new_segments = segments.with_columns(
+        pl.col("segment_id")
+        .map_elements(
+            lambda identifier: str(destination / "segments" / f"{identifier}.npz"),
+            return_dtype=pl.String,
+        )
+        .alias("path")
+    )
+    publish_export(
+        source,
+        destination,
+        new_index,
+        new_segments,
+        ledger,
+        method="verified-v1-window-migration",
+        seconds=perf_counter() - started,
+    )
     preserve_v1_audit(source, destination)
-    return dict(dataset=destination.name, segments=len(ledger), windows=len(index),
-                seconds=perf_counter()-started, allocated_bytes=sum(
-                    (destination / row["signal"]).stat().st_blocks * 512 for row in ledger
-                ))
+    return dict(
+        dataset=destination.name,
+        segments=len(ledger),
+        windows=len(index),
+        seconds=perf_counter() - started,
+        allocated_bytes=sum(
+            (destination / row["signal"]).stat().st_blocks * 512 for row in ledger
+        ),
+    )
 
 
-def export_cached_segments(source: Path, destination: Path, index: pl.DataFrame,
-                           segments: pl.DataFrame, *, source_metadata: dict,
-                           parameters: dict) -> dict:
+def export_cached_segments(
+    source: Path,
+    destination: Path,
+    index: pl.DataFrame,
+    segments: pl.DataFrame,
+    *,
+    source_metadata: dict,
+    parameters: dict,
+) -> dict:
     """Export v2 directly from preprocessing's retained per-segment arrays."""
     started, ledger = perf_counter(), []
     for segment in segments.iter_rows(named=True):
         if index.filter(pl.col("segment_id") == segment["segment_id"]).is_empty():
             continue
         with read_segment(segment["path"]) as arrays:
-            signal = log_signal(arrays["squared_difference"], arrays["difference_valid"])
+            signal = log_signal(
+                arrays["squared_difference"], arrays["difference_valid"]
+            )
             coordinates = (arrays["receivers"].tolist(), arrays["subcarriers"].tolist())
         path = destination / "signals" / f"{segment['segment_id']}.npy"
-        ledger.append(dict(segment_id=segment["segment_id"], **write_signal(path, signal),
-                           subcarriers=coordinates[1]))
-    new_index = index.with_columns(pl.col("segment_id").map_elements(
-        lambda identifier: f"signals/{identifier}.npy", return_dtype=pl.String
-    ).alias("signal"))
-    publish_export(source, destination, new_index, segments,
-                   ledger, method="direct-preprocessing", seconds=perf_counter()-started,
-                   source_metadata=source_metadata, parameters=parameters)
-    return dict(dataset=destination.name, segments=len(ledger), windows=len(index),
-                seconds=perf_counter()-started)
+        ledger.append(
+            dict(
+                segment_id=segment["segment_id"],
+                **write_signal(path, signal),
+                subcarriers=coordinates[1],
+            )
+        )
+    new_index = index.with_columns(
+        pl.col("segment_id")
+        .map_elements(
+            lambda identifier: f"signals/{identifier}.npy", return_dtype=pl.String
+        )
+        .alias("signal")
+    )
+    publish_export(
+        source,
+        destination,
+        new_index,
+        segments,
+        ledger,
+        method="direct-preprocessing",
+        seconds=perf_counter() - started,
+        source_metadata=source_metadata,
+        parameters=parameters,
+    )
+    return dict(
+        dataset=destination.name,
+        segments=len(ledger),
+        windows=len(index),
+        seconds=perf_counter() - started,
+    )
 
 
 def preserve_v1_audit(source: Path, destination: Path) -> None:
     """Retain review tables, figures and the representative audit segment."""
-    for name in ("selection.parquet", "recordings.parquet", "alignment.parquet",
-                 "hampel.parquet", "differences.parquet", "window_counts.parquet"):
+    for name in (
+        "selection.parquet",
+        "recordings.parquet",
+        "alignment.parquet",
+        "hampel.parquet",
+        "differences.parquet",
+        "window_counts.parquet",
+    ):
         if (source / name).exists():
             shutil.copy2(source / name, destination / name)
     if (source / "reports").exists():
         if not (destination / "reports").exists():
             shutil.copytree(source / "reports", destination / "reports")
-        shutil.copytree(source / "reports", destination / "reports" / "v1",
-                        dirs_exist_ok=True)
+        shutil.copytree(
+            source / "reports", destination / "reports" / "v1", dirs_exist_ok=True
+        )
     segments = pl.read_parquet(source / "segments.parquet")
     for row in segments.filter(pl.col("cached")).iter_rows(named=True):
         old = array_directory(Path(row["path"]))
@@ -250,31 +357,54 @@ def preserve_v1_audit(source: Path, destination: Path) -> None:
             target = destination / "segments" / f"{row['segment_id']}.npz"
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(row["path"], target)
-    updated = segments.with_columns(pl.col("segment_id").map_elements(
-        lambda identifier: str(destination.resolve() / "segments" / f"{identifier}.npz"),
-        return_dtype=pl.String,
-    ).alias("path"))
+    updated = segments.with_columns(
+        pl.col("segment_id")
+        .map_elements(
+            lambda identifier: str(
+                destination.resolve() / "segments" / f"{identifier}.npz"
+            ),
+            return_dtype=pl.String,
+        )
+        .alias("path")
+    )
     _atomic_table(updated, destination / "segments.parquet")
     manifest_path = destination / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
-    manifest["metadata_sha256"]["segments.parquet"] = file_hash(destination / "segments.parquet")
-    for obsolete in ("max_windows_per_shard", "npy_storage_order", "compression",
-                     "bounded_writer_tasks", "writer_memory_budget_mb",
-                     "reload_verification"):
+    manifest["metadata_sha256"]["segments.parquet"] = file_hash(
+        destination / "segments.parquet"
+    )
+    for obsolete in (
+        "max_windows_per_shard",
+        "npy_storage_order",
+        "compression",
+        "bounded_writer_tasks",
+        "writer_memory_budget_mb",
+        "reload_verification",
+    ):
         manifest["parameters"].pop(obsolete, None)
-    manifest["parameters"].update(dtype="float32", tensor_order="time,receiver,subcarrier")
+    manifest["parameters"].update(
+        dtype="float32", tensor_order="time,receiver,subcarrier"
+    )
     if "labels" not in manifest:
-        manifest["labels"] = dict(fall=1, non_fall=0,
-                                  rule="fall window center in action cue; other fall windows omitted")
+        manifest["labels"] = dict(
+            fall=1,
+            non_fall=0,
+            rule="fall window center in action cue; other fall windows omitted",
+        )
     if "classes" not in manifest["counts"]:
         index = pl.read_parquet(destination / "window_index.parquet")
-        manifest["counts"]["classes"] = index.group_by("duration", "target").len().sort(
-            "duration", "target"
-        ).to_dicts()
+        manifest["counts"]["classes"] = (
+            index.group_by("duration", "target")
+            .len()
+            .sort("duration", "target")
+            .to_dicts()
+        )
     if "timings_seconds" not in manifest:
         source_manifest = json.loads((source / "manifest.json").read_text())
-        manifest["timings_seconds"] = dict(source_manifest.get("timings_seconds", {}),
-                                           v2_conversion=manifest["conversion_seconds"])
+        manifest["timings_seconds"] = dict(
+            source_manifest.get("timings_seconds", {}),
+            v2_conversion=manifest["conversion_seconds"],
+        )
     _atomic_json(manifest, manifest_path)
 
 
@@ -282,14 +412,18 @@ def verify_v2_dataset(source: Path, destination: Path) -> dict:
     """Compare every v2 window, mask, target and identifier against v1."""
     started = perf_counter()
     manifest = json.loads((destination / "manifest.json").read_text())
-    if manifest["schema"] != SCHEMA or manifest["provenance"]["v1_manifest_sha256"] != file_hash(source / "manifest.json"):
+    if manifest["schema"] != SCHEMA or manifest["provenance"][
+        "v1_manifest_sha256"
+    ] != file_hash(source / "manifest.json"):
         raise ValueError("Source manifest differs")
     old = pl.read_parquet(source / "window_index.parquet")
     new = pl.read_parquet(destination / "window_index.parquet")
     expected = old.drop("shard", "shard_row").with_columns(
-        pl.col("segment_id").map_elements(
+        pl.col("segment_id")
+        .map_elements(
             lambda identifier: f"signals/{identifier}.npy", return_dtype=pl.String
-        ).alias("signal")
+        )
+        .alias("signal")
     )
     if not expected.equals(new):
         raise ValueError("Window identifiers or metadata differ")
@@ -297,7 +431,10 @@ def verify_v2_dataset(source: Path, destination: Path) -> dict:
     checked = 0
     for segment in ledger.iter_rows(named=True):
         path = destination / segment["signal"]
-        if path.stat().st_size != segment["bytes"] or file_hash(path) != segment["sha256"]:
+        if (
+            path.stat().st_size != segment["bytes"]
+            or file_hash(path) != segment["sha256"]
+        ):
             raise ValueError(f"Signal hash differs: {path}")
         signal = np.load(path, mmap_mode="r", allow_pickle=False)
         if signal.shape != (segment["samples"], 4, 245) or signal.dtype != np.float32:
@@ -311,12 +448,21 @@ def verify_v2_dataset(source: Path, destination: Path) -> dict:
                 for row in part.iter_rows(named=True):
                     if int(targets[row["shard_row"]]) != row["target"]:
                         raise ValueError("Target differs")
-                    old_values = log_signal(raw[row["shard_row"]], valid[row["shard_row"]])
-                    actual = signal[row["start"]:row["stop"]]
+                    old_values = log_signal(
+                        raw[row["shard_row"]], valid[row["shard_row"]]
+                    )
+                    actual = signal[row["start"] : row["stop"]]
                     if not np.array_equal(old_values, actual, equal_nan=True):
-                        raise ValueError(f"Window values or validity differ: {row['segment_id']} {row['start']}")
+                        raise ValueError(
+                            f"Window values or validity differ: {row['segment_id']} {row['start']}"
+                        )
                     checked += 1
     if checked != len(old):
         raise ValueError("Not every window was verified")
-    return dict(dataset=destination.name, windows=checked, segments=len(ledger),
-                seconds=perf_counter()-started, identical=True)
+    return dict(
+        dataset=destination.name,
+        windows=checked,
+        segments=len(ledger),
+        seconds=perf_counter() - started,
+        identical=True,
+    )

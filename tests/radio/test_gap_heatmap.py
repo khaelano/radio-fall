@@ -8,7 +8,12 @@ import pytest
 
 from fall_detection.radio.acquisition.availability import AvailabilityGrid
 from fall_detection.radio.visualization.gaps import (
-    GAP, PENDING, RECEIVED, UNKNOWN, CsiGapPanel, gap_values,
+    GAP,
+    PENDING,
+    RECEIVED,
+    UNKNOWN,
+    CsiGapPanel,
+    gap_values,
 )
 
 
@@ -21,12 +26,8 @@ def test_gap_snapshot_matches_deadlines_and_never_backfills_late_delivery():
     snapshot = grid.snapshot(seconds=0.2, now_ns=1_120_000_000)
     values = gap_values(snapshot, 1_120_000_000)
     # Visible bins -4..6 include both partially visible time bins.
-    np.testing.assert_array_equal(
-        values[0], [UNKNOWN] * 4 + [RECEIVED] + [PENDING] * 6
-    )
-    np.testing.assert_array_equal(
-        values[1], [UNKNOWN] * 4 + [GAP] + [PENDING] * 6
-    )
+    np.testing.assert_array_equal(values[0], [UNKNOWN] * 4 + [RECEIVED] + [PENDING] * 6)
+    np.testing.assert_array_equal(values[1], [UNKNOWN] * 4 + [GAP] + [PENDING] * 6)
     assert before == (grid.next_bin, dict(grid.timely), dict(grid.late), len(emitted))
     assert not grid.observe("rx-2", 1_005_000_000, 1_130_000_000)
     later = grid.snapshot(seconds=0.2, now_ns=1_120_000_000)
@@ -72,7 +73,8 @@ def test_gap_panel_shows_all_receivers_and_refreshes_silence_at_four_hz(qt_app):
 
     grid = AvailabilityGrid(("rx-1", "rx-2", "rx-3", "rx-4"), 0)
     panel = CsiGapPanel(
-        *qt_modules(), receivers=grid.receivers,
+        *qt_modules(),
+        receivers=grid.receivers,
         snapshot=lambda seconds, now_ns: grid.snapshot(seconds=seconds, now_ns=now_ns),
     )
     try:
@@ -92,14 +94,17 @@ def test_gap_panel_shows_all_receivers_and_refreshes_silence_at_four_hz(qt_app):
 
 
 def test_gap_tab_skips_phase_work_obeys_backlog_guard_and_rebinds_after_recovery(
-    qt_app, monkeypatch,
+    qt_app,
+    monkeypatch,
 ):
     from fall_detection.radio.visualization.live import LiveDashboard
     from fall_detection.radio.visualization.state import LiveState
 
     state = LiveState(120)
     for method in ("snapshot", "prepare_phase_views"):
-        monkeypatch.setattr(state.buffer, method, lambda **kw: pytest.fail("phase work"))
+        monkeypatch.setattr(
+            state.buffer, method, lambda **kw: pytest.fail("phase work")
+        )
     grid = AvailabilityGrid(("rx-1", "rx-2"), 0)
     radio = SimpleNamespace(
         state=state,

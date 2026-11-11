@@ -24,8 +24,11 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "create":
         result = create_archive(
-            args.source, args.destination,
-            progress=lambda index, total, path: print(f"{index}/{total} {path}", flush=True),
+            args.source,
+            args.destination,
+            progress=lambda index, total, path: print(
+                f"{index}/{total} {path}", flush=True
+            ),
         )
     elif args.command == "verify":
         result = verify_archive(args.archive)
@@ -36,7 +39,9 @@ def main() -> None:
             else:
                 print(recording.compare_source(args.source))
         return
-    print(f"Verified {len(result['files'])} original files and {len(result['tables'])} tables")
+    print(
+        f"Verified {len(result['files'])} original files and {len(result['tables'])} tables"
+    )
 
 
 if __name__ == "__main__":

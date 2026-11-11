@@ -83,9 +83,16 @@ def _reject_legacy_writer(path: Path) -> None:
                     value = descriptor.stat()
                     if (value.st_dev, value.st_ino) != (target.st_dev, target.st_ino):
                         continue
-                    for line in (process / "fdinfo" / descriptor.name).read_text().splitlines():
-                        if line.startswith("flags:") and int(line.split()[1], 8) & os.O_ACCMODE:
-                            raise ValueError("session is already open in another collector")
+                    for line in (
+                        (process / "fdinfo" / descriptor.name).read_text().splitlines()
+                    ):
+                        if (
+                            line.startswith("flags:")
+                            and int(line.split()[1], 8) & os.O_ACCMODE
+                        ):
+                            raise ValueError(
+                                "session is already open in another collector"
+                            )
                 except (OSError, PermissionError):
                     continue
         except (OSError, PermissionError):
@@ -122,21 +129,26 @@ class TrialCapture:
         for receiver_id in sorted(set(self.receiver_ids.values())):
             receiver_path = self.path / "receivers" / _slug(receiver_id)
             receiver_path.mkdir(parents=True, exist_ok=True)
-            csi_file = self._open(receiver_path / "csi.csv",
-                "w", encoding="utf-8", newline=""
+            csi_file = self._open(
+                receiver_path / "csi.csv", "w", encoding="utf-8", newline=""
             )
-            timing_file = self._open(receiver_path / "radio_timing.csv",
-                "w", encoding="utf-8", newline=""
+            timing_file = self._open(
+                receiver_path / "radio_timing.csv", "w", encoding="utf-8", newline=""
             )
             csi_file.write(CSI_HEADER + "\n")
             timing_file.write(TIMING_HEADER + "\n")
             clock = self._clock_streams[receiver_id] = self._open(
-                receiver_path / "usb_clock_sync.csv", "w", encoding="utf-8", buffering=1)
+                receiver_path / "usb_clock_sync.csv", "w", encoding="utf-8", buffering=1
+            )
             clock.write(CLOCK_SYNC_HEADER + "\n")
             self._receiver_streams[receiver_id] = (csi_file, timing_file)
 
     def _open(self, path: Path, mode: str, **kwargs):
-        return self._io.open(path, mode, **kwargs) if self._io else path.open(mode, **kwargs)
+        return (
+            self._io.open(path, mode, **kwargs)
+            if self._io
+            else path.open(mode, **kwargs)
+        )
 
     @property
     def writes_complete(self) -> bool:
@@ -176,7 +188,11 @@ class TrialCapture:
         self, receiver_id: str, record: CsiRecord, arrival_ns: int
     ) -> None:
         if receiver_id not in self._ble_streams:
-            filename = "gateway_timing.jsonl" if record.transport == "espnow_gateway" else "ble_timing.jsonl"
+            filename = (
+                "gateway_timing.jsonl"
+                if record.transport == "espnow_gateway"
+                else "ble_timing.jsonl"
+            )
             path = self.path / "receivers" / _slug(receiver_id) / filename
             self._ble_streams[receiver_id] = self._open(path, "x", encoding="utf-8")
         value = dict(
@@ -209,12 +225,12 @@ class TrialCapture:
             if receiver_id is None:
                 return
             self._clock_streams[receiver_id].write(
-                    f"{host_receive_monotonic_ns},{sample.receiver_mac},{sample.sync_id},"
-                    f"{sample.sensing_sequence},{sample.receiver_boot_id},"
-                    f"{sample.tx_t1_us},{sample.rx_t2_us},{sample.rx_t3_us},"
-                    f"{sample.tx_t4_us},{sample.rx_radio_t2_us},{sample.tx_radio_t4_us},"
-                    f"{sample.round_trip_us},{sample.receiver_minus_transmitter_us:.6f},"
-                    f"{estimate.drift_ppm:.6f},{estimate.uncertainty_us:.6f}\n"
+                f"{host_receive_monotonic_ns},{sample.receiver_mac},{sample.sync_id},"
+                f"{sample.sensing_sequence},{sample.receiver_boot_id},"
+                f"{sample.tx_t1_us},{sample.rx_t2_us},{sample.rx_t3_us},"
+                f"{sample.tx_t4_us},{sample.rx_radio_t2_us},{sample.tx_radio_t4_us},"
+                f"{sample.round_trip_us},{sample.receiver_minus_transmitter_us:.6f},"
+                f"{estimate.drift_ppm:.6f},{estimate.uncertainty_us:.6f}\n"
             )
 
     def close_streams(self) -> None:
@@ -285,8 +301,10 @@ class SessionArtifactStore:
         self.session_id = session_id
         self._io = recording_io
         self._event_file = (
-            recording_io.open(self.root / "events.jsonl", "x") if recording_io
-            else (self.root / "events.jsonl").open("x", encoding="utf-8"))
+            recording_io.open(self.root / "events.jsonl", "x")
+            if recording_io
+            else (self.root / "events.jsonl").open("x", encoding="utf-8")
+        )
         _lock_events(self._event_file)
         self._closed = False
         self._session = {
@@ -311,19 +329,30 @@ class SessionArtifactStore:
         from .resume import load_session_resume
 
         _reject_legacy_writer(physical_path(root / "events.jsonl"))
-        stream = (recording_io.open(root / "events.jsonl", "a") if recording_io
-                  else (root / "events.jsonl").open("a", encoding="utf-8"))
+        stream = (
+            recording_io.open(root / "events.jsonl", "a")
+            if recording_io
+            else (root / "events.jsonl").open("a", encoding="utf-8")
+        )
         try:
             _lock_events(stream)
             saved = load_session_resume(root)
             old = saved.manifest.get("environment", {})
-            for key in ("receiver_ids", "radio_profile_fingerprint", "gateway_transport_fingerprint"):
+            for key in (
+                "receiver_ids",
+                "radio_profile_fingerprint",
+                "gateway_transport_fingerprint",
+            ):
                 if old.get(key) != environment.get(key):
                     raise ValueError(f"cannot resume with changed {key}")
             if bool(old.get("video")) != bool(environment.get("video")):
                 raise ValueError("resume must retain the session's enabled video mode")
             store = cls.__new__(cls)
-            store.root, store.protocol, store.metadata = saved.root, saved.protocol, saved.metadata
+            store.root, store.protocol, store.metadata = (
+                saved.root,
+                saved.protocol,
+                saved.metadata,
+            )
             store.session_id = saved.manifest["session_id"]
             store._session = dict(saved.manifest)
             store._receiver_ids = _receiver_bindings(environment)
@@ -338,9 +367,13 @@ class SessionArtifactStore:
         """Append the new process epoch while retaining original session inputs."""
         previous = self._session.get("status")
         ended = self._session.pop("ended_monotonic_ns", None)
-        value = dict(resumed_at_utc=datetime.now(timezone.utc).isoformat(),
-                     resumed_monotonic_ns=monotonic_ns, previous_status=previous,
-                     previous_ended_monotonic_ns=ended, environment=environment)
+        value = dict(
+            resumed_at_utc=datetime.now(timezone.utc).isoformat(),
+            resumed_monotonic_ns=monotonic_ns,
+            previous_status=previous,
+            previous_ended_monotonic_ns=ended,
+            environment=environment,
+        )
         boot = Path("/proc/sys/kernel/random/boot_id")
         value["host_boot_id"] = boot.read_text().strip() if boot.exists() else None
         self._session.setdefault("resumptions", []).append(value)

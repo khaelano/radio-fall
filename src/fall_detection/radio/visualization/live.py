@@ -45,9 +45,7 @@ class LiveDashboard:
         self._status_at = float("-inf")
         self._selected: str | None = None
 
-    def _gap_snapshot(
-        self, seconds: float, now_ns: int
-    ) -> AvailabilitySnapshot | None:
+    def _gap_snapshot(self, seconds: float, now_ns: int) -> AvailabilitySnapshot | None:
         grid = self.radio.manager.grid
         return grid.snapshot(seconds=seconds, now_ns=now_ns) if grid else None
 

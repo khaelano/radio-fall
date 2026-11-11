@@ -17,12 +17,22 @@ def main() -> None:
             destination = source.with_suffix(".zip")
             print(f"Migrating {source.name}", flush=True)
             if not destination.exists():
-                create_archive(source, destination, progress=lambda n, total, path: print(
-                    f"  {n}/{total}", flush=True) if n % 500 == 0 else None)
+                create_archive(
+                    source,
+                    destination,
+                    progress=lambda n, total, path: (
+                        print(f"  {n}/{total}", flush=True) if n % 500 == 0 else None
+                    ),
+                )
             with Recording(destination) as recording:
                 compared = recording.compare_source(source)
-            entry = {"session": source.name, "archive": str(destination),
-                     "status": "verified", **compared, "archive_bytes": destination.stat().st_size}
+            entry = {
+                "session": source.name,
+                "archive": str(destination),
+                "status": "verified",
+                **compared,
+                "archive_bytes": destination.stat().st_size,
+            }
             log.write(json.dumps(entry) + "\n")
             print(json.dumps(entry), flush=True)
 

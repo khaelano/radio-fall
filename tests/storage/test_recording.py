@@ -10,9 +10,11 @@ def test_archive_extracts_every_original_byte_and_reads_tables(tmp_path):
     source = tmp_path / "session"
     receiver = source / "trials/001/attempt_01/receivers/rx-1"
     receiver.mkdir(parents=True)
-    (source / "session.json").write_text(json.dumps({
-        "artifact_schema_version": 2, "status": "ended", "session_id": "test"
-    }))
+    (source / "session.json").write_text(
+        json.dumps(
+            {"artifact_schema_version": 2, "status": "ended", "session_id": "test"}
+        )
+    )
     (source / "binary.bin").write_bytes(bytes(range(256)))
     relative = "trials/001/attempt_01/receivers/rx-1/csi.csv"
     (source / relative).write_bytes(b'id,data\r\n001,"[1,-2]"\r\n')
@@ -47,7 +49,9 @@ def test_collector_finalizes_after_resource_cleanup(tmp_path, monkeypatch):
         return 0
 
     monkeypatch.setattr(app, "_run", run)
-    monkeypatch.setattr(archive, "finalize_recording", lambda path: calls.append("archive") or path)
+    monkeypatch.setattr(
+        archive, "finalize_recording", lambda path: calls.append("archive") or path
+    )
     assert app.main([]) == 0
     assert calls == ["writer closed", "archive"]
 

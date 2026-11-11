@@ -51,7 +51,6 @@ def reference_phase_windows(rows: list, starts: list[int]) -> np.ndarray:
     return np.asarray(result, dtype=np.float32)
 
 
-
 def test_phase_native_matches_independent_integer_clock_reference(native_record):
     from fall_detection import _radio_native as core
 
@@ -79,10 +78,14 @@ def test_phase_native_matches_independent_integer_clock_reference(native_record)
                 tensor = np.frombuffer(window.tensor_bytes(), dtype="=f4").reshape(
                     16, 100, 242
                 )
-                np.testing.assert_array_equal(tensor, np.concatenate([np.nan_to_num(raw), np.isfinite(raw)], axis=-3).astype("float32"))
+                np.testing.assert_array_equal(
+                    tensor,
+                    np.concatenate(
+                        [np.nan_to_num(raw), np.isfinite(raw)], axis=-3
+                    ).astype("float32"),
+                )
         finally:
             native.close()
-
 
 
 def test_phase_maximum_lag_accepts_exact_150_ms_and_rejects_one_ns_more(native_record):
@@ -107,7 +110,6 @@ def test_phase_maximum_lag_accepts_exact_150_ms_and_rejects_one_ns_more(native_r
             assert np.all(tensor[8:, 0] == (1 if extra == 0 else 0))
     finally:
         native.close()
-
 
 
 def test_phase_native_constructor_rejects_fitted_scaling():

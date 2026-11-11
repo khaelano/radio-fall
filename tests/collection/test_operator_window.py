@@ -71,7 +71,8 @@ def _window(qt_app, protocol, commands=None, *, video_enabled=False):
 
 
 def test_operator_window_camera_preview_preserves_aspect_and_clears_on_loss(
-    qt_app, tmp_path,
+    qt_app,
+    tmp_path,
 ):
     from fall_detection.collection.video import VideoPreviewFrame
 

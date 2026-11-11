@@ -6,7 +6,10 @@ from fall_detection.radio.experiments.transport import (
     receiver_counter_delta,
     summarize_experiments,
 )
-from fall_detection.radio.acquisition.telemetry import ReceiverTelemetry, TransmitterTelemetry
+from fall_detection.radio.acquisition.telemetry import (
+    ReceiverTelemetry,
+    TransmitterTelemetry,
+)
 from fall_detection.radio.acquisition.wire import ReceiverStats
 
 

@@ -153,7 +153,9 @@ class OperatorWindow:
         if self._continuous:
             self.detail_button.hide()
         meta_row.addWidget(self.detail_button)
-        self.instruction_label = QtWidgets.QLabel("Waiting to record" if self._continuous else "Waiting for the first trial")
+        self.instruction_label = QtWidgets.QLabel(
+            "Waiting to record" if self._continuous else "Waiting for the first trial"
+        )
         self.instruction_label.setObjectName("instruction")
         self.instruction_label.setWordWrap(True)
         self.message_label = QtWidgets.QLabel("")
@@ -249,14 +251,21 @@ class OperatorWindow:
         if trial is None:
             self.scenario_title.setText("Protocol complete")
             self.scenario_meta.setText("—")
-            self.instruction_label.setText("All segments are recorded." if self._continuous else "All selected trials are resolved.")
+            self.instruction_label.setText(
+                "All segments are recorded."
+                if self._continuous
+                else "All selected trials are resolved."
+            )
             self.phase_label.setText("—")
             self.setup_label.hide()
         else:
             self.scenario_title.setText(trial.scenario.title)
             self.scenario_meta.setText(
-                (f"{trial.scenario.activity_label}  ·  segment {trial.ordinal}" if self._continuous
-                 else f"{trial.scenario.activity_label}  ·  repetition {trial.repetition}")
+                (
+                    f"{trial.scenario.activity_label}  ·  segment {trial.ordinal}"
+                    if self._continuous
+                    else f"{trial.scenario.activity_label}  ·  repetition {trial.repetition}"
+                )
                 + f"  ·  attempt {snapshot.attempt_number or '—'}"
                 + f"  ·  {trial.ordinal}/{snapshot.total_trials}"
             )
@@ -265,7 +274,11 @@ class OperatorWindow:
             equipment = attributes.get("equipment")
             self.setup_label.setVisible(equipment is not None)
             if equipment is not None:
-                setup = "clear floor" if equipment == "none" else equipment.replace("_", " ")
+                setup = (
+                    "clear floor"
+                    if equipment == "none"
+                    else equipment.replace("_", " ")
+                )
                 if attributes.get("chair_direction"):
                     setup += f" · chair facing {attributes['chair_direction']}"
                 self.setup_label.setText(f"Setup: {setup}")
@@ -300,14 +313,18 @@ class OperatorWindow:
             and not snapshot.action_confirmed,
             OperatorCommand.ABORT: snapshot.state in active_states,
             OperatorCommand.ACCEPT: snapshot.state is SessionState.REVIEW
-            and snapshot.attempt_status != "invalid" and not snapshot.accept_pending,
+            and snapshot.attempt_status != "invalid"
+            and not snapshot.accept_pending,
             OperatorCommand.RETRY: snapshot.state is SessionState.REVIEW,
             OperatorCommand.SKIP: snapshot.state
             in (SessionState.READY, SessionState.REVIEW),
             OperatorCommand.END_SESSION: snapshot.state is not SessionState.COMPLETE,
         }
         for command, button in self.buttons.items():
-            button.setEnabled(enabled[command] and (not self._continuous or command is OperatorCommand.END_SESSION))
+            button.setEnabled(
+                enabled[command]
+                and (not self._continuous or command is OperatorCommand.END_SESSION)
+            )
 
         self.status_label.setText(radio_detail)
         self.metrics_label.setText(metrics_text)

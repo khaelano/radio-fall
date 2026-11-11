@@ -2,6 +2,7 @@
 
 Run: uv run --no-sync python tools/processing/benchmark_amplitude_preprocessing.py SESSION_DIR
 """
+
 import argparse
 import json
 from pathlib import Path
@@ -18,6 +19,7 @@ HAMPEL_WINDOW_SECONDS = 0.1
 HAMPEL_MIN_PERIODS = 5
 HAMPEL_THRESHOLD = 5.0
 HAMPEL_BATCH_ROWS = 256
+
 
 # Preserved notebook implementation for independent parity and timing checks.
 def numpy_hampel_subcarriers(amplitude, times):
@@ -36,24 +38,30 @@ def numpy_hampel_subcarriers(amplitude, times):
             continue
         rows = np.flatnonzero(sizes == size)
         for offset in range(0, len(rows), HAMPEL_BATCH_ROWS):
-            batch = rows[offset:offset + HAMPEL_BATCH_ROWS]
+            batch = rows[offset : offset + HAMPEL_BATCH_ROWS]
             indices = starts[batch, None] + np.arange(size)
             windows = amplitude[indices]
             enough = np.isfinite(windows).sum(axis=1) >= HAMPEL_MIN_PERIODS
             with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", message="All-NaN slice encountered", category=RuntimeWarning)
+                warnings.filterwarnings(
+                    "ignore",
+                    message="All-NaN slice encountered",
+                    category=RuntimeWarning,
+                )
                 median = np.nanmedian(windows, axis=1)
                 mad = np.nanmedian(np.abs(windows - median[:, None, :]), axis=1)
             center = amplitude[batch]
             outlier = (
-                enough & np.isfinite(center) & np.isfinite(median) & (mad > 0)
+                enough
+                & np.isfinite(center)
+                & np.isfinite(median)
+                & (mad > 0)
                 & (np.abs(center - median) > HAMPEL_THRESHOLD * 1.4826 * mad)
             )
             row_idx, tone_idx = np.nonzero(outlier)
             filtered[batch[row_idx], tone_idx] = median[row_idx, tone_idx]
             replaced[batch[row_idx], tone_idx] = True
     return filtered, replaced
-
 
 
 def main():
@@ -65,28 +73,35 @@ def main():
     args = parser.parse_args()
     if args.recordings < 1 or args.repeats < 1:
         parser.error("recordings and repeats must be positive")
-    parquet_dir = args.parquet_dir or Path("data/interim/parquet") / args.session_dir.name
+    parquet_dir = (
+        args.parquet_dir or Path("data/interim/parquet") / args.session_dir.name
+    )
     session = load_parquet_session(args.session_dir, parquet_dir)
     attempts = session.attempts
     recordings = (
         attempts.loc[attempts.status.eq("accepted") & attempts.inclusion.ne("exclude")]
-        .explode("receiver_ids").dropna(subset=["receiver_ids"])
+        .explode("receiver_ids")
+        .dropna(subset=["receiver_ids"])
         .sort_values(["trial_ordinal", "attempt", "receiver_ids"])
         .head(args.recordings)
     )
     modes = {
         "numpy": numpy_hampel_subcarriers,
-        "rust_scalar": lambda a, t: hampel_subcarriers(a, t, parallel=False, simd=False),
+        "rust_scalar": lambda a, t: hampel_subcarriers(
+            a, t, parallel=False, simd=False
+        ),
         "rust_simd": lambda a, t: hampel_subcarriers(a, t, parallel=False),
         "rust_parallel_simd": hampel_subcarriers,
     }
     observations = []
     for row in recordings.itertuples(index=False):
         started = perf_counter()
-        packets = session.read_packets(filters=[
-            ("attempt_key", "==", row.attempt_key),
-            ("receiver_id", "==", row.receiver_ids),
-        ])
+        packets = session.read_packets(
+            filters=[
+                ("attempt_key", "==", row.attempt_key),
+                ("receiver_id", "==", row.receiver_ids),
+            ]
+        )
         loaded = perf_counter()
         signal = phase_signal_from_packets(packets)
         decoded = perf_counter()
@@ -95,7 +110,8 @@ def main():
             raise ValueError("Unsupported layout or unaligned metadata")
         amplitude = np.abs(signal.complex_csi)
         valid = (
-            np.isfinite(amplitude) & np.isfinite(signal.raw_phase)
+            np.isfinite(amplitude)
+            & np.isfinite(signal.raw_phase)
             & metadata.driver_valid.fillna(False).to_numpy(dtype=bool)[:, None]
         )
         amplitude[~valid] = np.nan
@@ -114,13 +130,20 @@ def main():
                 start = perf_counter()
                 modes[name](values, signal.time_seconds)
                 timings[name].append(perf_counter() - start)
-        observations.append({
-            "attempt_key": row.attempt_key, "receiver": row.receiver_ids,
-            "shape": list(values.shape), "read_seconds": loaded - started,
-            "decode_seconds": decoded - loaded, "normalize_seconds": normalized - decoded,
-            "hampel_median_seconds": {k: float(np.median(v)) for k, v in timings.items()},
-            "exact_parity": True,
-        })
+        observations.append(
+            {
+                "attempt_key": row.attempt_key,
+                "receiver": row.receiver_ids,
+                "shape": list(values.shape),
+                "read_seconds": loaded - started,
+                "decode_seconds": decoded - loaded,
+                "normalize_seconds": normalized - decoded,
+                "hampel_median_seconds": {
+                    k: float(np.median(v)) for k, v in timings.items()
+                },
+                "exact_parity": True,
+            }
+        )
     print(json.dumps({"repeats": args.repeats, "recordings": observations}, indent=2))
 
 

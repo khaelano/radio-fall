@@ -104,7 +104,9 @@ def test_input_rejects_wrong_radio_or_unavailable_clock():
 
 
 @pytest.mark.parametrize("backend", ["torch", "tinygrad"])
-def test_load_twelve_model_files_and_score_all_four_types(tmp_path, backend, monkeypatch):
+def test_load_twelve_model_files_and_score_all_four_types(
+    tmp_path, backend, monkeypatch
+):
     if backend == "tinygrad":
         monkeypatch.setenv("DEV", "CPU")
         compiler = Path("/usr/lib64/rocm/llvm/bin/clang")
@@ -128,14 +130,13 @@ def test_load_twelve_model_files_and_score_all_four_types(tmp_path, backend, mon
                 "config": config,
             }
             if kind != "random_forest" and backend == "tinygrad":
-                info.update(backend="tinygrad", features=490,
-                            labels=["preparation", "action", "resting"])
-                config["hidden_size"] = 4
-            (path / "metrics.json").write_text(
-                json.dumps(
-                    info
+                info.update(
+                    backend="tinygrad",
+                    features=490,
+                    labels=["preparation", "action", "resting"],
                 )
-            )
+                config["hidden_size"] = 4
+            (path / "metrics.json").write_text(json.dumps(info))
             if kind == "random_forest":
                 model = RandomForestClassifier(n_estimators=1, random_state=1).fit(
                     np.zeros((2, 4 * 490)), [1, 2]
@@ -143,9 +144,15 @@ def test_load_twelve_model_files_and_score_all_four_types(tmp_path, backend, mon
                 joblib.dump(model, path / "model.joblib")
             elif backend == "tinygrad":
                 from tinygrad.nn.state import get_state_dict, safe_save
-                from fall_detection.detection.tiny_phase_models import CNNModel, LSTMModel, GRUModel
+                from fall_detection.detection.tiny_phase_models import (
+                    CNNModel,
+                    LSTMModel,
+                    GRUModel,
+                )
 
-                model = {"cnn": CNNModel, "lstm": LSTMModel, "gru": GRUModel}[kind](490, 4)
+                model = {"cnn": CNNModel, "lstm": LSTMModel, "gru": GRUModel}[kind](
+                    490, 4
+                )
                 safe_save(get_state_dict(model), str(path / "model.safetensors"))
             else:
                 if kind == "cnn":

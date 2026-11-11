@@ -7,7 +7,7 @@ from fall_detection.storage.tables import convert_csv_to_parquet, iter_table
 
 def test_convert_preserves_rows_and_original(tmp_path):
     source = tmp_path / "csi.csv"
-    rows = [["00001", "", '[1,-2,3]'], ["99999999999999999999", "x,y", "[]"]]
+    rows = [["00001", "", "[1,-2,3]"], ["99999999999999999999", "x,y", "[]"]]
     with source.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
         writer.writerow(["id", "value", "data"])

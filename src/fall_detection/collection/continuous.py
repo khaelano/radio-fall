@@ -10,17 +10,33 @@ from .protocol import protocol_from_mapping
 
 def continuous_protocol(segment_seconds: float, segments: int):
     """Create a bounded queue of non-fall activity segments."""
-    return protocol_from_mapping({
-        "schema_version": 1, "protocol_id": "continuous-activity-v1",
-        "title": "Continuous activity recording",
-        "defaults": {"countdown_seconds": 0, "action_seconds": segment_seconds,
-                     "recovery_seconds": 0},
-        "blocks": [{"id": "continuous", "title": "Continuous activity", "scenarios": [{
-            "id": "activity", "activity_label": "non_fall",
-            "title": "Non-fall segment", "instruction": "Continue normal non-fall activities.",
-            "repetitions": segments,
-        }]}],
-    })
+    return protocol_from_mapping(
+        {
+            "schema_version": 1,
+            "protocol_id": "continuous-activity-v1",
+            "title": "Continuous activity recording",
+            "defaults": {
+                "countdown_seconds": 0,
+                "action_seconds": segment_seconds,
+                "recovery_seconds": 0,
+            },
+            "blocks": [
+                {
+                    "id": "continuous",
+                    "title": "Continuous activity",
+                    "scenarios": [
+                        {
+                            "id": "activity",
+                            "activity_label": "non_fall",
+                            "title": "Non-fall segment",
+                            "instruction": "Continue normal non-fall activities.",
+                            "repetitions": segments,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
 
 
 class ContinuousController(SessionController):
@@ -36,7 +52,9 @@ class ContinuousController(SessionController):
 
     def dispatch(self, command: OperatorCommand):
         if command is not OperatorCommand.END_SESSION:
-            raise RuntimeError("continuous recording is automatic; use End Session to stop")
+            raise RuntimeError(
+                "continuous recording is automatic; use End Session to stop"
+            )
         return super().dispatch(command)
 
     def _open_gap(self, reason: str) -> None:
@@ -58,7 +76,10 @@ class ContinuousController(SessionController):
                 if self._attempt_status == "invalid":
                     self._retry_locked()
                 elif self._attempt_status == "pending_review":
-                    if self._last_capture is not None and self._last_capture.writes_complete:
+                    if (
+                        self._last_capture is not None
+                        and self._last_capture.writes_complete
+                    ):
                         self._accept_locked()
             if self._state is SessionState.READY:
                 self._open_gap("waiting for ready inputs or next segment")
@@ -66,10 +87,15 @@ class ContinuousController(SessionController):
                     self._start_trial_locked()
                     if self._state is SessionState.COUNTDOWN:
                         start = self._capture_start_ns
-                        self._store.event("continuous_gap_ended", start,
-                                          started_monotonic_ns=self._gap_start)
+                        self._store.event(
+                            "continuous_gap_ended",
+                            start,
+                            started_monotonic_ns=self._gap_start,
+                        )
                         self._gap_start = None
                         current = self._clock() if now is None else now
                         self._change_phase_locked(SessionState.ACTION, current)
-                        self._phase_deadline = current + self._current_scenario.action_seconds
+                        self._phase_deadline = (
+                            current + self._current_scenario.action_seconds
+                        )
             return self._notify_locked()

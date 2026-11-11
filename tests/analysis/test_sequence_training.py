@@ -108,11 +108,20 @@ def test_segment_slices_keep_nan_mask_and_deterministic_batches(tmp_path):
     signal[0, 0, 0] = np.nan
     path = tmp_path / "segment.npy"
     np.save(path, signal)
-    frame = pl.DataFrame([
-        dict(path=str(path), start=start, stop=start + 192, duration=2,
-             target=0, split="train", window_id=i)
-        for i, start in enumerate((0, 96))
-    ])
+    frame = pl.DataFrame(
+        [
+            dict(
+                path=str(path),
+                start=start,
+                stop=start + 192,
+                duration=2,
+                target=0,
+                split="train",
+                window_id=i,
+            )
+            for i, start in enumerate((0, 96))
+        ]
+    )
     store = SegmentStore()
     normalizer = fit_normalizer(frame, store)
     np.testing.assert_array_equal(normalizer.count[:1], [383])
@@ -180,8 +189,10 @@ def test_model_update_and_checkpoint_round_trip(kind, tmp_path):
                 step(x, targets)
             values = x + offset
             np.testing.assert_allclose(
-                predictor(Tensor(values)).numpy(), model(Tensor(values)).numpy(),
-                rtol=1e-5, atol=1e-6,
+                predictor(Tensor(values)).numpy(),
+                model(Tensor(values)).numpy(),
+                rtol=1e-5,
+                atol=1e-6,
             )
         expected = model(Tensor(x)).sigmoid().numpy()
         save_checkpoint(model, tmp_path / "model.safetensors")
@@ -248,8 +259,10 @@ def test_opencl_predictor_replays_across_new_window_boundaries(kind):
     for _ in range(4):
         x = rng.normal(size=(2, 19, 4)).astype(np.float32)
         np.testing.assert_allclose(
-            predictor(Tensor(x.copy())).numpy(), model(Tensor(x.copy())).numpy(),
-            rtol=1e-4, atol=1e-5,
+            predictor(Tensor(x.copy())).numpy(),
+            model(Tensor(x.copy())).numpy(),
+            rtol=1e-4,
+            atol=1e-5,
         )
 
 

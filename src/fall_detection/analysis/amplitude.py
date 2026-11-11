@@ -45,13 +45,23 @@ def hampel_subcarriers(
     values = np.asarray(amplitude, dtype=np.float64)
     times = np.asarray(times, dtype=np.float64)
     if values.ndim != 2 or times.ndim != 1 or len(times) != values.shape[0]:
-        raise ValueError("Expected amplitude (packets, subcarriers) and times (packets,)")
+        raise ValueError(
+            "Expected amplitude (packets, subcarriers) and times (packets,)"
+        )
     filtered, replaced = hampel_filter(
-        values.tobytes(order="F"), times.tobytes(), values.shape[1],
-        window_seconds, min_periods, threshold, parallel, simd,
+        values.tobytes(order="F"),
+        times.tobytes(),
+        values.shape[1],
+        window_seconds,
+        min_periods,
+        threshold,
+        parallel,
+        simd,
     )
     return (
-        np.frombuffer(filtered, dtype=np.float64).reshape(values.shape, order="F").copy(),
+        np.frombuffer(filtered, dtype=np.float64)
+        .reshape(values.shape, order="F")
+        .copy(),
         np.frombuffer(replaced, dtype=np.bool_).reshape(values.shape, order="F").copy(),
     )
 
@@ -81,8 +91,8 @@ def normalize_subcarriers(
     normalized = np.full(amplitude.shape, np.nan)
     varying = has_data & (upper > lower)
     normalized[:, varying] = (
-        2 * (amplitude[:, varying] - lower[varying])
-        / (upper[varying] - lower[varying]) - 1
+        2 * (amplitude[:, varying] - lower[varying]) / (upper[varying] - lower[varying])
+        - 1
     )
     constant = has_data & ~varying
     normalized[:, constant] = np.where(finite[:, constant], 0.0, np.nan)

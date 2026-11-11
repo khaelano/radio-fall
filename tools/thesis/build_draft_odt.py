@@ -73,6 +73,7 @@ def citations(node: Any) -> Iterator[list[dict[str, Any]]]:
 
 def ensure_bibliography(document: dict[str, Any]) -> None:
     """Provide the explicit refs Div supported by the Better BibTeX filter."""
+
     def has_refs(node: Any) -> bool:
         if isinstance(node, dict):
             if node.get("t") == "Div" and node["c"][0][0] == "refs":
@@ -98,7 +99,7 @@ def verify_fields(path: Path, expected_sizes: list[int]) -> None:
         prefix = "ZOTERO_ITEM CSL_CITATION "
         if not name.startswith(prefix):
             continue
-        payload, _ = json.JSONDecoder().raw_decode(name[len(prefix):])
+        payload, _ = json.JSONDecoder().raw_decode(name[len(prefix) :])
         items = payload.get("citationItems", [])
         if not items or any(not item.get("uris") for item in items):
             raise ValueError("Field sitasi tidak terhubung ke item Zotero.")
@@ -126,29 +127,43 @@ def build(args: argparse.Namespace) -> None:
         raise ValueError("Nama output harus berakhiran .odt.")
     if output.exists() and not args.force:
         raise ValueError("Output sudah ada; gunakan --force untuk menimpanya.")
-    ast = json.loads(subprocess.check_output(
-        ["pandoc", "--from=markdown+citations", "--to=json", *map(str, inputs)],
-        text=True,
-    ))
+    ast = json.loads(
+        subprocess.check_output(
+            ["pandoc", "--from=markdown+citations", "--to=json", *map(str, inputs)],
+            text=True,
+        )
+    )
     clusters = list(citations(ast))
     if not clusters:
-        raise ValueError("Tidak ada sitasi Pandoc. Gunakan [@citationKey], bukan tautan paper.")
-    if any(item["citationMode"]["t"] == "AuthorInText"
-           for cluster in clusters for item in cluster):
+        raise ValueError(
+            "Tidak ada sitasi Pandoc. Gunakan [@citationKey], bukan tautan paper."
+        )
+    if any(
+        item["citationMode"]["t"] == "AuthorInText"
+        for cluster in clusters
+        for item in cluster
+    ):
         raise ValueError(
             "Sitasi naratif @key tidak didukung sebagai field aktif oleh filter. "
             "Tulis nama penulis secara eksplisit, diikuti [@key] atau [-@key]."
         )
     # Override source metadata so it cannot silently select plain/scannable cites.
     config = {
-        "client": "zotero", "scannable-cite": False, "transferable": False,
-        "csl-style": args.style, "author-in-text": False,
+        "client": "zotero",
+        "scannable-cite": False,
+        "transferable": False,
+        "csl-style": args.style,
+        "author-in-text": False,
     }
     if args.library:
         config["library"] = args.library
     ast["meta"]["zotero"] = {
-        "t": "MetaMap", "c": {
-            key: {"t": "MetaBool" if isinstance(value, bool) else "MetaString", "c": value}
+        "t": "MetaMap",
+        "c": {
+            key: {
+                "t": "MetaBool" if isinstance(value, bool) else "MetaString",
+                "c": value,
+            }
             for key, value in config.items()
         },
     }
@@ -177,8 +192,12 @@ def build(args: argparse.Namespace) -> None:
             lua_filter.write_bytes(data)
         staged = work / "document.odt"
         command = [
-            "pandoc", "--from=json", "--to=odt", "--standalone",
-            f"--lua-filter={lua_filter}", f"--output={staged}",
+            "pandoc",
+            "--from=json",
+            "--to=odt",
+            "--standalone",
+            f"--lua-filter={lua_filter}",
+            f"--output={staged}",
         ]
         directories = dict.fromkeys(path.parent for path in inputs)
         command.append("--resource-path=" + os.pathsep.join(map(str, directories)))
@@ -196,20 +215,36 @@ def build(args: argparse.Namespace) -> None:
 
 def main() -> int:
     """Parse command-line options and report actionable build errors."""
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("inputs", nargs="+", type=Path, help="Markdown dengan [@citationKey].")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "inputs", nargs="+", type=Path, help="Markdown dengan [@citationKey]."
+    )
     parser.add_argument("-o", "--output", required=True, type=Path)
-    parser.add_argument("--style", default="harvard-cite-them-right", help="ID style Zotero.")
-    parser.add_argument("--library", help="Nama group library; default library pribadi.")
-    parser.add_argument("--filter", type=Path, help="Filter zotero.lua mandiri dari Better BibTeX.")
-    parser.add_argument("--reference-odt", type=Path, help="Template format ODT opsional.")
+    parser.add_argument(
+        "--style", default="harvard-cite-them-right", help="ID style Zotero."
+    )
+    parser.add_argument(
+        "--library", help="Nama group library; default library pribadi."
+    )
+    parser.add_argument(
+        "--filter", type=Path, help="Filter zotero.lua mandiri dari Better BibTeX."
+    )
+    parser.add_argument(
+        "--reference-odt", type=Path, help="Template format ODT opsional."
+    )
     parser.add_argument("--force", action="store_true", help="Izinkan menimpa output.")
     args = parser.parse_args()
     try:
         build(args)
-    except (OSError, ValueError, subprocess.SubprocessError, zipfile.BadZipFile,
-            ET.ParseError) as error:
+    except (
+        OSError,
+        ValueError,
+        subprocess.SubprocessError,
+        zipfile.BadZipFile,
+        ET.ParseError,
+    ) as error:
         print(f"Gagal: {error}", file=sys.stderr)
         return 1
     return 0

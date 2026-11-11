@@ -589,7 +589,11 @@ class SequenceDataset:
         """Return this dataset's derived directory."""
         if self.format_version not in (1, 2):
             raise ValueError("Unknown sequence format version")
-        return self.root / f"data/processed/amplitude_sequence_v{self.format_version}" / self.name
+        return (
+            self.root
+            / f"data/processed/amplitude_sequence_v{self.format_version}"
+            / self.name
+        )
 
     def load(self) -> pl.DataFrame:
         """Load reviewed metadata and report every selected/excluded attempt."""
@@ -966,10 +970,14 @@ class SequenceDataset:
         """Load completed metadata and optionally audit all signal hashes."""
         manifest = json.loads((self.output / "manifest.json").read_text())
         if self.format_version == 2:
-            if manifest.get("schema") != "amplitude_sequence_v2" or (
-                manifest.get("source", {}).get("source_fingerprint")
-                != self.session.manifest.get("source_fingerprint")
-            ) or manifest.get("parameters", {}).get("dtype") != "float32":
+            if (
+                manifest.get("schema") != "amplitude_sequence_v2"
+                or (
+                    manifest.get("source", {}).get("source_fingerprint")
+                    != self.session.manifest.get("source_fingerprint")
+                )
+                or manifest.get("parameters", {}).get("dtype") != "float32"
+            ):
                 raise ValueError("Export source or schema differs")
             for filename, digest in manifest["metadata_sha256"].items():
                 if file_hash(self.output / filename) != digest:
@@ -977,9 +985,11 @@ class SequenceDataset:
             signals = pl.read_parquet(self.output / "signals.parquet")
             for row in signals.iter_rows(named=True):
                 path = (self.output / row["signal"]).resolve()
-                if not path.is_relative_to(self.output.resolve()) or (
-                    path.stat().st_size != row["bytes"]
-                ) or (verify_hashes and file_hash(path) != row["sha256"]):
+                if (
+                    not path.is_relative_to(self.output.resolve())
+                    or (path.stat().st_size != row["bytes"])
+                    or (verify_hashes and file_hash(path) != row["sha256"])
+                ):
                     raise ValueError(f"Export signal differs: {path}")
             self.index = pl.read_parquet(self.output / "window_index.parquet")
             self.segments = pl.read_parquet(self.output / "segments.parquet")
@@ -989,7 +999,12 @@ class SequenceDataset:
             self.timings = manifest.get("timings_seconds", {})
             self._completed_source = fingerprint(self.session.manifest)
             self._completed_parameters = (self.gap_seconds, self.shard_windows)
-            return self.index.group_by("duration").len().rename({"len": "windows"}).sort("duration")
+            return (
+                self.index.group_by("duration")
+                .len()
+                .rename({"len": "windows"})
+                .sort("duration")
+            )
         expected = dict(
             source_hz=120,
             target_hz=96,
@@ -1305,27 +1320,45 @@ class SequenceDataset:
 
         if self._completed_cache_valid() and (self.output / "manifest.json").exists():
             self.cache_hits.append("export")
-            return self.index.group_by("duration").len().rename({"len": "windows"}).sort("duration")
+            return (
+                self.index.group_by("duration")
+                .len()
+                .rename({"len": "windows"})
+                .sort("duration")
+            )
         if not hasattr(self, "segments") or not hasattr(self, "index"):
             raise ValueError("Run preprocessing stages and window indexing first")
         source_metadata = self.session.manifest
         parameters = dict(
-            source_hz=120, target_hz=96, normalization=None,
+            source_hz=120,
+            target_hz=96,
+            normalization=None,
             sampling="nearest source round; ties upward; no interpolation",
-            recording_gap_seconds=self.gap_seconds, hampel_seconds=0.5,
-            threshold=3, min_periods=5, durations=list(DURATIONS), overlap=0.5,
-            dtype="float32", tensor_order="time,receiver,subcarrier",
+            recording_gap_seconds=self.gap_seconds,
+            hampel_seconds=0.5,
+            threshold=3,
+            min_periods=5,
+            durations=list(DURATIONS),
+            overlap=0.5,
+            dtype="float32",
+            tensor_order="time,receiver,subcarrier",
         )
         result = export_cached_segments(
-            self.output, self.output, self.index, self.segments,
-            source_metadata=source_metadata, parameters=parameters,
+            self.output,
+            self.output,
+            self.index,
+            self.segments,
+            source_metadata=source_metadata,
+            parameters=parameters,
         )
         self.index = pl.read_parquet(self.output / "window_index.parquet")
         self.signals = pl.read_parquet(self.output / "signals.parquet")
         self.timings["export_verify"] = result["seconds"]
         rows = self.segments.to_dicts()
         falls = [r for r in rows if r["activity_label"].endswith("_to_fall")]
-        representative = sorted(falls or rows, key=lambda r: (-r["samples"], r["segment_id"]))[0]["segment_id"]
+        representative = sorted(
+            falls or rows, key=lambda r: (-r["samples"], r["segment_id"])
+        )[0]["segment_id"]
         for segment in rows:
             if segment["segment_id"] != representative:
                 import shutil
@@ -1335,4 +1368,9 @@ class SequenceDataset:
                     shutil.rmtree(directory)
         self._completed_source = fingerprint(self.session.manifest)
         self._completed_parameters = (self.gap_seconds, self.shard_windows)
-        return self.index.group_by("duration").len().rename({"len": "windows"}).sort("duration")
+        return (
+            self.index.group_by("duration")
+            .len()
+            .rename({"len": "windows"})
+            .sort("duration")
+        )

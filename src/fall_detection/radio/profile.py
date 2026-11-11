@@ -27,9 +27,7 @@ SUPPORTED_BANDS = frozenset({"2.4ghz", "5ghz"})
 # ESP-IDF's Indonesia country table permits channels 1--13 in 2.4 GHz.
 # Channel 14 is a Japan-only channel and must not leak into an ID profile.
 INDONESIA_2GHZ_CHANNELS = frozenset(range(1, 14))
-NON_DFS_5GHZ_CHANNELS = frozenset(
-    {36, 40, 44, 48, 149, 153, 157, 161, 165}
-)
+NON_DFS_5GHZ_CHANNELS = frozenset({36, 40, 44, 48, 149, 153, 157, 161, 165})
 
 
 def _text(value: Any, field: str) -> str:
@@ -60,7 +58,9 @@ class RadioDevice:
         device_id = _text(value.get("id"), f"devices[{index}].id")
         role = _text(value.get("role"), f"devices[{index}].role").lower()
         if role not in {"transmitter", "receiver", "gateway"}:
-            raise RadioProfileError(f"devices[{index}].role must be transmitter, receiver or gateway")
+            raise RadioProfileError(
+                f"devices[{index}].role must be transmitter, receiver or gateway"
+            )
         target = _text(value.get("target"), f"devices[{index}].target").lower()
         if target not in SUPPORTED_TARGETS:
             raise RadioProfileError(f"devices[{index}].target is unsupported: {target}")
@@ -106,11 +106,19 @@ class RadioInventory:
         if len(receivers) != len(raw_receivers):
             raise RadioProfileError("each receiver entry must be an object")
         if any(device.role != "receiver" for device in receivers):
-            raise RadioProfileError("inventory.receivers entries must have role receiver")
+            raise RadioProfileError(
+                "inventory.receivers entries must have role receiver"
+            )
 
         raw_gateway = value.get("gateway")
-        gateway = RadioDevice.from_mapping(raw_gateway, index=5) if isinstance(raw_gateway, Mapping) else None
-        if schema_version == 2 and (gateway is None or gateway.role != "gateway" or gateway.target != "esp32c6"):
+        gateway = (
+            RadioDevice.from_mapping(raw_gateway, index=5)
+            if isinstance(raw_gateway, Mapping)
+            else None
+        )
+        if schema_version == 2 and (
+            gateway is None or gateway.role != "gateway" or gateway.target != "esp32c6"
+        ):
             raise RadioProfileError("inventory v2 requires an ESP32-C6 gateway")
         if raw_gateway is not None and schema_version == 1:
             raise RadioProfileError("gateway requires inventory schema_version 2")
@@ -121,7 +129,12 @@ class RadioInventory:
             raise RadioProfileError("device IDs must be unique")
         if len(set(macs)) != len(macs):
             raise RadioProfileError("device MAC addresses must be unique")
-        return cls(schema_version=schema_version, transmitter=transmitter, receivers=receivers, gateway=gateway)
+        return cls(
+            schema_version=schema_version,
+            transmitter=transmitter,
+            receivers=receivers,
+            gateway=gateway,
+        )
 
     @classmethod
     def load(cls, path: Path) -> "RadioInventory":
@@ -156,12 +169,16 @@ class RadioProfile:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "RadioProfile":
-        if type(value.get("schema_version")) is not int or value["schema_version"] not in (1, 2):
+        if type(value.get("schema_version")) is not int or value[
+            "schema_version"
+        ] not in (1, 2):
             raise RadioProfileError("radio profile schema_version must be 1 or 2")
         profile_id = _text(value.get("profile_id"), "profile_id")
         country_code = _text(value.get("country_code"), "country_code").upper()
         if country_code != "ID":
-            raise RadioProfileError("only the Indonesia country profile (ID) is supported")
+            raise RadioProfileError(
+                "only the Indonesia country profile (ID) is supported"
+            )
         band = _text(value.get("band"), "band").lower().replace(" ", "")
         if band in {"2.4g", "2.4ghz", "24ghz"}:
             band = "2.4ghz"
@@ -170,17 +187,27 @@ class RadioProfile:
         else:
             raise RadioProfileError("band must be 2.4ghz or 5ghz")
         if value["schema_version"] == 2 and band != "5ghz":
-            raise RadioProfileError("radio profile version 2 requires 5ghz gateway sensing")
+            raise RadioProfileError(
+                "radio profile version 2 requires 5ghz gateway sensing"
+            )
         try:
             channel = int(value.get("channel"))
             bandwidth = int(value.get("bandwidth_mhz"))
             rate = int(value.get("nominal_rate_hz"))
         except (TypeError, ValueError) as exc:
-            raise RadioProfileError("channel, bandwidth_mhz, and nominal_rate_hz must be integers") from exc
+            raise RadioProfileError(
+                "channel, bandwidth_mhz, and nominal_rate_hz must be integers"
+            ) from exc
         if bandwidth != 20:
             raise RadioProfileError("only 20 MHz bandwidth is supported")
-        if isinstance(value.get("nominal_rate_hz"), bool) or rate != value.get("nominal_rate_hz") or not 50 <= rate <= (120 if value["schema_version"] == 2 else 100):
-            raise RadioProfileError("nominal_rate_hz must be an integer between 50 and 100 (120 in profile version 2)")
+        if (
+            isinstance(value.get("nominal_rate_hz"), bool)
+            or rate != value.get("nominal_rate_hz")
+            or not 50 <= rate <= (120 if value["schema_version"] == 2 else 100)
+        ):
+            raise RadioProfileError(
+                "nominal_rate_hz must be an integer between 50 and 100 (120 in profile version 2)"
+            )
         if band == "2.4ghz" and channel not in INDONESIA_2GHZ_CHANNELS:
             raise RadioProfileError("2.4ghz channel is not permitted in Indonesia")
         if band == "5ghz":
@@ -188,14 +215,24 @@ class RadioProfile:
                 raise RadioProfileError(
                     "5ghz channel must be a supported non-DFS channel"
                 )
-        return cls(value["schema_version"], profile_id, country_code, band, channel, bandwidth, rate)
+        return cls(
+            value["schema_version"],
+            profile_id,
+            country_code,
+            band,
+            channel,
+            bandwidth,
+            rate,
+        )
 
     @classmethod
     def load(cls, path: Path) -> "RadioProfile":
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise RadioProfileError(f"unable to read radio profile {path}: {exc}") from exc
+            raise RadioProfileError(
+                f"unable to read radio profile {path}: {exc}"
+            ) from exc
         if not isinstance(value, Mapping):
             raise RadioProfileError("radio profile root must be an object")
         return cls.from_mapping(value)

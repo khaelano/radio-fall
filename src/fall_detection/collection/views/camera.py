@@ -51,7 +51,8 @@ class CameraPreview:
             self.image.clear()
             self.image.setText(
                 "Waiting for camera frames"
-                if detail == "waiting for camera frames" else "Camera unavailable"
+                if detail == "waiting for camera frames"
+                else "Camera unavailable"
             )
         elif frame is not None:
             image = self.QtGui.QImage(

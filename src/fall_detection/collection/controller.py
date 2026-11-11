@@ -301,7 +301,9 @@ class SessionController:
         with self._lock:
             if self._state is not SessionState.SETUP:
                 raise RuntimeError("session has already started")
-            store, saved = SessionArtifactStore.reopen(root, self._environment, self._recording_io)
+            store, saved = SessionArtifactStore.reopen(
+                root, self._environment, self._recording_io
+            )
             try:
                 if self.protocol.source_hash != saved.protocol.source_hash:
                     raise ValueError("resume must use the saved session protocol")
@@ -316,16 +318,27 @@ class SessionController:
                         with backup.open("xb") as stream:
                             stream.write(original)
                     value = json.loads(original)
-                    value.update(status="invalid",
-                                 interruption_reason="collector restarted before attempt resolution",
-                                 invalidated_on_resume_monotonic_ns=now)
+                    value.update(
+                        status="invalid",
+                        interruption_reason="collector restarted before attempt resolution",
+                        invalidated_on_resume_monotonic_ns=now,
+                    )
                     _write_json(path, value)
-                    store.event("attempt_invalidated_on_resume", now,
-                                trial_ordinal=value["trial_ordinal"], path=str(path.relative_to(store.root)))
+                    store.event(
+                        "attempt_invalidated_on_resume",
+                        now,
+                        trial_ordinal=value["trial_ordinal"],
+                        path=str(path.relative_to(store.root)),
+                    )
                 for ordinal in saved.recovered_resolutions:
-                    store.event("trial_resolved", now, trial_ordinal=ordinal,
-                                attempt=saved.attempt_numbers.get(ordinal, 0),
-                                disposition="accepted", recovered_from_attempt=True)
+                    store.event(
+                        "trial_resolved",
+                        now,
+                        trial_ordinal=ordinal,
+                        attempt=saved.attempt_numbers.get(ordinal, 0),
+                        disposition="accepted",
+                        recovered_from_attempt=True,
+                    )
                 store.mark_resumed(now, self._environment)
             except BaseException:
                 store._event_file.close()
@@ -333,7 +346,9 @@ class SessionController:
             self._store, self._session_id = store, store.session_id
             self._trial_index = saved.trial_index
             self._attempt_numbers = dict(saved.attempt_numbers)
-            self._health = replace(self._health, radio_live=False, clock_sync_ready=False)
+            self._health = replace(
+                self._health, radio_live=False, clock_sync_ready=False
+            )
             self._state = SessionState.READY
             self._message = (
                 f"resumed at trial {saved.trial_index + 1}; "
@@ -352,7 +367,9 @@ class SessionController:
                 except (OSError, RuntimeError, BufferError) as exc:
                     self._accept_requested = False
                     self._attempt_status = "invalid"
-                    self._message = f"acceptance failed: {exc}; retry or skip this attempt"
+                    self._message = (
+                        f"acceptance failed: {exc}; retry or skip this attempt"
+                    )
             current = self._clock() if now is None else now
             if (
                 self._state is SessionState.COUNTDOWN
@@ -609,7 +626,11 @@ class SessionController:
             raise RuntimeError("accept is only available during review")
         if self._attempt_status == "invalid":
             raise RuntimeError("an invalid attempt cannot be accepted")
-        if self._recording_io and self._last_capture and not self._last_capture.writes_complete:
+        if (
+            self._recording_io
+            and self._last_capture
+            and not self._last_capture.writes_complete
+        ):
             self._accept_requested = True
             self._message = "accept queued; saving recording in the background"
             return

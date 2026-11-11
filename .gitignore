@@ -22,15 +22,8 @@ src/*.egg-info/
 # Thesis drafts and generated exports are local working files.
 /draft/
 
-# Local datasets and artifacts; keep the directory guides versioned.
-/data/*
-!/data/README.md
-!/data/annotations/
-/data/annotations/*
-!/data/annotations/README.md
-!/data/splits/
-/data/splits/*
-!/data/splits/README.md
+# Local datasets and processed artifacts stay outside Git.
+/data/
 
 # Codex local build and validation artifacts
 .codex-build/

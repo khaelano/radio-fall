@@ -27,8 +27,10 @@ src/*.egg-info/
 # Regenerable figures
 /docs/figures/
 
-# Local notebook runs, figures, and temporary outputs; models are tracked via DVC.
-/artifacts/
+# Artifact subdirectories are DVC outputs; retain their metadata in Git.
+/artifacts/*
+!/artifacts/*.dvc
+!/artifacts/.gitignore
 
 # Codex artifacts
 .codex-build/

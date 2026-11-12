@@ -15,9 +15,16 @@ retained model-pilot results are summarized in
 [fall model pilots](reports/fall-model-pilots.md).
 
 Raw participant recordings are immutable. Recordings and reusable derived
-datasets belong under `data/` and are versioned with DVC. Local notebook runs,
-metrics, and figures belong under ignored `artifacts/notebooks/`.
-Model bundles belong under `models/sequence/`, tracked by `models/sequence.dvc`.
+datasets belong under `data/` and are versioned with DVC. Notebook run history
+(including checkpoints and normalizers) belongs under
+`artifacts/notebooks/<notebook-name>/<run-id>/`. Latest verified ONNX bundles
+belong under `artifacts/model/<model-name>/`. The two directories are versioned
+independently by `artifacts/notebooks.dvc` and `artifacts/model.dvc`, with contents
+excluded from Git.
+Retired `data/processed/amplitude_sequence_v2/` and `_v3/` were removed from
+the workspace; current exports use `amplitude_sequence/{96,120}hz/`. Historical
+split tables can still reference the retired paths and require the earlier DVC
+snapshot/cache for replay. Their cache was retained during cleanup.
 Use the safe-prune utility to inspect eligible local cleanup candidates. See
 the [data layout](../data/README.md) and [dataset format](dataset-format.md).
 

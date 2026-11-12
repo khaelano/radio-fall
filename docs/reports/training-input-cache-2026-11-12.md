@@ -32,8 +32,8 @@ notebook can unnecessarily fall back to RAM despite low live tensor allocation.
 
 The check reused the 120 Hz split and 2-second normalizer from run
 `20261112T043926419689Z`. Its split and metrics now live under
-`artifacts/notebooks/03_training/<run-id>/`; normalizers and checkpoints live
-under `models/sequence/<run-id>/`. These files were moved from the former
+`artifacts/notebooks/03_training/<run-id>/`, together with normalizers and
+checkpoints. These files were moved from the former
 `data/processed/pytorch_sequence_pilot/notebook/` location with hashes verified.
 Train, validation, and test contained 5,133, 1,522, and 1,525 windows respectively.
 Split SHA-256: `418b9a8ec2bd4ca40b91bfcffd8c1960a2c4f2ef612a1615de9068e473dd4bc9`.

@@ -38,8 +38,8 @@ recordings and research reports remain on disk.
 | `resources/Papers/` | Local, ignored literature library (PDFs plus Markdown conversions) |
 | [`tools/`](tools/README.md) | Paper, data, analysis, runtime, and draft tools |
 | `data/` | Raw recordings and reusable derived datasets, versioned with DVC |
-| `artifacts/notebooks/` | Local notebook run metrics, splits, and figures; ignored by Git |
-| [`models/`](models/README.md) | Sequence checkpoints, normalizers, and ONNX bundles; binaries versioned with DVC |
+| `artifacts/notebooks/` | History grouped by notebook and run, tracked by `artifacts/notebooks.dvc` |
+| `artifacts/model/` | Latest ONNX bundles by model name, tracked by `artifacts/model.dvc` |
 | [`notebooks/`](notebooks/README.md) | Current analysis and experiment notebooks |
 
 ## Setup

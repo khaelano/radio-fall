@@ -4,11 +4,12 @@ Current notebooks live in `latest/`. Start with the shared exploration and
 preprocessing path, then use the dedicated input and training experiments as
 needed:
 
-Local notebook runs, metrics, split tables, and figures go under the Git-ignored
-`artifacts/notebooks/` directory. Model checkpoints, configuration, normalizers,
-and exports go under `models/sequence/<run-id>/`, versioned by
-[`models/sequence.dvc`](../models/sequence.dvc). Recordings and reusable derived
-datasets remain in `data/`.
+Run history, including metrics, splits, checkpoints, normalizers, and ONNX
+exports, lives under `artifacts/notebooks/<notebook-name>/<run-id>/`.
+The latest verified ONNX bundles are published separately to
+`artifacts/model/<model-name>/`. These directories are versioned independently
+with `artifacts/notebooks.dvc` and `artifacts/model.dvc`; their contents are
+excluded from Git. Recordings and reusable derived datasets remain in `data/`.
 
 - `01_exploration.ipynb` explores session data and capture quality.
 - `01_01_amplitude_exp.ipynb` and `01_02_phase_exp.ipynb` compare amplitude
@@ -34,13 +35,14 @@ for a full run if GPU memory is insufficient.
 
 Add `--extra onnx` to the environment command for ONNX export. The final notebook
 cell writes models, matching training normalizers, and an input/output manifest
-under `models/sequence/<run-id>/onnx/full/` or `onnx/pilot/`. Inputs are prepared
+under the run’s `onnx/<mode>/<model-name>/` directory and copies the latest
+verified bundle to `artifacts/model/<model-name>/`. Inputs are prepared
 float32 sequences, with a dynamic batch axis (1–128) and fixed window/feature
 dimensions; outputs are fall logits. Preprocessing and normalization are not embedded in the
 graphs. The cell verifies batch sizes 1 and 2 against PyTorch before publishing
 each model. Set `ONNX_RUN` to an earlier `artifacts/notebooks/03_training/<run-id>/`
 to export its matching model bundle. Refresh model versions with
-`uv run dvc add models/sequence` after training/exporting.
+`uv run dvc add artifacts/notebooks artifacts/model` after training/exporting.
 Export uses `dynamo=True` (the `torch.export`-based exporter), opset 18, and
 embedded weights. The `onnx` extra includes ONNX Script for this exporter.
 

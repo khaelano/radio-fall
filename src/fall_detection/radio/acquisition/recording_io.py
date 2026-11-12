@@ -1,9 +1,11 @@
 """Python file-shaped interface to Rust's bounded recording worker."""
 
 from __future__ import annotations
-from pathlib import Path
+
 import json
+from pathlib import Path
 from typing import Any
+
 from .native import require_native
 
 
@@ -78,7 +80,7 @@ class RecordingIO:
         if self.compressed:
             if mode.rstrip("b") == "a" and path.exists():
                 raise ValueError(
-                    "Cannot append compressed frames to a legacy plain file"
+                    "Cannot append compressed frames to an existing plain file"
                 )
             path = Path(str(path) + ".zst")
         return _Stream(self._native.open(str(path), mode))

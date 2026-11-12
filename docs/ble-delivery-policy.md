@@ -122,6 +122,7 @@ counter checks remain necessary; synthetic tests are not throughput evidence.
 For a paired hardware comparison, use a new output directory:
 
 ```bash
+# Historical command; the BLE timing runner has been removed:
 uv run python -m fall_detection.radio.experiments.ble_timing \
   --receiver-config data/interim/ble/c6-receivers.json \
   --radio-profile configs/radio/profiles/indonesia_2g_ch6_80hz.json \

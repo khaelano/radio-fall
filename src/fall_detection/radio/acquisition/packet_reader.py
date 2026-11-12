@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-import time
-from typing import Callable, Optional
 
 from .buffer import RollingCsiBuffer
 from .protocol import CsiRecord
 from .recorder import CsiRecorder
-from .wire import CsiDatagramError, DecodedCsiPacket, ReceiverStats, decode_csi_packet
 from .telemetry import BackhaulTelemetrySnapshot
+from .wire import DecodedCsiPacket, ReceiverStats
 
 
 class BinaryCsiPacketReader:
@@ -23,11 +23,11 @@ class BinaryCsiPacketReader:
         buffer: RollingCsiBuffer,
         output_dir: Path,
         *,
-        receiver_mac: Optional[str] = None,
-        on_status: Optional[Callable[[str, bool], None]] = None,
+        receiver_mac: str | None = None,
+        on_status: Callable[[str, bool], None] | None = None,
         live_status: str = "binary CSI stream live",
-        record_sink: Optional[Callable[[CsiRecord, int], None]] = None,
-        profile_fingerprint: Optional[str] = None,
+        record_sink: Callable[[CsiRecord, int], None] | None = None,
+        profile_fingerprint: str | None = None,
         require_profile_fingerprint: bool = False,
     ) -> None:
         self.buffer = buffer
@@ -45,39 +45,20 @@ class BinaryCsiPacketReader:
         self.total_packets = 0
         self.foreign_packets = 0
         self.batch_packets = 0
-        self.legacy_packets = 0
         self.transport_missing = 0
         self.transport_reordered = 0
-        self.last_transport_sequence: Optional[int] = None
+        self.last_transport_sequence: int | None = None
         self.batch_missing = 0
         self.batch_reordered = 0
-        self.last_batch_sequence: Optional[int] = None
-        self.receiver_boot_id: Optional[int] = None
+        self.last_batch_sequence: int | None = None
+        self.receiver_boot_id: int | None = None
         self.receiver_restarts = 0
-        self.receiver_stats: Optional[ReceiverStats] = None
-        self.last_valid_time: Optional[float] = None
+        self.receiver_stats: ReceiverStats | None = None
+        self.last_valid_time: float | None = None
         self.firmware_messages: deque[str] = deque(maxlen=20)
-        self._recorder: Optional[CsiRecorder] = None
+        self._recorder: CsiRecorder | None = None
         self._stream_live = False
         self._identity_context = None
-
-    @property
-    def total_datagrams(self) -> int:
-        """Backward-compatible UDP counter name."""
-
-        return self.total_packets
-
-    @property
-    def foreign_datagrams(self) -> int:
-        """Backward-compatible UDP counter name."""
-
-        return self.foreign_packets
-
-    @property
-    def batch_datagrams(self) -> int:
-        """Backward-compatible UDP counter name."""
-
-        return self.batch_packets
 
     def telemetry_snapshot(self) -> BackhaulTelemetrySnapshot:
         """Return a read-only snapshot of host and available firmware counters."""
@@ -100,12 +81,6 @@ class BinaryCsiPacketReader:
             transmitter_stats=getattr(self, "transmitter_stats", None),
             gateway_stats=getattr(self, "gateway_stats", None),
         )
-
-    @property
-    def legacy_datagrams(self) -> int:
-        """Backward-compatible UDP counter name."""
-
-        return self.legacy_packets
 
     def _status(self, message: str, connected: bool) -> None:
         if self.on_status is not None:
@@ -146,35 +121,6 @@ class BinaryCsiPacketReader:
         self.last_transport_sequence = None
         self.last_batch_sequence = None
 
-    def _ingest_packet(self, data: bytes) -> bool:
-        return self.ingest_packet(data)
-
-    def ingest_packet(
-        self,
-        data: bytes,
-        *,
-        host_receive_monotonic_ns: int | None = None,
-        context: dict | None = None,
-        capture_clock: Callable[[int], int | None] | None = None,
-    ) -> bool:
-        """Accept a complete packet, returning false for validation rejection.
-
-        Storage exceptions propagate so a transport cannot ACK unaccepted data.
-        Transport context qualifies duplicates across transmitter/receiver epochs.
-        """
-        try:
-            packet = decode_csi_packet(data)
-        except (CsiDatagramError, ValueError):
-            self.total_packets += 1
-            self.malformed_lines += 1
-            return False
-        return self.ingest_decoded_packet(
-            packet,
-            host_receive_monotonic_ns=host_receive_monotonic_ns,
-            context=context,
-            capture_clock=capture_clock,
-        )
-
     def ingest_decoded_packet(
         self,
         packet: DecodedCsiPacket,
@@ -211,12 +157,11 @@ class BinaryCsiPacketReader:
                 ):
                     self.foreign_packets += 1
                     return False
-        elif self.require_profile_fingerprint:
-            if any(
-                not decoded.record.profile_fingerprint for decoded in packet.records
-            ):
-                self.foreign_packets += 1
-                return False
+        elif self.require_profile_fingerprint and any(
+            not decoded.record.profile_fingerprint for decoded in packet.records
+        ):
+            self.foreign_packets += 1
+            return False
 
         if context is not None:
             identity = tuple(
@@ -233,8 +178,6 @@ class BinaryCsiPacketReader:
         if packet.batch_sequence is not None:
             self.batch_packets += 1
             self._track_batch_sequence(packet.batch_sequence)
-        else:
-            self.legacy_packets += 1
         if packet.receiver_stats is not None:
             self.receiver_stats = packet.receiver_stats
 
@@ -258,7 +201,7 @@ class BinaryCsiPacketReader:
             # Each transmitted frame is captured about twice by the radio.  Keep
             # the first capture of a (sequence, tx timestamp) pair so a session
             # holds one row per sensing frame.  Rows without a transmit
-            # timestamp (legacy/UDP transports) are never deduplicated.
+            # timestamp are never deduplicated.
             key = None
             if record.tx_timestamp_us:
                 # Include the receiver so two receivers observing the same

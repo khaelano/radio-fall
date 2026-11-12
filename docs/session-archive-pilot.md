@@ -1,9 +1,10 @@
-# Raw session archive contract, versions 1 and 2
+# Session archive contract, version 2
 
 This is the accepted raw format for a closed schema-2 session. One ZIP64 file
 contains one complete session and Parquet representations of its receiver
-tables. Readers support the original version-1 archives and version-2 archives
-with directly recorded Zstandard members.
+tables. Readers accept version-2 archives with either plain or directly recorded
+Zstandard members. Version-1 raw archives are preserved unchanged; use the
+verified copies in `data/normalized/sessions/` for current analysis.
 The collector publishes `<session-id>.zip` after the application exits and
 radio, video and buffered writers have closed. During collection it uses a
 recoverable schema-2 working directory whose CSI CSVs, radio/clock timing,
@@ -19,7 +20,7 @@ Resuming a working session produces a new numbered archive revision on exit.
 ## Layout and preservation
 
 - `manifest.json` is UTF-8 JSON with `format` set to
-  `fall-detection-session-archive`, `version` set to `1` or `2`, `session_id`, and
+  `fall-detection-session-archive`, `version` set to `2`, `session_id`, and
   `files` and `tables` arrays.
 - `original/<relative path>` contains every regular file from the source
   session, byte-for-byte. Paths use forward slashes, are relative to the
@@ -55,9 +56,9 @@ full verification. Extraction produces original logical files and verifies the
 logical hashes. Parquet tables map to logical CSV names. Finalization builds
 Parquet from a streaming decoder without restoring CSV files on disk.
 
-Resume appends complete frames to the compressed session event stream. Legacy
-plain-directory sessions retain plain writing when resumed, to avoid mixing
-encodings in an existing file. Incomplete final Zstandard frames are rejected;
+Resume appends complete frames to a compressed session event stream. It rejects
+a plain event stream rather than mixing encodings. Incomplete final Zstandard
+frames are rejected;
 a crashed recording with such a tail needs explicit recovery before resume.
 This change does not promise power-loss durability or change the pending-data
 loss window set by the recording flush interval.
@@ -127,6 +128,15 @@ contains 228 Parquet tables with 3,513,298 rows; their uncompressed ZIP-member
 sizes total 626,808,084 bytes. This is one session and does not predict the
 compression ratio for sessions containing video or different transport data.
 The original session remains unchanged.
+
+## Version-1 archive normalization
+
+`uv run python tools/processing/upgrade_session_archive.py <destination> <source...>`
+creates separate version-2 archives without modifying the source. It validates
+all declared member sizes and SHA256 checksums, records the source manifest hash,
+and verifies the complete output before publishing it. The `data/normalized.dvc`
+metadata versions the local normalized copies. The session path resolver checks
+the source manifest when both copies are present.
 
 ## Migration of existing sessions
 

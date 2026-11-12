@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fall_detection.collection.app import (
+from fall_detection.apps.collector.app import (
     COLLECTOR_FPS_CHOICES,
     COLLECTOR_FPS_DEFAULT,
     COLLECTOR_UI_INTERVAL_MS,
@@ -9,8 +9,8 @@ from fall_detection.collection.app import (
     _parser,
     frame_interval_ms,
 )
-from fall_detection.radio.visualization.app import GUI_FPS_CHOICES, GUI_INTERVAL_MS
-from fall_detection.radio.visualization.dashboard import DEFAULT_VIEW_SECONDS
+from fall_detection.apps.csi_viewer.app import GUI_FPS_CHOICES, GUI_INTERVAL_MS
+from fall_detection.presentation.radio.dashboard import DEFAULT_VIEW_SECONDS
 
 
 def test_collection_parser_defaults_to_gateway_protocol():

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
 import hashlib
 import json
-from pathlib import Path
 import struct
 import zlib
+from dataclasses import asdict, dataclass, fields
+from pathlib import Path
 
 from .profile import RadioInventory, RadioProfile, profile_fingerprint
 
@@ -24,7 +24,7 @@ def mac_bytes(value: str) -> bytes:
 class EspnowTransportConfig:
     """Bounded transport settings; timing reserves require hardware qualification."""
 
-    schema_version: int = 1
+    schema_version: int = 7
     channel: int = 6
     phy: str = "ht20_mcs0_lgi"
     slot_ms: int = 50
@@ -49,10 +49,9 @@ class EspnowTransportConfig:
     def __post_init__(self) -> None:
         if (
             type(self.schema_version) is not int
-            or self.schema_version not in (1, 2, 3, 4, 5, 6, 7)
+            or self.schema_version != 7
             or type(self.phy) is not str
             or self.phy not in {f"ht20_mcs{i}_lgi" for i in range(4)}
-            or (self.schema_version < 6 and self.phy != "ht20_mcs0_lgi")
         ):
             raise ValueError("unsupported ESP-NOW policy/PHY")
         limits = {
@@ -60,14 +59,14 @@ class EspnowTransportConfig:
             "slot_ms": (20, 500),
             "start_guard_ms": (1, 100),
             "return_reserve_ms": (1, 100),
-            "queue_capacity": (1, 96 if self.schema_version >= 7 else 64),
+            "queue_capacity": (1, 96),
             "maximum_age_ms": (1, 1000),
             "outstanding_batches": (1, 8),
             "early_return_idle_ms": (0, 20),
             "minimum_revisit_ms": (0, 1000),
             "send_completion_guard_ms": (1, 20),
             "ack_timeout_ms": (1, 500),
-            "maximum_retries": (0, 3 if self.schema_version >= 4 else 1),
+            "maximum_retries": (0, 3),
             "records_per_slot": (1, 64),
             "bin_hz": (1, 100),
             "delivery_grace_ms": (0, 1000),
@@ -88,21 +87,10 @@ class EspnowTransportConfig:
         ):
             raise ValueError("ACK and measurement options must be boolean")
         if not self.application_acknowledgements and (
-            self.schema_version < 5
-            or self.maximum_retries
-            or self.batch_acknowledgements
+            self.maximum_retries or self.batch_acknowledgements
         ):
             raise ValueError(
-                "ACK-less delivery requires version 5, zero retries and no bitmap ACKs"
-            )
-        if self.schema_version < 3 and (
-            self.minimum_revisit_ms
-            or self.send_completion_guard_ms != 10
-            or self.batch_acknowledgements
-            or self.measure_send_completions
-        ):
-            raise ValueError(
-                "revisit, send guard, bitmap ACK and measurement options require version 3"
+                "ACK-less delivery requires zero retries and no bitmap ACKs"
             )
         if self.start_guard_ms + self.return_reserve_ms >= self.slot_ms:
             raise ValueError("slot leaves no upload time")
@@ -111,12 +99,6 @@ class EspnowTransportConfig:
             >= self.slot_ms - self.start_guard_ms - self.return_reserve_ms
         ):
             raise ValueError("send guard leaves no upload budget")
-        if self.schema_version == 1 and (
-            self.outstanding_batches > 4 or self.early_return_idle_ms
-        ):
-            raise ValueError(
-                "legacy policy supports four batches and deadline return only"
-            )
         if (
             self.early_return_idle_ms
             >= self.slot_ms - self.start_guard_ms - self.return_reserve_ms
@@ -136,10 +118,6 @@ class EspnowTransportConfig:
         value = json.loads(path.read_text())
         if not isinstance(value, dict) or set(value) - {f.name for f in fields(cls)}:
             raise ValueError("unknown ESP-NOW policy fields")
-        if value.get("schema_version", 1) == 1:
-            value.setdefault("schema_version", 1)
-            value.setdefault("outstanding_batches", 4)
-            value.setdefault("early_return_idle_ms", 0)
         return cls(**value)
 
     def validate(
@@ -160,33 +138,17 @@ class EspnowTransportConfig:
             require_four and len(inventory.receivers) != 4
         ):
             raise ValueError("collection requires four registered C5 receivers")
-        if (
-            profile.schema_version >= 2 or profile.nominal_rate_hz > 100
-        ) and self.schema_version < 6:
-            raise ValueError("sensing above 100 Hz requires transport version 6")
         if inventory.gateway is None or inventory.gateway.target != "esp32c6":
             raise ValueError("inventory requires an identified ESP32-C6 gateway")
 
     def fingerprint(self, inventory: RadioInventory, profile: RadioProfile) -> str:
         """Fingerprint policy, both channels, PHY and ordered physical identities."""
         policy = asdict(self)
-        if self.schema_version < 5:
-            policy.pop("application_acknowledgements")
-        if self.schema_version < 3:
-            for key in (
-                "minimum_revisit_ms",
-                "send_completion_guard_ms",
-                "batch_acknowledgements",
-                "measure_send_completions",
-            ):
-                policy.pop(key)
-        if self.schema_version == 1:
-            policy.pop("early_return_idle_ms")
-        value = dict(
-            policy=policy,
-            inventory=inventory.as_dict(),
-            profile=profile.as_dict(),
-        )
+        value = {
+            "policy": policy,
+            "inventory": inventory.as_dict(),
+            "profile": profile.as_dict(),
+        }
         return hashlib.sha256(
             json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()[:16]
@@ -226,20 +188,17 @@ class EspnowTransportConfig:
             p[44 + i * 6 : 50 + i * 6] = mac_bytes(receiver.mac)
         p[68:84] = profile_fingerprint(profile, inventory).encode()
         p[84:100] = self.fingerprint(inventory, profile).encode()
-        if self.schema_version >= 3:
-            struct.pack_into(
-                "!4B",
-                p,
-                100,
-                self.early_return_idle_ms,
-                self.minimum_revisit_ms // 5,
-                self.send_completion_guard_ms,
-                int(self.batch_acknowledgements)
-                | (int(self.measure_send_completions) << 1)
-                | (int(not self.application_acknowledgements) << 2)
-                | (int(self.phy[len("ht20_mcs")]) << 3),
-            )
-        else:
-            struct.pack_into("!H", p, 100, self.early_return_idle_ms)
+        struct.pack_into(
+            "!4B",
+            p,
+            100,
+            self.early_return_idle_ms,
+            self.minimum_revisit_ms // 5,
+            self.send_completion_guard_ms,
+            int(self.batch_acknowledgements)
+            | (int(self.measure_send_completions) << 1)
+            | (int(not self.application_acknowledgements) << 2)
+            | (int(self.phy[len("ht20_mcs")]) << 3),
+        )
         struct.pack_into("!I", p, 104, zlib.crc32(p[:104]))
         return bytes(p)

@@ -11,13 +11,13 @@ controller and capture modules.
 | `radio/acquisition/recovery.py` | Classify recoverable interruptions, verify gateway identity and request a fresh idle relay epoch |
 | `src/native/radio_core/`, `radio/acquisition/native.py` | Native USB drain, ordered parallel decode, SIMD statistics/phase and bounded Python handoff |
 | `radio/acquisition/recording_io.py` | Native bounded recording worker; periodic batched disk writes |
-| `radio/visualization/live.py` | Compose the dashboard and transport panel; limit diagnostics to four updates per second |
-| `radio/visualization/pacing.py` | Shared display rates and timer intervals |
-| `radio/visualization/rendering.py` | Numerical preparation and a bounded one-snapshot/one-frame cache |
-| `radio/visualization/gaps.py` | Receiver-by-time heatmap of CSI availability at delivery deadlines |
-| `collection/app.py` | Parse options, gather metadata, compose the controller and windows, enter the Qt event loop |
-| `collection/runtime.py` | Evaluate health, advance trial timing, update both windows and drain a run on exit |
-| `collection/views/` | Setup/detail dialogs, operator controls, performer cues and presentation styles |
+| `presentation/radio/live.py` | Compose the dashboard and transport panel; limit diagnostics to four updates per second |
+| `presentation/radio/pacing.py` | Shared display rates and timer intervals |
+| `radio/preprocessing/rendering.py` | Numerical preparation and a bounded one-snapshot/one-frame cache |
+| `presentation/radio/gaps.py` | Receiver-by-time heatmap of CSI availability at delivery deadlines |
+| `apps/collector/app.py` | Parse options, gather metadata, compose the controller and windows, enter the Qt event loop |
+| `apps/collector/runtime.py` | Evaluate health, advance trial timing, update both windows and drain a run on exit |
+| `apps/collector/views/` | Setup/detail dialogs, operator controls, performer cues and presentation styles |
 | `collection/controller.py`, `capture.py` | Collection state transitions and immutable recording artifacts |
 
 `LiveRadio` binds configured identities without opening hardware. Its `start`
@@ -113,7 +113,7 @@ Reproduce the current implementation's check with:
 
 ```sh
 QT_QPA_PLATFORM=offscreen uv run python \
-  -m fall_detection.radio.visualization.benchmark \
+  -m fall_detection.presentation.radio.benchmark \
   --view controls --frames 80 --points 1200
 
 uv run pytest -q

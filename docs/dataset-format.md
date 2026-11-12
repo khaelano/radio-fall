@@ -5,13 +5,17 @@ where each file lives, what it contains, and how to read it without guessing.
 It is the reference for anyone building datasets, annotations, or models from
 `data/raw/sessions/`.
 
-**Raw container:** version-1 and version-2 ZIP64
-[session archives](session-archive-pilot.md) are supported. New collector
-streams use version 2 with direct Zstandard recording.
-The collector publishes one verified `<session-id>.zip` on application exit.
-The layout below describes its exact original members, working directories,
-and verified extractions. Use `fall_detection.storage.Recording` to open raw
-archives and legacy directories. Migration retains both representations.
+**Session container:** the current reader accepts version-2 ZIP64
+[session archives](session-archive-pilot.md). New collector streams use
+independent Zstandard frames; archives made from plain session directories also
+use version 2. Original version-1 archives remain immutable under
+`data/raw/sessions/`. Their verified version-2 copies are stored under
+`data/normalized/sessions/` and versioned separately with DVC.
+
+Use `fall_detection.storage.session_archive_path` to locate a session by ID and
+`Recording` to open its current archive. The resolver checks that a normalized
+copy's source-manifest fingerprint matches the raw archive when both exist.
+Working session directories remain supported for collection and review.
 
 **Inner artifact schema:** `2` (receiver-split). The obsolete schema 1 is
 described in [Legacy format](#8-legacy-format-and-cleanup) and is no longer
@@ -80,6 +84,7 @@ data/
 │   │                           └── usb_clock_sync.csv
 │   └── receivers/<receiver-id>/             ad-hoc captures, not sessions
 ├── archive/                                 compressed obsolete bundles (local)
+├── normalized/sessions/                     verified version-2 copies
 ├── interim/                                 extracted windows and features
 ├── annotations/                             reviewed labels
 ├── processed/                               model-ready dataset versions
@@ -1028,10 +1033,9 @@ USB-only sessions do not require these sidecars.
 
 ## Scheduled ESP-NOW gateway sidecars
 
-The transmitter reference may use `usb`, the older experimental `ble` path, or
-the dedicated `espnow_uart` companion path. The transport manifest records
+The transmitter reference uses `usb` or the dedicated `espnow_uart` companion path. The transport manifest records
 `transmitter_link`; collection also snapshots it in the session environment.
-All three retain the original C5 round timestamps and the same CSI row schema.
+Both retain the original C5 round timestamps and the same CSI row schema.
 Relay mode adds `relay_*` diagnostics to gateway status events, and records a
 ten-second minimum baseline for reference-clock drift fitting. See the
 [UART relay procedure](uart-transmitter-relay.md) for failure handling and
@@ -1042,7 +1046,7 @@ ordered inventory, sensing profile and gateway policy. Attempt CSV formats are
 unchanged; `gateway_timing.jsonl` records run/boot identities, transmitter enqueue
 reference, mapped host capture time and clock uncertainty alongside each CSI row.
 Readers require that sidecar for capture-time alignment and do not fall back to
-USB arrival times. Historical `ble_timing.jsonl` remains supported.
+USB arrival times. Historical BLE timing sidecars are not supported by the current analysis tools.
 
 Session journals under `transport/gateway/<run-id>/` contain versioned manifests,
 CRC-protected complete envelopes, acceptance events, raw grants/clock/status
@@ -1190,10 +1194,5 @@ metadata hashes. Validate the file sizes before loading and compare hashes for
 a full integrity audit. The Btrfs `compression=none` property applies only to
 new signal files; NPY loading does not depend on Btrfs.
 
-To migrate a verified v1 export, run
-`uv run python tools/processing/migrate_sequence_segments.py <dataset>`. The converter
-reconstructs each segment from indexed windows, requires overlapping values
-and validity to agree, and publishes each NPY atomically. It preserves review
-tables, figures, and the representative audit segment. The full verification
-routine compares every indexed window with its v1 source, including values,
-validity, target, and row metadata. Raw recordings are never modified.
+Version-1 sequence exports are no longer supported. Generate current sequence
+stores from source sessions using the preprocessing notebook.

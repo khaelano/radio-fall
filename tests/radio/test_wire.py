@@ -3,22 +3,27 @@ from dataclasses import replace
 
 import pytest
 
-from fall_detection.radio.acquisition.protocol import format_csi_record, parse_csi_line
+from fall_detection.radio.acquisition.protocol import format_csi_record
+from fall_detection.radio.acquisition.protocol import parse_csi_line as _parse_csi_line
 from fall_detection.radio.acquisition.wire import (
     BATCH_HEADER_SIZE,
-    CsiDatagramError,
-    DecodedCsiDatagram,
     HEADER_SIZE,
     MAX_BATCH_RECORDS,
     MAX_DATAGRAM_SIZE,
     MAX_UDP_PAYLOAD,
+    CsiDatagramError,
+    DecodedCsiDatagram,
     ReceiverStats,
-    decode_csi_packet,
-    decode_csi_datagram,
     encode_csi_batch,
     encode_csi_datagram,
 )
 
+
+def parse_csi_line(line):
+    return replace(_parse_csi_line(line), profile_fingerprint="0123456789abcdef")
+
+
+from wire_reference import decode_csi_datagram, decode_csi_packet
 
 LINE = (
     "CSI_DATA,10,1a:00:00:00:00:00,-40,11,1,2,0,1,1,0,1,0,1,-95,3,11,0,"
@@ -59,7 +64,7 @@ def test_binary_wire_round_trip_preserves_metadata_and_csv():
 
     decoded = decode_csi_datagram(packet)
 
-    assert HEADER_SIZE == 71
+    assert HEADER_SIZE == 87
     assert len(packet) <= MAX_DATAGRAM_SIZE
     assert decoded.receiver_mac == "24:6f:28:aa:bb:cc"
     assert decoded.transport_sequence == 99
@@ -106,6 +111,8 @@ def test_binary_wire_handles_maximum_csi_payload():
     "mutator",
     [
         lambda packet: b"BAD!" + packet[4:],
+        lambda packet: packet[:4] + bytes([1]) + packet[5:],
+        lambda packet: packet[:4] + bytes([2]) + packet[5:],
         lambda packet: packet[:4] + bytes([9]) + packet[5:],
         lambda packet: packet[:-1],
         lambda packet: packet[: HEADER_SIZE - 1] + packet[HEADER_SIZE:],
@@ -132,19 +139,12 @@ def test_binary_wire_uses_explicit_network_byte_order():
     assert packet[22:26] == struct.pack("!I", 0x01020304)
 
 
-def test_packet_decoder_keeps_legacy_csi1_compatibility():
+def test_packet_decoder_rejects_unbatched_records():
     encoded = encode_csi_datagram(
-        parse_csi_line(LINE),
-        receiver_mac="24:6f:28:aa:bb:cc",
-        transport_sequence=7,
+        parse_csi_line(LINE), receiver_mac="24:6f:28:aa:bb:cc", transport_sequence=7
     )
-
-    packet = decode_csi_packet(encoded)
-
-    assert packet.boot_id is None
-    assert packet.batch_sequence is None
-    assert packet.receiver_stats is None
-    assert packet.records[0].transport_sequence == 7
+    with pytest.raises(CsiDatagramError):
+        decode_csi_packet(encoded)
 
 
 def test_batch_round_trip_preserves_four_records_and_stats():
@@ -199,7 +199,7 @@ def test_batch_accepts_two_large_clocked_records_below_payload_limit():
         receiver_stats=STATS,
     )
 
-    assert len(encoded) == 1366
+    assert len(encoded) == 1398
     assert len(decode_csi_packet(encoded).records) == 2
 
 

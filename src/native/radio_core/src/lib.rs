@@ -1,14 +1,18 @@
-mod amplitude;
+#[path = "low_level/bindings.rs"]
 mod bindings;
+#[path = "preprocessing/detector.rs"]
 mod detector;
+#[path = "low_level/framing.rs"]
 mod framing;
-mod hampel;
-mod numeric;
 #[cfg(unix)]
+#[path = "low_level/pipeline.rs"]
 mod pipeline;
+#[path = "low_level/recording.rs"]
 mod recording;
+#[path = "low_level/wire.rs"]
 mod wire;
 use pyo3::prelude::*;
+use radio_preprocessing::{amplitude, hampel};
 
 #[pymodule]
 fn _radio_native(m: &Bound<'_, PyModule>) -> PyResult<()> {

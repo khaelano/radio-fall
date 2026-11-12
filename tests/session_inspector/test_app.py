@@ -12,17 +12,17 @@ pytest.importorskip("pyqtgraph")
 
 from PySide6 import QtCore, QtWidgets
 
-from fall_detection.radio.acquisition.protocol import (
-    CSI_HEADER,
-    CsiRecord,
-    format_csi_record,
-)
-from fall_detection.session_inspector.app import (
+from fall_detection.apps.session_inspector.app import (
     SessionInspectorWindow,
     SignalsPanel,
     TextTableModel,
     ValuesPanel,
     _parser,
+)
+from fall_detection.radio.acquisition.protocol import (
+    CSI_HEADER,
+    CsiRecord,
+    format_csi_record,
 )
 from fall_detection.session_inspector.data import (
     TableData,

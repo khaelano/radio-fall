@@ -2,33 +2,33 @@
 
 from __future__ import annotations
 
-from collections import deque
-from dataclasses import asdict, dataclass
-from pathlib import Path
 import os
 import secrets
 import struct
-from threading import Event, Lock, Thread
-from typing import Any, Callable
 import time
+from collections import deque
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from threading import Event, Lock, Thread
+from typing import Any
 
-from ..espnow_config import EspnowTransportConfig, CONTROL, RESPONSE, ENVELOPE, ACK
+from ..espnow_config import ACK, CONTROL, ENVELOPE, RESPONSE, EspnowTransportConfig
 from ..profile import RadioInventory, RadioProfile, profile_fingerprint
 from .availability import AvailabilityGrid, RoundReceipts
 from .buffer import RollingCsiBuffer
+from .clock_sync import ClockSyncEstimator
+from .gateway_diagnostics import DeliveryRates, GatewayDiagnostics, ReceiverDiagnostics
 from .gateway_journal import GatewayJournal
 from .gateway_protocol import GatewayBatch, checked
-from .gateway_diagnostics import DeliveryRates, GatewayDiagnostics, ReceiverDiagnostics
 from .packet_reader import BinaryCsiPacketReader
-from .recorder import CsiRecorder
 from .protocol import CsiRecord
-from .clock_sync import ClockSyncEstimator
+from .recorder import CsiRecorder
 from .serial_framing import SerialFrameStreamDecoder, encode_serial_frame
 from .telemetry import BackhaulTelemetrySnapshot
 from .transmitter_reference import TransmitterReference
 from .usb_buffer import UsbReadBuffer
 from .wireless_reference import WirelessReferenceSerial
-
 
 # Yield optional plots well before the independent 200 ms ingestion deadline.
 PREVIEW_MAX_QUEUED_CHUNKS = 8
@@ -102,12 +102,10 @@ class GatewayReceiverManager:
     ) -> None:
         self.inventory, self.profile, self.output_dir = inventory, profile, output_dir
         self.transmitter_port, self.gateway_port = transmitter_port, gateway_port
-        if transmitter_link not in {"usb", "ble", "espnow_uart"}:
+        if transmitter_link not in {"usb", "espnow_uart"}:
             raise ValueError("unsupported transmitter link")
         self.transmitter_link = transmitter_link
-        self._wireless_prefix = (
-            "relay" if transmitter_link == "espnow_uart" else "wireless"
-        )
+        self._wireless_prefix = "relay"
         self._wireless_serial = None
         self._wireless_peer_baseline = None
         self._wireless_drop_baseline = None
@@ -224,21 +222,21 @@ class GatewayReceiverManager:
                 boot = struct.unpack_from("!I", data, 20)[0]
                 if state.status.get("boot_id", boot) != boot:
                     raise RuntimeError("receiver restarted; start a new run")
-                state.status = dict(
-                    boot_id=boot,
-                    state=data[6],
-                    grant=struct.unpack_from("!I", data, 24)[0],
-                    captured=struct.unpack_from("!I", data, 72)[0],
-                    dropped=struct.unpack_from("!I", data, 76)[0],
-                    expired=struct.unpack_from("!I", data, 80)[0],
-                    queued=struct.unpack_from("!H", data, 84)[0],
-                    departed_us=struct.unpack_from("!Q", data, 56)[0],
-                    returned_us=struct.unpack_from("!Q", data, 64)[0],
-                    transition_grant=struct.unpack_from("!I", data, 28)[0],
-                    peak=struct.unpack_from("!H", data, 86)[0],
-                    queue_event_loss=bool(data[7]),
-                    send_errors=struct.unpack_from("!I", data, 88)[0],
-                )
+                state.status = {
+                    "boot_id": boot,
+                    "state": data[6],
+                    "grant": struct.unpack_from("!I", data, 24)[0],
+                    "captured": struct.unpack_from("!I", data, 72)[0],
+                    "dropped": struct.unpack_from("!I", data, 76)[0],
+                    "expired": struct.unpack_from("!I", data, 80)[0],
+                    "queued": struct.unpack_from("!H", data, 84)[0],
+                    "departed_us": struct.unpack_from("!Q", data, 56)[0],
+                    "returned_us": struct.unpack_from("!Q", data, 64)[0],
+                    "transition_grant": struct.unpack_from("!I", data, 28)[0],
+                    "peak": struct.unpack_from("!H", data, 86)[0],
+                    "queue_event_loss": bool(data[7]),
+                    "send_errors": struct.unpack_from("!I", data, 88)[0],
+                }
                 state.connected = True
                 self._receiver_heartbeats[state.binding.receiver_id] = time.monotonic()
                 self.journal.event(
@@ -410,13 +408,13 @@ class GatewayReceiverManager:
             if not state.ingest_decoded_packet(
                 packet,
                 host_receive_monotonic_ns=arrival_ns,
-                context=dict(
-                    run_id=batch.run_id,
-                    transmitter_boot_id=batch.transmitter_boot_id,
-                    receiver_boot_id=batch.receiver_boot_id,
-                    transport="espnow_gateway",
-                    capture_clock_uncertainty_us=self.reference.estimator.estimate.uncertainty_us,
-                ),
+                context={
+                    "run_id": batch.run_id,
+                    "transmitter_boot_id": batch.transmitter_boot_id,
+                    "receiver_boot_id": batch.receiver_boot_id,
+                    "transport": "espnow_gateway",
+                    "capture_clock_uncertainty_us": self.reference.estimator.estimate.uncertainty_us,
+                },
                 capture_clock=self.reference.capture_time,
             ):
                 raise ValueError("CSI decoder rejected batch")
@@ -481,7 +479,7 @@ class GatewayReceiverManager:
                 arrival = time.monotonic_ns()
                 if data:
                     self._usb_buffer.put(data, arrival)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — thread error boundary
             if self._usb_stop.is_set():
                 self._shutdown_error = f"gateway USB shutdown failed to drain: {exc}"
                 self._fail(self._shutdown_error)
@@ -618,7 +616,7 @@ class GatewayReceiverManager:
                     last_errors = errors
                 if native_done:
                     break
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — thread error boundary
             if not self._stop.is_set():
                 self._fail(f"gateway ingestion failed: {exc}")
 
@@ -664,44 +662,44 @@ class GatewayReceiverManager:
             self.journal = GatewayJournal(
                 root,
                 self.run_id,
-                dict(
-                    host_processing=backend_info(),
-                    transport="espnow_gateway",
-                    transmitter_link=self.transmitter_link,
-                    host_clock_minimum_drift_span_us=10_000_000
+                {
+                    "host_processing": backend_info(),
+                    "transport": "espnow_gateway",
+                    "transmitter_link": self.transmitter_link,
+                    "host_clock_minimum_drift_span_us": 10_000_000
                     if self.transmitter_link != "usb"
                     else 0,
-                    host_usb_buffer=dict(
-                        reader_isolation="rust"
+                    "host_usb_buffer": {
+                        "reader_isolation": "rust"
                         if os.name == "posix" and self.serial_factory is None
                         else "thread",
-                        reader_process_fifo_bytes=0,
-                        capacity_bytes=self._usb_buffer.capacity_bytes,
-                        capacity_chunks=self._usb_buffer.capacity_chunks,
-                        maximum_age_ns=self._usb_buffer.maximum_age_ns,
-                        processing_group_max_chunks=8
+                        "reader_process_fifo_bytes": 0,
+                        "capacity_bytes": self._usb_buffer.capacity_bytes,
+                        "capacity_chunks": self._usb_buffer.capacity_chunks,
+                        "maximum_age_ns": self._usb_buffer.maximum_age_ns,
+                        "processing_group_max_chunks": 8
                         if os.name == "posix" and self.serial_factory is None
                         else 4,
-                        native_decoder_workers=2,
-                        native_completed_capacity_bytes=16 * 1024 * 1024,
-                        maximum_read_bytes=4096,
-                        read_timeout_ms=5,
-                    ),
-                    transport_config=asdict(self.config),
-                    transport_fingerprint=self.config.fingerprint(
+                        "native_decoder_workers": 2,
+                        "native_completed_capacity_bytes": 16 * 1024 * 1024,
+                        "maximum_read_bytes": 4096,
+                        "read_timeout_ms": 5,
+                    },
+                    "transport_config": asdict(self.config),
+                    "transport_fingerprint": self.config.fingerprint(
                         self.inventory, self.profile
                     ),
-                    inventory=self.inventory.as_dict(),
-                    profile=self.profile.as_dict(),
-                    recovery=self.recovery_context,
-                ),
+                    "inventory": self.inventory.as_dict(),
+                    "profile": self.profile.as_dict(),
+                    "recovery": self.recovery_context,
+                },
                 recording_io=self.recording_io,
             )
             if self.recovery_context:
                 self.journal.event("run_resuming", **self.recovery_context)
             if self.transmitter_link != "usb":
                 self._open_gateway()
-                expected_version = 1 if self.transmitter_link == "espnow_uart" else 2
+                expected_version = 1
                 if self.gateway_status.get(
                     f"{self._wireless_prefix}_version"
                 ) != expected_version or not self.gateway_status.get(
@@ -710,10 +708,7 @@ class GatewayReceiverManager:
                     raise RuntimeError(
                         "gateway lacks a paired connectionless transmitter bridge for the selected link"
                     )
-                if (
-                    self.transmitter_link == "espnow_uart"
-                    and self.gateway_status.get("relay_transport") != "espnow_uart"
-                ):
+                if self.gateway_status.get("relay_transport") != "espnow_uart":
                     raise RuntimeError("gateway relay transport mismatch")
                 deadline = time.monotonic() + 8
                 while (
@@ -810,7 +805,7 @@ class GatewayReceiverManager:
                 self.receipts.advance(now)
                 for key, heartbeat in self._receiver_heartbeats.items():
                     self.readers[key].connected = time.monotonic() - heartbeat < 2.5
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — thread error boundary
             self._fail(str(exc))
         finally:
             if self.reference:
@@ -818,7 +813,7 @@ class GatewayReceiverManager:
                     self.reference.command(
                         struct.pack("!4sQ", b"CGSP", self.run_id), timeout=0.5
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 — best-effort stop
                     pass  # The independent host-control lease also stops sensing.
             # A host stop ends grants; records already forwarded may finish ingestion.
             until = time.monotonic() + self.config.drain_ms / 1000
@@ -830,7 +825,7 @@ class GatewayReceiverManager:
             if self.connection:
                 try:
                     self._write(CONTROL, struct.pack("!4sQ", b"CGSP", self.run_id))
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 — best-effort stop
                     pass
             self._stop_gateway_usb()
             if self.journal:
@@ -849,11 +844,13 @@ class GatewayReceiverManager:
             if owned_io:
                 try:
                     self.recording_io.close()
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 — thread error boundary
                     self._recording_shutdown_error = exc
                     self._fail(f"recording shutdown failed: {exc}")
 
     def _open_gateway(self) -> None:
+        if self.serial_factory is None and os.name != "posix":
+            raise RuntimeError("Native gateway acquisition requires a POSIX host")
         factory = self.serial_factory
         if factory is None:
             from serial import Serial
@@ -863,7 +860,7 @@ class GatewayReceiverManager:
             self.gateway_port, 921600, timeout=0.005, write_timeout=0.5, exclusive=True
         )
         if os.name == "posix" and self.serial_factory is None:
-            from .native import require_native, PipelineStats
+            from .native import PipelineStats, require_native
 
             self._native_pipeline = require_native().Pipeline(
                 self.connection.fileno(), maximum_age_ns=self._usb_buffer.maximum_age_ns

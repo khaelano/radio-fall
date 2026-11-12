@@ -1,5 +1,6 @@
 import json
 import zipfile
+
 import pytest
 
 from fall_detection.radio.acquisition.recording_io import RecordingIO
@@ -31,12 +32,27 @@ def test_native_writer_emits_zstd_before_close_and_appends_complete_frames(tmp_p
         read_bytes(path)
 
 
+def test_compressed_writer_rejects_plain_append_without_modifying_file(tmp_path):
+    path = tmp_path / "events.jsonl"
+    path.write_bytes(b"original\n")
+    writer = RecordingIO(compressed=True)
+    try:
+        with pytest.raises(ValueError, match="existing plain file"):
+            writer.open(path, "a")
+        assert path.read_bytes() == b"original\n"
+        assert not path.with_suffix(".jsonl.zst").exists()
+    finally:
+        writer.close()
+
+
 def test_archive_keeps_compressed_bytes_and_exposes_original_logical_files(tmp_path):
     root = tmp_path / "session"
     receiver = root / "trials/001/attempt_01/receivers/rx-1"
     receiver.mkdir(parents=True)
     (root / "session.json").write_text(
-        json.dumps(dict(artifact_schema_version=2, status="ended", session_id="test"))
+        json.dumps(
+            {"artifact_schema_version": 2, "status": "ended", "session_id": "test"}
+        )
     )
     writer = RecordingIO(compressed=True)
     stream = writer.open(receiver / "csi.csv", "x")

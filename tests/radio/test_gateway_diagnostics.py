@@ -1,20 +1,20 @@
 """Gateway status uses native counters, real delivery windows and explicit unknowns."""
 
-from dataclasses import replace
 import os
 import struct
 import time
 import zlib
+from dataclasses import replace
 
 import pytest
+from test_gateway import batch, manager
 
-from fall_detection.radio.acquisition.gateway_diagnostics import DeliveryRates
-from fall_detection.radio.espnow_config import EspnowTransportConfig
-from fall_detection.radio.visualization.transport_status import (
+from fall_detection.presentation.radio.transport_status import (
     format_transport_status,
     receiver_cells,
 )
-from test_gateway import batch, manager
+from fall_detection.radio.acquisition.gateway_diagnostics import DeliveryRates
+from fall_detection.radio.espnow_config import EspnowTransportConfig
 
 
 def test_delivery_window_decays_without_new_packets_and_keeps_receivers_separate():
@@ -86,14 +86,14 @@ def test_status_decodes_actual_send_counter_and_flags_stale_reports(tmp_path):
         struct.pack_into("!I", data, 92, zlib.crc32(data[:92]))
         m._event("radio_event", payload_hex=data.hex())
         now = time.monotonic_ns()
-        m.gateway_status = dict(
-            configured=True,
-            received=400,
-            forwarded=399,
-            rejected=2,
-            usb_errors=1,
-            queued=3,
-        )
+        m.gateway_status = {
+            "configured": True,
+            "received": 400,
+            "forwarded": 399,
+            "rejected": 2,
+            "usb_errors": 1,
+            "queued": 3,
+        }
         m._gateway_status_ns = now
         snapshot = m.diagnostics(now_ns=now)
         receiver = snapshot.receivers[0]
@@ -169,7 +169,8 @@ def test_shared_gateway_panel_switches_selected_row_without_mixing_counters(tmp_
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
-    from fall_detection.radio.visualization.transport_status import GatewayStatusPanel
+
+    from fall_detection.presentation.radio.transport_status import GatewayStatusPanel
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     m = configured_manager(tmp_path)

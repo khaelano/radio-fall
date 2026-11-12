@@ -1,14 +1,14 @@
 import pytest
 
-from fall_detection.radio.acquisition.buffer import RollingCsiBuffer
-from fall_detection.radio.visualization.app import (
+from fall_detection.apps.csi_viewer.app import (
     GUI_FPS_CHOICES,
     GUI_FPS_DEFAULT,
     GUI_INTERVAL_MS,
-    LiveState,
     _parser,
     frame_interval_ms,
 )
+from fall_detection.radio.acquisition.buffer import RollingCsiBuffer
+from fall_detection.radio.state import LiveState
 
 
 def test_gui_uses_constant_sixteen_or_twenty_four_fps():

@@ -1,9 +1,9 @@
 """Version-3 cadence, guard and selective ACK contracts against the real C header."""
 
-from dataclasses import replace
-from pathlib import Path
 import shutil
 import subprocess
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -13,7 +13,7 @@ from fall_detection.radio.profile import RadioInventory, RadioProfile
 
 def tuning_policy():
     return EspnowTransportConfig(
-        schema_version=3,
+        schema_version=7,
         outstanding_batches=8,
         minimum_revisit_ms=150,
         batch_acknowledgements=True,
@@ -23,31 +23,40 @@ def tuning_policy():
 
 def identities():
     inventory = RadioInventory.from_mapping(
-        dict(
-            schema_version=2,
-            transmitter=dict(
-                id="tx", role="transmitter", target="esp32c5", mac="02:00:00:00:00:01"
-            ),
-            receivers=[
-                dict(
-                    id="rx", role="receiver", target="esp32c5", mac="02:00:00:00:00:02"
-                )
+        {
+            "schema_version": 2,
+            "transmitter": {
+                "id": "tx",
+                "role": "transmitter",
+                "target": "esp32c5",
+                "mac": "02:00:00:00:00:01",
+            },
+            "receivers": [
+                {
+                    "id": "rx",
+                    "role": "receiver",
+                    "target": "esp32c5",
+                    "mac": "02:00:00:00:00:02",
+                }
             ],
-            gateway=dict(
-                id="gw", role="gateway", target="esp32c6", mac="02:00:00:00:00:03"
-            ),
-        )
+            "gateway": {
+                "id": "gw",
+                "role": "gateway",
+                "target": "esp32c6",
+                "mac": "02:00:00:00:00:03",
+            },
+        }
     )
     profile = RadioProfile.from_mapping(
-        dict(
-            schema_version=1,
-            profile_id="test",
-            country_code="ID",
-            band="5ghz",
-            channel=44,
-            bandwidth_mhz=20,
-            nominal_rate_hz=80,
-        )
+        {
+            "schema_version": 1,
+            "profile_id": "test",
+            "country_code": "ID",
+            "band": "5ghz",
+            "channel": 44,
+            "bandwidth_mhz": 20,
+            "nominal_rate_hz": 80,
+        }
     )
     return inventory, profile
 
@@ -56,24 +65,24 @@ def test_tuning_policy_encoding_and_fingerprints():
     inv, profile = identities()
     policy = tuning_policy()
     raw = policy.encode(123, inv, profile)
-    assert len(raw) == 108 and raw[4] == 3 and raw[100:104] == bytes([0, 30, 10, 3])
+    assert len(raw) == 108 and raw[4] == 7 and raw[100:104] == bytes([0, 30, 10, 3])
     for changes in [
-        dict(minimum_revisit_ms=200),
-        dict(send_completion_guard_ms=5),
-        dict(batch_acknowledgements=False),
-        dict(measure_send_completions=False),
+        {"minimum_revisit_ms": 200},
+        {"send_completion_guard_ms": 5},
+        {"batch_acknowledgements": False},
+        {"measure_send_completions": False},
     ]:
         assert replace(policy, **changes).fingerprint(
             inv, profile
         ) != policy.fingerprint(inv, profile)
     for changes in [
-        dict(schema_version=2),
-        dict(minimum_revisit_ms=151),
-        dict(minimum_revisit_ms=1005),
-        dict(send_completion_guard_ms=0),
-        dict(send_completion_guard_ms=21),
-        dict(batch_acknowledgements=1),
-        dict(measure_send_completions=1),
+        {"schema_version": 2},
+        {"minimum_revisit_ms": 151},
+        {"minimum_revisit_ms": 1005},
+        {"send_completion_guard_ms": 0},
+        {"send_completion_guard_ms": 21},
+        {"batch_acknowledgements": 1},
+        {"measure_send_completions": 1},
     ]:
         with pytest.raises(ValueError):
             replace(policy, **changes)

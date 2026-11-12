@@ -1,20 +1,60 @@
-"""Shared access to raw session archives and legacy session directories."""
+"""Shared access to session archives and collection working directories."""
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import hashlib
 import json
-from pathlib import Path, PurePosixPath
 import tempfile
 import zipfile
-from typing import BinaryIO, Iterator, TYPE_CHECKING
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, BinaryIO, Self
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
-from .compressed import open_binary, decoded_stream
+from .compressed import decoded_stream, open_binary
 from .session_archive import _inventory, verify_archive
+
+
+def session_archive_path(root: Path, session_id: str) -> Path:
+    """Locate a normalized session or a newly collected raw archive.
+
+    Args:
+        root: Repository root containing the data directory.
+        session_id: Session identifier without a path or extension.
+
+    Returns:
+        The normalized archive if present, otherwise the raw archive path.
+
+    Raises:
+        ValueError: The identifier is not a single path component.
+    """
+    if (
+        not session_id
+        or session_id in {".", ".."}
+        or Path(session_id).name != session_id
+    ):
+        raise ValueError("invalid session identifier")
+    normalized = root / "data/normalized/sessions" / f"{session_id}.zip"
+    raw = root / "data/raw/sessions" / f"{session_id}.zip"
+    if not normalized.is_file():
+        return raw
+    with zipfile.ZipFile(normalized) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+    if manifest.get("session_id") != session_id or manifest.get("version") != 2:
+        raise ValueError("normalized session identity or version differs")
+    if raw.is_file():
+        with zipfile.ZipFile(raw) as archive:
+            source_hash = hashlib.sha256(archive.read("manifest.json")).hexdigest()
+        provenance = manifest.get("normalized_from")
+        if (
+            not isinstance(provenance, dict)
+            or provenance.get("manifest_sha256") != source_hash
+        ):
+            raise ValueError("normalized session source manifest differs")
+    return normalized
 
 
 class Recording:
@@ -37,7 +77,7 @@ class Recording:
             )
         )
 
-    def __enter__(self) -> Recording:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args) -> None:
@@ -80,12 +120,13 @@ class Recording:
     ) -> pa.Table:
         """Read a CSV's Parquet representation as an Arrow table of strings.
 
-        Legacy CSV inputs use the same lossless string column contract.
+        Working-directory CSV inputs use the same lossless string column contract.
         """
-        import pyarrow as pa
-        import pyarrow.parquet as pq
         import csv
         import io
+
+        import pyarrow as pa
+        import pyarrow.parquet as pq
 
         if self.manifest:
             entry = next(

@@ -2,14 +2,13 @@ import numpy as np
 
 from fall_detection.radio.acquisition.buffer import BufferSnapshot, RollingCsiBuffer
 from fall_detection.radio.acquisition.protocol import CsiRecord, parse_csi_line
-from fall_detection.radio.visualization.rendering import (
+from fall_detection.radio.preprocessing.rendering import (
     VALID_SUBCARRIERS,
     RenderGate,
     phase_column,
     prepare_frame,
     representative_subcarriers,
 )
-
 
 PHASE_MODE_CALIBRATED = "Calibrated phase"
 PHASE_MODE_CHANGE = "Phase change"
@@ -18,13 +17,15 @@ PHASE_MODE_RAW = "Raw phase (diagnostic)"
 
 def test_dashboard_defers_plot_work_until_acquisition_catches_up(monkeypatch):
     import os
+
     import pytest
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
-    from fall_detection.radio.visualization.dashboard import CsiDashboardPanel
-    from fall_detection.radio.visualization.state import LiveState
+
+    from fall_detection.presentation.radio.dashboard import CsiDashboardPanel
+    from fall_detection.radio.state import LiveState
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     state = LiveState(120)
@@ -73,7 +74,7 @@ def test_phase_display_snapshot_preserves_frames_without_raw_csi_matrices():
     full = buffer.snapshot(seconds=3)
     for mode in (PHASE_MODE_CALIBRATED, PHASE_MODE_CHANGE, PHASE_MODE_RAW):
 
-        def frame(snapshot):
+        def frame(snapshot, mode=mode):
             return prepare_frame(
                 snapshot,
                 phase_mode=mode,
@@ -106,7 +107,7 @@ def test_phase_display_snapshot_preserves_frames_without_raw_csi_matrices():
 
 
 def _snapshot() -> BufferSnapshot:
-    indices = tuple(range(0, 32)) + tuple(range(-32, 0))
+    indices = tuple(range(32)) + tuple(range(-32, 0))
     row = tuple(float(index) for index in indices)
     return BufferSnapshot(
         timestamps=(0.0, 0.1),
@@ -154,7 +155,7 @@ def test_prepare_frame_reorders_serialized_slots_to_physical_order():
     )
 
     assert frame.sequence == 11
-    assert frame.subcarriers == tuple(range(-32, 0)) + tuple(range(0, 32))
+    assert frame.subcarriers == tuple(range(-32, 0)) + tuple(range(32))
     assert np.array_equal(frame.timestamps, np.array([-0.1, 0.0]))
     assert frame.amplitudes[0, 0] == -32.0
     assert frame.amplitudes[0, -1] == 31.0
@@ -212,7 +213,7 @@ def test_render_gate_is_independent_per_view_and_configuration():
 def test_frame_cache_reuses_arrays_and_invalidates_on_buffer_window_or_mode_change(
     monkeypatch,
 ):
-    from fall_detection.radio.visualization.rendering import CsiFrameCache
+    from fall_detection.radio.preprocessing.rendering import CsiFrameCache
 
     first, second = RollingCsiBuffer(), RollingCsiBuffer()
     record = CsiRecord(7, "02:00:00:00:00:01", -40, -95, 1, (4 + 2j,) * 64)
@@ -254,13 +255,15 @@ def test_dashboard_renders_duplicate_sequence_appends_and_reuses_control_frames(
     monkeypatch,
 ):
     import os
+
     import pytest
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
-    from fall_detection.radio.visualization.dashboard import CsiDashboardPanel
-    from fall_detection.radio.visualization.state import LiveState
+
+    from fall_detection.presentation.radio.dashboard import CsiDashboardPanel
+    from fall_detection.radio.state import LiveState
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     state = LiveState()
@@ -298,7 +301,12 @@ def test_cold_preview_prepares_bounded_work_without_changing_full_snapshot():
     records = [replace(base, sequence=i, timestamp_us=i * 8333) for i in range(5)]
     for record in records:
         buffer.append(record)
-    options = dict(seconds=3, max_records=2, budget_ns=8_000_000, clock_ns=lambda: 0)
+    options = {
+        "seconds": 3,
+        "max_records": 2,
+        "budget_ns": 8_000_000,
+        "clock_ns": lambda: 0,
+    }
     assert not buffer.prepare_phase_views(**options)
     assert sum(record.phase_views_ready for record in records) == 2
     assert not buffer.prepare_phase_views(**options)
@@ -331,13 +339,15 @@ def test_receiver_switch_clears_old_traces_and_waits_for_bounded_preparation(
 ):
     import os
     from dataclasses import replace
+
     import pytest
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
-    from fall_detection.radio.visualization.dashboard import CsiDashboardPanel
-    from fall_detection.radio.visualization.state import LiveState
+
+    from fall_detection.presentation.radio.dashboard import CsiDashboardPanel
+    from fall_detection.radio.state import LiveState
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     first, second = RollingCsiBuffer(), RollingCsiBuffer()
@@ -385,13 +395,15 @@ def test_preview_defers_records_arriving_after_budgeted_preparation(monkeypatch)
     """A radio burst between warmup and snapshot must not bypass the GUI budget."""
     import os
     from dataclasses import replace
+
     import pytest
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
-    from fall_detection.radio.visualization.dashboard import CsiDashboardPanel
-    from fall_detection.radio.visualization.state import LiveState
+
+    from fall_detection.presentation.radio.dashboard import CsiDashboardPanel
+    from fall_detection.radio.state import LiveState
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     state = LiveState(120)

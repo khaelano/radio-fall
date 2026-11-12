@@ -112,12 +112,12 @@ def _write_capture(attempt, *, corrupt=False):
         + "\n"
     )
     rows = [
-        dict(
-            schema_version=1,
-            sequence=record.sequence,
-            rx_radio_timestamp_us=record.timestamp_us,
-            capture_host_monotonic_ns=origin + offset,
-        )
+        {
+            "schema_version": 1,
+            "sequence": record.sequence,
+            "rx_radio_timestamp_us": record.timestamp_us,
+            "capture_host_monotonic_ns": origin + offset,
+        }
         for record, offset in zip(records, [1_200_000_000, 200_000_000], strict=True)
     ]
     if corrupt:
@@ -231,7 +231,8 @@ def test_video_and_all_signal_cursors_share_attempt_time(video_attempt):
     pytest.importorskip("PySide6")
     pytest.importorskip("pyqtgraph")
     from PySide6 import QtWidgets
-    from fall_detection.session_inspector.app import SignalsPanel
+
+    from fall_detection.apps.session_inspector.app import SignalsPanel
     from fall_detection.session_inspector.data import load_attempt_data
 
     _write_capture(video_attempt)
@@ -265,6 +266,7 @@ def test_video_viewer_shutdown_process_exits_cleanly():
     for _ in range(6):
         result = subprocess.run(
             [sys.executable, "-X", "faulthandler", "-m", "pytest", "-q", target],
+            check=False,
             env=dict(os.environ, QT_QPA_PLATFORM="offscreen", OPENBLAS_NUM_THREADS="1"),
             capture_output=True,
             text=True,
@@ -276,7 +278,8 @@ def test_video_viewer_shutdown_process_exits_cleanly():
 def test_video_panel_seeks_steps_and_clears_previous_attempt(video_attempt):
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
-    from fall_detection.session_inspector.video_panel import VideoPanel
+
+    from fall_detection.apps.session_inspector.video_panel import VideoPanel
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     panel = VideoPanel()

@@ -1,44 +1,46 @@
 """Cross-check native hot paths against preserved Python wire/scientific contracts."""
 
 import ctypes
-from dataclasses import replace
 import json
 import os
 import random
 import struct
 import subprocess
 import sys
-import time
 import threading
+import time
 import zlib
+from dataclasses import replace
 
 import numpy as np
 import pytest
 import serial
+from test_gateway import batch, manager
 
 from fall_detection import _radio_native as core
+from fall_detection.radio.acquisition.gateway_protocol import GatewayBatch
 from fall_detection.radio.acquisition.native import (
     NativeRecord,
     PipelineStats,
     gateway_batch,
 )
-from fall_detection.radio.acquisition.gateway_protocol import GatewayBatch
 from fall_detection.radio.acquisition.protocol import format_csi_record
 from fall_detection.radio.acquisition.serial_framing import (
-    encode_serial_frame,
     decode_serial_frame,
+    encode_serial_frame,
 )
 from fall_detection.radio.acquisition.wire import (
-    encode_csi_batch,
     DecodedCsiDatagram,
     ReceiverStats,
+    encode_csi_batch,
 )
-from test_gateway import batch, manager
 
 
 def packet(size, invalid=False, seed=17):
     base = batch()
-    record = base.decoded_packet.records[0].record
+    from wire_reference import decode_csi_packet
+
+    record = decode_csi_packet(base.payload).records[0].record
     rng = random.Random(seed)
     values = tuple(
         complex(rng.randrange(-128, 128), rng.randrange(-128, 128)) for _ in range(size)
@@ -67,7 +69,9 @@ def packet(size, invalid=False, seed=17):
 @pytest.mark.parametrize("invalid", [False, True])
 def test_native_matches_python_raw_csv_metadata_and_calibrated_phase(size, invalid):
     original = packet(size, invalid)
-    old = GatewayBatch.decode(original.encode()).decoded_packet.records[0].record
+    from wire_reference import decode_csi_packet
+
+    old = decode_csi_packet(original.payload).records[0].record
     decoded = core.decode_envelope(original.encode())
     new = NativeRecord(decoded.records[0])
     for key in [
@@ -168,6 +172,29 @@ def test_native_wire_rejects_truncations_and_malformed_nested_headers():
     for seq in [2**32 - 1, 0, 1]:
         decoded = core.decode_envelope(batch(seq=seq).encode())
         assert decoded.records[0].sequence == seq
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_native_rejects_retired_csi_versions(version):
+    encoded = bytearray(batch().encode())
+    encoded[40 + 60 + 2 + 4] = version
+    struct.pack_into("!I", encoded, len(encoded) - 4, zlib.crc32(encoded[:-4]))
+    with pytest.raises(ValueError, match="unsupported live CSI header"):
+        GatewayBatch.decode(encoded)
+
+
+def test_hardware_acquisition_cannot_fall_back_to_python_usb(monkeypatch):
+    from types import SimpleNamespace
+
+    from fall_detection.radio.acquisition import gateway_reader
+
+    manager = gateway_reader.GatewayReceiverManager.__new__(
+        gateway_reader.GatewayReceiverManager
+    )
+    manager.serial_factory = None
+    monkeypatch.setattr(gateway_reader, "os", SimpleNamespace(name="nt"))
+    with pytest.raises(RuntimeError, match="Native gateway acquisition"):
+        manager._open_gateway()
 
 
 @pytest.mark.skipif(os.name != "posix", reason="native POSIX serial reader")

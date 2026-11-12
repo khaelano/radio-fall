@@ -6,9 +6,10 @@ import json
 import struct
 import time
 from collections import deque
+from collections.abc import Callable
 from queue import Empty, Full, Queue
 from threading import Event, Lock, Thread
-from typing import Any, Callable
+from typing import Any
 
 from .clock_sync import ClockSyncEstimator, ClockSyncSample
 from .serial_framing import (
@@ -38,12 +39,13 @@ class TransmitterReference:
         port: str,
         transmitter_mac: str,
         event_sink: Callable[..., None],
+        *,
+        expected_sensing_rate_hz: int,
         serial_factory: Callable[..., Any] | None = None,
         failure_sink: Callable[[str], None] | None = None,
         expected_profile_fingerprint: str | None = None,
         expected_sensing_phy: str | None = None,
         expected_sensing_version: int | None = None,
-        expected_sensing_rate_hz: int | None = None,
         minimum_clock_fit_span_us: int = 0,
     ) -> None:
         self.port = port
@@ -54,7 +56,7 @@ class TransmitterReference:
         self.expected_profile_fingerprint = expected_profile_fingerprint
         self.expected_sensing_phy = expected_sensing_phy
         self.expected_sensing_version = expected_sensing_version
-        if expected_sensing_rate_hz is not None and (
+        if (
             type(expected_sensing_rate_hz) is not int
             or not 50 <= expected_sensing_rate_hz <= 120
         ):
@@ -232,7 +234,7 @@ class TransmitterReference:
                 self.usb_receive_queue_peak = max(
                     self.usb_receive_queue_peak, self._usb_chunks.qsize()
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — acquisition thread boundary
             if not self._stop.is_set():
                 self._fail(f"transmitter reference lost: {exc}")
 
@@ -286,7 +288,7 @@ class TransmitterReference:
                         )
                     elif frame.type == ROUND_TYPE:
                         self.accept_round(frame.payload)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — acquisition thread boundary
             if not self._stop.is_set():
                 self._fail(f"transmitter reference lost: {exc}")
 
@@ -299,10 +301,7 @@ class TransmitterReference:
         )
         if magic != b"CGRD":
             raise ValueError("invalid transmitter round log")
-        if self.expected_sensing_rate_hz is None:
-            if not 10000 <= period <= 20000:
-                raise ValueError("invalid legacy transmitter round period")
-        elif period != 1_000_000 // self.expected_sensing_rate_hz:
+        if period != 1_000_000 // self.expected_sensing_rate_hz:
             raise ValueError("transmitter round period differs from configured rate")
         if self.run_id is not None and run != self.run_id:
             return
@@ -339,20 +338,20 @@ class TransmitterReference:
                 payload_hex=payload.hex(),
             )
             self._fail("transmitter reference round log overflow")
-        value = dict(
-            run_id=run,
-            transmitter_boot_id=boot,
-            sequence=seq,
-            tx_enqueue_us=enqueue,
-            scheduled_us=deadline,
-            period_us=period,
-            send_mask=result & 0xF,
-            skipped_rounds=result & 0x7FFFFFFF if result & 0x80000000 else 0,
-            log_drops=(drops - self._drop_baseline) & 0xFFFFFFFF,
-            lifetime_log_drops=drops,
-            owners=owners,
-            host_capture_ns=self.capture_time(enqueue),
-        )
+        value = {
+            "run_id": run,
+            "transmitter_boot_id": boot,
+            "sequence": seq,
+            "tx_enqueue_us": enqueue,
+            "scheduled_us": deadline,
+            "period_us": period,
+            "send_mask": result & 0xF,
+            "skipped_rounds": result & 0x7FFFFFFF if result & 0x80000000 else 0,
+            "log_drops": (drops - self._drop_baseline) & 0xFFFFFFFF,
+            "lifetime_log_drops": drops,
+            "owners": owners,
+            "host_capture_ns": self.capture_time(enqueue),
+        }
         self.last_round = value
         self.event_sink("round", **value)
 

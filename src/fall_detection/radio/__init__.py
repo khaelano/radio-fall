@@ -1,1 +1,1 @@
-"""Radio acquisition, preprocessing, experiments, and visualization."""
+"""Radio acquisition, preprocessing, configuration, and experiments."""

@@ -1,16 +1,18 @@
 """Explicit gateway switching probes and fixed-criteria hardware qualification."""
 
 from __future__ import annotations
+
 import argparse
+import json
+import time
 from bisect import bisect_right
 from collections import Counter
-import json
 from pathlib import Path
-import time
+
 import numpy as np
 
-from ..acquisition.gateway_reader import GatewayReceiverManager
 from ..acquisition.clock_sync import ClockSyncEstimate
+from ..acquisition.gateway_reader import GatewayReceiverManager
 from ..settings import add_config_argument, resolve_settings
 
 
@@ -40,14 +42,14 @@ def evaluate(
     end = begin + int(measurement_s * 1e9)
     complete = max(e["host_capture_ns"] for e in rounds) >= end
     receivers = manifest["inventory"]["receivers"]
-    result = dict(
-        schema_version=1,
-        mode="qualification" if qualification else "switching_probe",
-        measurement_s=measurement_s,
-        target_records_s=target_records_s,
-        complete=complete,
-        receivers={},
-    )
+    result = {
+        "schema_version": 1,
+        "mode": "qualification" if qualification else "switching_probe",
+        "measurement_s": measurement_s,
+        "target_records_s": target_records_s,
+        "complete": complete,
+        "receivers": {},
+    }
     selected = [
         e
         for e in events
@@ -98,30 +100,30 @@ def evaluate(
         )
         rate = len(timely) / measurement_s
         fraction = float(np.mean((delays >= 0) & (delays < 1000))) if len(delays) else 0
-        result["receivers"][identity] = dict(
-            delivered=len(rows),
-            timely_records_s=rate,
-            subsecond_fraction=fraction,
-            clock_alignment_complete=bool(len(delays))
+        result["receivers"][identity] = {
+            "delivered": len(rows),
+            "timely_records_s": rate,
+            "subsecond_fraction": fraction,
+            "clock_alignment_complete": bool(len(delays))
             and bool(np.isfinite(delays).all()),
-            delay_p50_ms=float(np.quantile(delays[np.isfinite(delays)], 0.5))
+            "delay_p50_ms": float(np.quantile(delays[np.isfinite(delays)], 0.5))
             if np.isfinite(delays).any()
             else None,
-            delay_p99_ms=float(np.quantile(delays[np.isfinite(delays)], 0.99))
+            "delay_p99_ms": float(np.quantile(delays[np.isfinite(delays)], 0.99))
             if np.isfinite(delays).any()
             else None,
-            one_second_rates=counts.tolist(),
-            longest_timely_capture_gap_ms=max(np.diff(times)) / 1e6,
-            queue_peak=max(peaks, default=None),
-            queue_median_growth=growth,
-            queues_stable=stable,
-            passes=bool(
+            "one_second_rates": counts.tolist(),
+            "longest_timely_capture_gap_ms": max(np.diff(times)) / 1e6,
+            "queue_peak": max(peaks, default=None),
+            "queue_median_growth": growth,
+            "queues_stable": stable,
+            "passes": bool(
                 rate >= target_records_s
                 and fraction >= 0.99
                 and stable
                 and np.isfinite(delays).all()
             ),
-        )
+        }
     intervals = [
         e
         for e in events
@@ -170,12 +172,12 @@ def evaluate(
     evidence = bool(required) and required <= proven and log_drops == 0
     starts = sorted(start for _, start, arrival in grants if begin <= arrival < end)
     spacing = np.diff(starts) / 1000
-    result["upload_start_spacing_ms"] = dict(
-        samples=len(spacing),
-        mean=float(np.mean(spacing)) if len(spacing) else None,
-        p50=float(np.median(spacing)) if len(spacing) else None,
-        p99=float(np.quantile(spacing, 0.99)) if len(spacing) else None,
-    )
+    result["upload_start_spacing_ms"] = {
+        "samples": len(spacing),
+        "mean": float(np.mean(spacing)) if len(spacing) else None,
+        "p50": float(np.median(spacing)) if len(spacing) else None,
+        "p99": float(np.quantile(spacing, 0.99)) if len(spacing) else None,
+    }
     return_evidence = Counter()
     for interval in intervals:
         bounds = deadline_bounds.get(interval["grant_id"])
@@ -200,13 +202,13 @@ def evaluate(
         reasons = Counter(
             e.get("detail", 0) for e in queue_events if e["event_code"] == 9
         )
-        result["receivers"][receiver["id"]]["early_return_events_full_run"] = dict(
-            complete_or_send_cutoff=reasons[1],
-            idle_grace=reasons[2],
-            unknown=sum(
+        result["receivers"][receiver["id"]]["early_return_events_full_run"] = {
+            "complete_or_send_cutoff": reasons[1],
+            "idle_grace": reasons[2],
+            "unknown": sum(
                 count for reason, count in reasons.items() if reason not in (1, 2)
             ),
-        )
+        }
         result["receivers"][receiver["id"]]["retune_completed_events_full_run"] = sum(
             e["event_code"] == 10 for e in queue_events
         )
@@ -217,20 +219,22 @@ def evaluate(
             and e["receiver_id"] == receiver["id"]
         ]
         samples = sum(e["samples"] for e in metrics)
-        result["receivers"][receiver["id"]]["mac_completions_full_run"] = dict(
-            summaries=len(metrics),
-            samples=samples,
-            failures=sum(e["failures"] for e in metrics),
-            maximum_us=max((e["maximum_us"] for e in metrics), default=None),
-            maximum_failure_us=max(
+        result["receivers"][receiver["id"]]["mac_completions_full_run"] = {
+            "summaries": len(metrics),
+            "samples": samples,
+            "failures": sum(e["failures"] for e in metrics),
+            "maximum_us": max((e["maximum_us"] for e in metrics), default=None),
+            "maximum_failure_us": max(
                 (e["maximum_failure_us"] for e in metrics), default=None
             ),
-            mean_us=sum(e["total_us"] for e in metrics) / samples if samples else None,
-            completions_after_cutoff=sum(
+            "mean_us": sum(e["total_us"] for e in metrics) / samples
+            if samples
+            else None,
+            "completions_after_cutoff": sum(
                 e["completions_after_cutoff"] for e in metrics
             ),
-            busy_at_return=sum(e["sender_busy_at_return"] for e in metrics),
-        )
+            "busy_at_return": sum(e["sender_busy_at_return"] for e in metrics),
+        }
     for receiver in receivers:
         # Departure is before retuning; recovery is the first observed sensing
         # packet. These conservative intervals are not channel-API durations.
@@ -241,13 +245,13 @@ def evaluate(
                 if e["receiver_id"] == receiver["id"]
             ]
         )
-        result["receivers"][receiver["id"]]["observed_recovery_upper_ms"] = dict(
-            intervals=len(absence),
-            mean=float(np.mean(absence)) if len(absence) else None,
-            p50=float(np.median(absence)) if len(absence) else None,
-            p99=float(np.quantile(absence, 0.99)) if len(absence) else None,
-            maximum=float(np.max(absence)) if len(absence) else None,
-        )
+        result["receivers"][receiver["id"]]["observed_recovery_upper_ms"] = {
+            "intervals": len(absence),
+            "mean": float(np.mean(absence)) if len(absence) else None,
+            "p50": float(np.median(absence)) if len(absence) else None,
+            "p99": float(np.quantile(absence, 0.99)) if len(absence) else None,
+            "maximum": float(np.max(absence)) if len(absence) else None,
+        }
     result.update(
         channel_intervals=len(intervals),
         overlapping_or_uncertain_intervals=overlaps,
@@ -269,13 +273,13 @@ def evaluate(
                         for r in receivers
                     )
                 ] += 1
-    result["availability"] = dict(
-        receiver_order=[r["id"] for r in receivers],
-        bin_hz=manifest["transport_config"].get("bin_hz", 50),
-        grace_ms=manifest["transport_config"].get("delivery_grace_ms", 500),
-        finalized_bins=sum(masks.values()),
-        counts_by_mask=dict(sorted(masks.items())),
-    )
+    result["availability"] = {
+        "receiver_order": [r["id"] for r in receivers],
+        "bin_hz": manifest["transport_config"].get("bin_hz", 50),
+        "grace_ms": manifest["transport_config"].get("delivery_grace_ms", 500),
+        "finalized_bins": sum(masks.values()),
+        "counts_by_mask": dict(sorted(masks.items())),
+    }
     result["qualified"] = bool(
         qualification
         and len(receivers) == 4
@@ -301,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--mode", choices=("qualify", "probe"), default="qualify")
     parser.add_argument("--port", help="verified C5 transmitter USB path")
-    parser.add_argument("--transmitter-link", choices=("usb", "ble", "espnow_uart"))
+    parser.add_argument("--transmitter-link", choices=("usb", "espnow_uart"))
     parser.add_argument("--gateway-port", help="verified C6 gateway USB path")
     add_config_argument(parser)
     parser.add_argument(

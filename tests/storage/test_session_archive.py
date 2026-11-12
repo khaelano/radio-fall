@@ -21,6 +21,7 @@ def test_archive_preserves_originals_and_parquet(tmp_path):
     destination = tmp_path / "session.zip"
     manifest = create_archive(source, destination)
     assert verify_archive(destination) == manifest
+    assert manifest["version"] == 2
     assert manifest["tables"][0]["rows"] == 1
     with zipfile.ZipFile(destination) as archive:
         assert (

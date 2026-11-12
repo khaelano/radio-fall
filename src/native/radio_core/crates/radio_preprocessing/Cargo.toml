@@ -1,0 +1,9 @@
+[package]
+name = "radio-preprocessing"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+
+[dependencies]
+pyo3 = { version = "0.29", features = ["abi3-py312", "num-complex"] }
+rayon = "1.11"

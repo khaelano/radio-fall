@@ -1,15 +1,15 @@
 """Higher-rate experiments retain old flags, identities and channel interlocking."""
 
-from dataclasses import replace
-from pathlib import Path
 import shutil
 import subprocess
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
+from test_gateway_tuning import identities
 
 from fall_detection.radio.espnow_config import EspnowTransportConfig
 from fall_detection.radio.profile import RadioProfile, RadioProfileError
-from test_gateway_tuning import identities
 
 
 @pytest.mark.parametrize("mcs", range(4))
@@ -19,7 +19,7 @@ def test_throughput_python_c_contract(tmp_path, mcs):
         dict(old_profile.as_dict(), schema_version=2, nominal_rate_hz=120)
     )
     policy = EspnowTransportConfig(
-        schema_version=6,
+        schema_version=7,
         phy=f"ht20_mcs{mcs}_lgi",
         application_acknowledgements=False,
         maximum_retries=0,
@@ -29,7 +29,7 @@ def test_throughput_python_c_contract(tmp_path, mcs):
         maximum_age_ms=750,
     )
     raw = policy.encode(123, inventory, profile)
-    assert len(raw) == 108 and raw[4] == 6 and raw[103] == 4 | (mcs << 3)
+    assert len(raw) == 108 and raw[4] == 7 and raw[103] == 4 | (mcs << 3)
     assert policy.fingerprint(inventory, profile) != replace(
         policy, phy=f"ht20_mcs{(mcs + 1) % 4}_lgi"
     ).fingerprint(inventory, profile)
@@ -103,8 +103,9 @@ def test_profile_rejects_unsupported_throughput_rate(rate, band):
 
 def test_c_provisioning_profile_accepts_120_only_on_5ghz(tmp_path):
     import json
-    from fall_detection.radio.provisioning import _profile_payload
+
     from fall_detection.radio.profile import profile_fingerprint
+    from fall_detection.radio.provisioning import _profile_payload
 
     cc = shutil.which("cc")
     if not cc:
@@ -171,39 +172,43 @@ int main(int argc,char **argv){
 @pytest.mark.parametrize("target,passes", [(50, True), (80, False)])
 def test_benchmark_uses_explicit_delivery_target(tmp_path, target, passes):
     import json
+
     from fall_detection.radio.experiments.gateway import evaluate
 
     inventory, _ = identities()
     (tmp_path / "manifest.json").write_text(
         json.dumps(
-            dict(inventory=inventory.as_dict(), transport_config={"queue_capacity": 64})
+            {
+                "inventory": inventory.as_dict(),
+                "transport_config": {"queue_capacity": 64},
+            }
         )
     )
     begin = 1_000_000_000
     events = [
-        dict(kind="round", host_capture_ns=begin),
-        dict(kind="round", host_capture_ns=begin + 1_000_000_000),
+        {"kind": "round", "host_capture_ns": begin},
+        {"kind": "round", "host_capture_ns": begin + 1_000_000_000},
     ]
     for i in range(60):
         t = begin + i * 10_000_000
         events.append(
-            dict(
-                kind="record",
-                receiver_id="rx",
-                capture_host_ns=t,
-                available_ns=t + 100_000_000,
-                clock_uncertainty_us=100,
-            )
+            {
+                "kind": "record",
+                "receiver_id": "rx",
+                "capture_host_ns": t,
+                "available_ns": t + 100_000_000,
+                "clock_uncertainty_us": 100,
+            }
         )
     for offset in [1, 999_999_999]:
         events.append(
-            dict(
-                kind="receiver_status",
-                receiver_id="rx",
-                host_monotonic_ns=begin + offset,
-                queued=2,
-                peak=3,
-            )
+            {
+                "kind": "receiver_status",
+                "receiver_id": "rx",
+                "host_monotonic_ns": begin + offset,
+                "queued": 2,
+                "peak": 3,
+            }
         )
     (tmp_path / "events.jsonl").write_text(
         "\n".join(json.dumps(e) for e in events) + "\n"

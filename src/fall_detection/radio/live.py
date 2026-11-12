@@ -12,7 +12,7 @@ from .acquisition.gateway_reader import GatewayReceiverManager
 from .acquisition.protocol import CsiRecord
 from .acquisition.recovery import RecoveryUnavailable, can_recover, recover_gateway
 from .settings import add_config_argument, resolve_settings
-from .visualization.state import LiveState
+from .state import LiveState
 
 
 def add_live_arguments(parser: argparse.ArgumentParser) -> None:
@@ -23,7 +23,7 @@ def add_live_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--gateway-port", help="override the configured C6 USB path")
     parser.add_argument("--port", help="override the C5 USB path for USB fallback")
-    parser.add_argument("--transmitter-link", choices=("usb", "ble", "espnow_uart"))
+    parser.add_argument("--transmitter-link", choices=("usb", "espnow_uart"))
 
 
 class LiveRadio:
@@ -71,18 +71,18 @@ class LiveRadio:
             self.settings.profile,
             args.output_dir,
         )
-        self._manager_options = dict(
-            transmitter_port=args.port,
-            gateway_port=args.gateway_port,
-            transmitter_link=args.transmitter_link,
-            config=self.settings.transport,
-            require_four=require_four,
-            on_status=report_status,
-            record_sink=record_sink,
-            journal_root=journal_root,
-            reference_failure_sink=on_interruption,
-            recording_io=recording_io,
-        )
+        self._manager_options = {
+            "transmitter_port": args.port,
+            "gateway_port": args.gateway_port,
+            "transmitter_link": args.transmitter_link,
+            "config": self.settings.transport,
+            "require_four": require_four,
+            "on_status": report_status,
+            "record_sink": record_sink,
+            "journal_root": journal_root,
+            "reference_failure_sink": on_interruption,
+            "recording_io": recording_io,
+        }
         self.manager = manager_factory(*self._manager_args, **self._manager_options)
         self.bindings = self.manager.bind()
         self.state.configure_receivers(
@@ -102,14 +102,12 @@ class LiveRadio:
             "gateway_port": args.gateway_port,
             "transmitter_link": args.transmitter_link,
             "radio_config": str(args.config) if args.config else None,
-            "receiver_config": str(args.receiver_config)
-            if args.receiver_config
-            else None,
         }
 
     def environment(self) -> dict[str, Any]:
         """Snapshot resolved radio inputs for an immutable session manifest."""
         from dataclasses import asdict
+
         from .acquisition.native import backend_info
 
         settings = self.settings
@@ -179,7 +177,7 @@ class LiveRadio:
                     return
                 try:
                     previous.stop()
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 — recovery boundary
                     self._report_status(f"Recovery stopped: {exc}", False)
                     return
                 self._retired_manager = previous
@@ -199,9 +197,10 @@ class LiveRadio:
                         replacement = self._manager_factory(
                             *self._manager_args,
                             **self._manager_options,
-                            recovery_context=dict(
-                                previous_run_id=str(previous.run_id), reason=reason
-                            ),
+                            recovery_context={
+                                "previous_run_id": str(previous.run_id),
+                                "reason": reason,
+                            },
                         )
                         replacement.bind()
                         self.manager = replacement
@@ -224,7 +223,7 @@ class LiveRadio:
                     return
                 except (OSError, TimeoutError) as exc:
                     self._report_status(f"Waiting for radio: {exc}", False)
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 — recovery boundary
                     self.manager._fail(f"Recovery stopped: {exc}")
                     return
 

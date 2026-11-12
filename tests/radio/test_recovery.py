@@ -1,11 +1,12 @@
 """Exercise interrupted-run recovery without physical USB devices."""
 
-from collections import deque
 import json
+from collections import deque
 from threading import Event
 
 import pytest
 
+from fall_detection.apps.csi_viewer.app import _parser
 from fall_detection.radio.acquisition.gateway_journal import GatewayJournal
 from fall_detection.radio.acquisition.gateway_reader import GatewayReceiverManager
 from fall_detection.radio.acquisition.recovery import can_recover, recover_gateway
@@ -14,7 +15,6 @@ from fall_detection.radio.acquisition.serial_framing import (
     encode_serial_frame,
 )
 from fall_detection.radio.live import LiveRadio
-from fall_detection.radio.visualization.app import _parser
 
 
 @pytest.mark.parametrize(
@@ -145,16 +145,16 @@ def test_recovery_stops_old_run_and_restarts_only_when_needed(
     radio = LiveRadio(_parser().parse_args([]))
     frames = deque()
     sent = []
-    status = dict(
-        role="gateway",
-        target="esp32c6",
-        mac=radio.settings.inventory.gateway.mac,
-        relay_recovery_version=1,
-        configured=configured,
-        run_id="123",
-        relay_ready=ready,
-        relay_fault=fault,
-    )
+    status = {
+        "role": "gateway",
+        "target": "esp32c6",
+        "mac": radio.settings.inventory.gateway.mac,
+        "relay_recovery_version": 1,
+        "configured": configured,
+        "run_id": "123",
+        "relay_ready": ready,
+        "relay_fault": fault,
+    }
 
     class Connection:
         in_waiting = 1

@@ -23,8 +23,8 @@ The setuptools build compiles an optimized release extension with thin LTO.
 `Cargo.lock` fixes native dependency versions. Source distributions include the
 crate and lockfile; neither generated binaries nor Cargo build output are
 versioned. Live acquisition reports an actionable error if the extension is
-missing. Python wire decoding remains available for historical recordings and
-independent protocol comparisons. The native serial worker currently targets
+missing. Gateway envelopes are decoded by Rust; an independent current-format
+Python reference decoder is kept in the test suite for protocol comparisons. The native serial worker currently targets
 POSIX hosts; it does not silently select the previous Python process reader.
 The configured [uv build cache keys](https://docs.astral.sh/uv/concepts/cache/)
 include Rust sources, manifest and lockfile, so later native edits trigger a
@@ -81,8 +81,7 @@ two-parameter fit replaces the per-record Python/NumPy least-squares setup.
 No fast-math flags relax floating-point semantics.
 
 Cross-checks compare raw I/Q and CSV bytes exactly, magnitude and wrapped phase
-within explicit numerical tolerances, and invalid masks exactly. Offline Python
-decoding for historical layouts remains intact. The live native phase path
+within explicit numerical tolerances, and invalid masks exactly. The live native phase path
 prepares the current HE20 layouts; unsupported layouts provide no calibrated
 phase rather than guessing a subcarrier arrangement.
 
@@ -99,9 +98,9 @@ buffer nor `flush` provides an `fsync`/power-loss durability guarantee.
 
 ```bash
 uv run pytest
-cargo test --manifest-path src/native/radio_core/Cargo.toml
-cargo clippy --manifest-path src/native/radio_core/Cargo.toml --all-targets -- -D warnings
-cargo test --release --manifest-path src/native/radio_core/Cargo.toml benchmark_iq_kernel -- --ignored --nocapture
+cargo test --manifest-path src/native/radio_core/Cargo.toml --workspace
+cargo clippy --manifest-path src/native/radio_core/Cargo.toml --workspace --all-targets -- -D warnings
+cargo test --release --manifest-path src/native/radio_core/Cargo.toml -p radio-signal benchmark_iq_kernel -- --ignored --nocapture
 uv run python tools/processing/benchmark_radio_pipeline.py <path/to/envelopes.bin>
 ```
 

@@ -1,10 +1,12 @@
 """Complete ESP-NOW/USB envelopes and host acceptance acknowledgements."""
 
 from __future__ import annotations
-from dataclasses import dataclass, field
+
 import struct
 import zlib
-from .wire import DecodedCsiPacket, decode_csi_packet
+from dataclasses import dataclass, field
+
+from .wire import DecodedCsiPacket
 
 HEADER = struct.Struct("!4sBBHQIII6sHI")
 ACK_HEADER = struct.Struct("!4sQIII6s")
@@ -42,14 +44,11 @@ class GatewayBatch:
     def decoded_packet(self) -> DecodedCsiPacket:
         """Return the validated immutable payload without repeating decoding."""
         if self._decoded_packet is None:
-            packet = decode_csi_packet(self.payload)
-            if (
-                packet.boot_id != self.receiver_boot_id
-                or packet.batch_sequence != self.batch_id
-                or not packet.records
-                or any(r.receiver_mac != self.receiver_mac for r in packet.records)
-            ):
-                raise ValueError("gateway and nested CSI identities disagree")
+            from .native import gateway_batch, require_native
+
+            encoded = self.encode()
+            native = require_native().decode_envelope(encoded)
+            packet = gateway_batch(native, encoded=encoded)._decoded_packet
             object.__setattr__(self, "_decoded_packet", packet)
         return self._decoded_packet
 
@@ -82,22 +81,11 @@ class GatewayBatch:
     @classmethod
     def decode(cls, data: bytes) -> GatewayBatch:
         """Validate envelope and every nested record's physical identity."""
-        checked(data, b"CGWY")
-        if not HEADER.size + 4 < len(data) <= MAX_ENVELOPE:
-            raise ValueError("invalid envelope size")
-        magic, version, flags, size, run, tx, rx, batch, mac, length, reserved = (
-            HEADER.unpack_from(data)
-        )
-        if (version, flags, size, reserved) != (1, 0, HEADER.size, 0) or not run:
-            raise ValueError("unsupported gateway envelope")
-        if len(data) != size + length + 4:
-            raise ValueError("invalid payload length")
-        payload = data[size:-4]
-        receiver = ":".join(f"{b:02x}" for b in mac)
-        decoded = cls(run, tx, rx, batch, receiver, payload)
-        _ = decoded.decoded_packet
-        object.__setattr__(decoded, "_encoded", data)
-        return decoded
+        from .native import gateway_batch, require_native
+
+        encoded = bytes(data)
+        native = require_native().decode_envelope(encoded)
+        return gateway_batch(native, encoded=encoded)
 
     @property
     def identity(self) -> tuple:

@@ -3,21 +3,20 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass, fields
 import json
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
 from .espnow_config import EspnowTransportConfig
 from .profile import RadioInventory, RadioProfile, profile_fingerprint
 
-
 DEFAULT_CONFIG = Path(__file__).resolve().parents[3] / "configs/radio.json"
 
 
 def _object(value: Any, name: str, allowed: set[str]) -> dict[str, Any]:
     if not isinstance(value, dict):
-        raise ValueError(f"{name} must be an object")
+        raise ValueError(f"{name} must be an object")  # noqa: TRY004 — configuration validation
     unknown = value.keys() - allowed
     if unknown:
         raise ValueError(f"unknown {name} fields: {', '.join(sorted(unknown))}")
@@ -74,7 +73,7 @@ class RadioSettings:
         for key, item in connection.items():
             if not isinstance(item, str) or not item.strip():
                 raise ValueError(f"connection.{key} must be a non-empty string")
-        if connection["transmitter_link"] not in {"usb", "ble", "espnow_uart"}:
+        if connection["transmitter_link"] not in {"usb", "espnow_uart"}:
             raise ValueError("unsupported connection.transmitter_link")
         inventory_value = _object(
             value.get("inventory"),
@@ -86,8 +85,11 @@ class RadioSettings:
                 "gateway",
             },
         )
-        if type(inventory_value.get("schema_version")) is not int:
-            raise ValueError("inventory.schema_version must be an integer")
+        if (
+            type(inventory_value.get("schema_version")) is not int
+            or inventory_value["schema_version"] != 2
+        ):
+            raise ValueError("inventory.schema_version must be 2")
         devices = [inventory_value.get("transmitter"), inventory_value.get("gateway")]
         receivers = inventory_value.get("receivers")
         if isinstance(receivers, list):
@@ -102,6 +104,8 @@ class RadioSettings:
         for key in ("schema_version", "channel", "bandwidth_mhz", "nominal_rate_hz"):
             if type(profile_value.get(key)) is not int:
                 raise ValueError(f"sensing.{key} must be an integer")
+        if profile_value["schema_version"] != 2:
+            raise ValueError("sensing.schema_version must be 2")
         policy = _object(
             value.get("transport"),
             "transport",
@@ -115,39 +119,18 @@ class RadioSettings:
 
 
 def add_config_argument(parser: argparse.ArgumentParser) -> None:
-    """Expose one settings file, retaining hidden flags for historical commands."""
+    """Expose the shared radio settings file."""
     parser.add_argument(
         "--config",
         type=Path,
         help="radio settings JSON (default: repository configs/radio.json)",
     )
-    for flag in ("--receiver-config", "--radio-profile", "--gateway-config"):
-        parser.add_argument(flag, type=Path, help=argparse.SUPPRESS)
 
 
 def resolve_settings(args: argparse.Namespace) -> RadioSettings:
     """Resolve the file and explicit connection overrides before hardware access."""
-    legacy = any((args.receiver_config, args.radio_profile, args.gateway_config))
-    if legacy:
-        if args.config is not None:
-            raise ValueError(
-                "--config cannot be combined with legacy configuration flags"
-            )
-        if not args.receiver_config or not args.radio_profile:
-            raise ValueError(
-                "--receiver-config and --radio-profile must be provided together"
-            )
-        inventory = RadioInventory.load(args.receiver_config)
-        profile = RadioProfile.load(args.radio_profile)
-        settings = RadioSettings(
-            inventory,
-            profile,
-            EspnowTransportConfig.load(args.gateway_config),
-            {"transmitter_link": "usb"},
-        )
-    else:
-        args.config = args.config or DEFAULT_CONFIG
-        settings = RadioSettings.load(args.config)
+    args.config = args.config or DEFAULT_CONFIG
+    settings = RadioSettings.load(args.config)
     for argument, key in (
         ("transmitter_link", "transmitter_link"),
         ("gateway_port", "gateway_port"),

@@ -1,26 +1,26 @@
 """Bounded retention and later-turn retries against the shared firmware contract."""
 
-from dataclasses import replace
-from pathlib import Path
 import shutil
 import subprocess
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
+from test_gateway_tuning import identities
 
 from fall_detection.radio.espnow_config import EspnowTransportConfig
-from test_gateway_tuning import identities
 
 
 def test_retention_retry_version_and_deadline_contract(tmp_path):
     inv, profile = identities()
     policy = EspnowTransportConfig(
-        schema_version=4,
+        schema_version=7,
         maximum_age_ms=750,
         maximum_retries=2,
         delivery_grace_ms=900,
     )
     raw = policy.encode(123, inv, profile)
-    assert len(raw) == 108 and raw[4] == 4 and raw[30] == 2
+    assert len(raw) == 108 and raw[4] == 7 and raw[30] == 2
     assert raw[100:104] == bytes([0, 0, 10, 0])
     for version in (1, 2, 3):
         with pytest.raises(ValueError):

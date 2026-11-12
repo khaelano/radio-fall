@@ -1,28 +1,26 @@
 """Offline contracts for the dual-band transport; no hardware/network access."""
 
-from dataclasses import replace
 import json
-from pathlib import Path
 import shutil
 import struct
 import subprocess
 import time
-from types import SimpleNamespace
 import zlib
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from fall_detection.radio.espnow_config import EspnowTransportConfig
-from fall_detection.radio.profile import (
-    RadioInventory,
-    RadioProfile,
-    profile_fingerprint,
+from fall_detection.radio.acquisition.availability import (
+    AvailabilityGrid,
+    RoundReceipts,
 )
-from fall_detection.radio.acquisition.gateway_protocol import GatewayBatch
 from fall_detection.radio.acquisition.gateway_journal import (
     GatewayJournal,
     iter_envelopes,
 )
+from fall_detection.radio.acquisition.gateway_protocol import GatewayBatch
 from fall_detection.radio.acquisition.gateway_reader import GatewayReceiverManager
 from fall_detection.radio.acquisition.protocol import CsiRecord
 from fall_detection.radio.acquisition.wire import (
@@ -30,39 +28,44 @@ from fall_detection.radio.acquisition.wire import (
     ReceiverStats,
     encode_csi_batch,
 )
-from fall_detection.radio.acquisition.availability import (
-    AvailabilityGrid,
-    RoundReceipts,
+from fall_detection.radio.espnow_config import EspnowTransportConfig
+from fall_detection.radio.profile import (
+    RadioInventory,
+    RadioProfile,
+    profile_fingerprint,
 )
 
 
 def inventory():
     def device(i, role, target="esp32c5"):
-        return dict(
-            id=f"{role}-{i}", role=role, target=target, mac=f"02:00:00:00:00:{i:02x}"
-        )
+        return {
+            "id": f"{role}-{i}",
+            "role": role,
+            "target": target,
+            "mac": f"02:00:00:00:00:{i:02x}",
+        }
 
     return RadioInventory.from_mapping(
-        dict(
-            schema_version=2,
-            transmitter=device(0, "transmitter"),
-            receivers=[device(i, "receiver") for i in range(1, 5)],
-            gateway=device(5, "gateway", "esp32c6"),
-        )
+        {
+            "schema_version": 2,
+            "transmitter": device(0, "transmitter"),
+            "receivers": [device(i, "receiver") for i in range(1, 5)],
+            "gateway": device(5, "gateway", "esp32c6"),
+        }
     )
 
 
 def profile():
     return RadioProfile.from_mapping(
-        dict(
-            schema_version=1,
-            profile_id="test",
-            country_code="ID",
-            band="5ghz",
-            channel=44,
-            bandwidth_mhz=20,
-            nominal_rate_hz=80,
-        )
+        {
+            "schema_version": 1,
+            "profile_id": "test",
+            "country_code": "ID",
+            "band": "5ghz",
+            "channel": 44,
+            "bandwidth_mhz": 20,
+            "nominal_rate_hz": 80,
+        }
     )
 
 
@@ -119,18 +122,16 @@ def test_config_inventory_order_and_identity_fingerprint():
 @pytest.mark.parametrize("wireless", [False, True])
 def test_gateway_ingestion_decodes_nested_payload_once(tmp_path, monkeypatch, wireless):
     """Full validation and recording must not reparse the same CSI payload."""
-    from fall_detection.radio.acquisition import gateway_protocol, packet_reader, wire
+    from fall_detection.radio.acquisition import native
 
     calls = []
-    original = wire.decode_csi_packet
+    original = native.gateway_batch
 
-    def decode(payload):
-        calls.append(payload)
-        return original(payload)
+    def adapt(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
 
-    monkeypatch.setattr(wire, "decode_csi_packet", decode)
-    monkeypatch.setattr(gateway_protocol, "decode_csi_packet", decode)
-    monkeypatch.setattr(packet_reader, "decode_csi_packet", decode)
+    monkeypatch.setattr(native, "gateway_batch", adapt)
     seen = []
     m = manager(tmp_path, lambda record, arrival: seen.append(record))
     try:
@@ -157,7 +158,7 @@ def test_gateway_replaced_payload_cannot_reuse_validated_identity():
     decoded = GatewayBatch.decode(batch().encode())
     _ = decoded.decoded_packet
     changed = replace(decoded, payload=batch(receiver=1).payload)
-    with pytest.raises(ValueError, match="identities disagree"):
+    with pytest.raises(ValueError, match="identity mismatch"):
         _ = changed.decoded_packet
 
 
@@ -173,49 +174,17 @@ def test_preview_deferral_does_not_change_acquisition_readiness(tmp_path):
         m.journal.close()
 
 
-def test_eight_batch_policy_and_legacy_config_are_distinct(tmp_path):
-    current = EspnowTransportConfig(
-        schema_version=2, outstanding_batches=8, early_return_idle_ms=5
-    )
+def test_current_policy_encodes_eight_batch_window():
+    current = EspnowTransportConfig(outstanding_batches=8, early_return_idle_ms=5)
     raw = current.encode(123, inventory(), profile())
-    assert raw[4] == 2 and raw[29] == 8
-    assert struct.unpack_from("!H", raw, 100)[0] == 5
+    assert raw[4] == 7 and raw[29] == 8 and raw[100] == 5
     assert current.fingerprint(inventory(), profile()) != replace(
         current, early_return_idle_ms=0
     ).fingerprint(inventory(), profile())
-    legacy_path = tmp_path / "legacy.json"
-    legacy_path.write_text(json.dumps(dict(schema_version=1, outstanding_batches=4)))
-    legacy = EspnowTransportConfig.load(legacy_path)
-    assert legacy.early_return_idle_ms == 0
-    assert legacy.encode(123, inventory(), profile())[4] == 1
-    from dataclasses import asdict
-    import hashlib
-
-    original_policy = asdict(legacy)
-    original_policy.pop("early_return_idle_ms")
-    original_policy.pop("application_acknowledgements")
-    for key in (
-        "minimum_revisit_ms",
-        "send_completion_guard_ms",
-        "batch_acknowledgements",
-        "measure_send_completions",
-    ):
-        original_policy.pop(key)
-    historical = dict(
-        policy=original_policy,
-        inventory=inventory().as_dict(),
-        profile=profile().as_dict(),
-    )
-    expected = hashlib.sha256(
-        json.dumps(historical, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()[:16]
-    assert legacy.fingerprint(inventory(), profile()) == expected
-    with pytest.raises(ValueError):
-        replace(legacy, outstanding_batches=8)
     with pytest.raises(ValueError):
         replace(current, outstanding_batches=9)
     with pytest.raises(ValueError):
-        replace(current, early_return_idle_ms=21)
+        replace(current, schema_version=6)
 
 
 @pytest.mark.parametrize(
@@ -223,8 +192,8 @@ def test_eight_batch_policy_and_legacy_config_are_distinct(tmp_path):
     [
         {"slot_ms": 10},
         {"return_reserve_ms": 50},
-        {"queue_capacity": 65},
-        {"maximum_retries": 2},
+        {"queue_capacity": 97},
+        {"maximum_retries": 4},
         {"phy": "default"},
         {"channel": 14},
         {"ack_timeout_ms": 501},
@@ -383,8 +352,8 @@ def test_mac_metrics_are_journaled_without_application_ack(tmp_path):
 
 def test_new_reference_baselines_prior_run_drops_but_rejects_current_loss():
     from fall_detection.radio.acquisition.transmitter_reference import (
-        TransmitterReference,
         ROUND,
+        TransmitterReference,
     )
 
     events = []
@@ -392,6 +361,7 @@ def test_new_reference_baselines_prior_run_drops_but_rejects_current_loss():
         "fake",
         inventory().transmitter.mac,
         lambda kind, **values: events.append((kind, values)),
+        expected_sensing_rate_hz=80,
     )
     reference.run_id = 123
     drops = 7
@@ -551,7 +521,7 @@ int main(int argc,char **argv){
         [
             str(tmp_path / "check"),
             EspnowTransportConfig(
-                schema_version=2, outstanding_batches=8, early_return_idle_ms=5
+                schema_version=7, outstanding_batches=8, early_return_idle_ms=5
             )
             .encode(123, inventory(), profile())
             .hex(),
@@ -602,15 +572,17 @@ class FakeUsb:
             self.inject(
                 6,
                 json.dumps(
-                    dict(
-                        role="gateway",
-                        target="esp32c6",
-                        mac=self.mac,
-                        protocol_version=3,
-                        transport_config_max_version=7 if self.supports_config2 else 1,
-                        csi_transport="espnow_gateway",
-                        boot_id=99,
-                    )
+                    {
+                        "role": "gateway",
+                        "target": "esp32c6",
+                        "mac": self.mac,
+                        "protocol_version": 3,
+                        "transport_config_max_version": 7
+                        if self.supports_config2
+                        else 1,
+                        "csi_transport": "espnow_gateway",
+                        "boot_id": 99,
+                    }
                 ).encode(),
             )
         elif frame.type == 20:
@@ -630,18 +602,7 @@ class FakeUsb:
 
 @pytest.mark.parametrize(
     "config_version,ackless",
-    [
-        (1, False),
-        (2, False),
-        (3, False),
-        (4, False),
-        (5, False),
-        (5, True),
-        (6, False),
-        (6, True),
-        (7, False),
-        (7, True),
-    ],
+    [(7, False), (7, True)],
 )
 def test_fake_usb_full_startup_recording_and_shutdown(
     tmp_path, config_version, ackless
@@ -721,11 +682,8 @@ def test_fake_usb_full_startup_recording_and_shutdown(
 @pytest.mark.parametrize(
     "mac,supported,error,config_version",
     [
-        ("02:00:00:00:00:ff", True, "identity mismatch", 2),
-        ("02:00:00:00:00:05", False, "rejected configuration", 2),
-        ("02:00:00:00:00:05", False, "rejected configuration", 3),
-        ("02:00:00:00:00:05", False, "rejected configuration", 4),
-        ("02:00:00:00:00:05", False, "lacks requested transport version", 5),
+        ("02:00:00:00:00:ff", True, "identity mismatch", 7),
+        ("02:00:00:00:00:05", False, "lacks requested transport version", 7),
     ],
 )
 def test_gateway_preflight_rejection_stops_without_sensing(
@@ -780,28 +738,28 @@ def test_switching_report_distinguishes_deadline_uncertainty(tmp_path):
     inv = inventory()
     (tmp_path / "manifest.json").write_text(
         json.dumps(
-            dict(
-                inventory=inv.as_dict(),
-                transport_config={"queue_capacity": 64},
-            )
+            {
+                "inventory": inv.as_dict(),
+                "transport_config": {"queue_capacity": 64},
+            }
         )
     )
     events = [
-        dict(kind="round", host_capture_ns=begin),
-        dict(kind="round", host_capture_ns=begin + 1_000_000_000),
-        dict(
-            kind="clock_exchange",
-            host_monotonic_ns=begin - 1,
-            estimate=dict(
-                receiver_boot_id=11,
-                reference_transmitter_us=0,
-                receiver_minus_transmitter_us=0,
-                drift_ppm=0,
-                uncertainty_us=100,
-                sample_count=8,
-                minimum_round_trip_us=200,
-            ),
-        ),
+        {"kind": "round", "host_capture_ns": begin},
+        {"kind": "round", "host_capture_ns": begin + 1_000_000_000},
+        {
+            "kind": "clock_exchange",
+            "host_monotonic_ns": begin - 1,
+            "estimate": {
+                "receiver_boot_id": 11,
+                "reference_transmitter_us": 0,
+                "receiver_minus_transmitter_us": 0,
+                "drift_ppm": 0,
+                "uncertainty_us": 100,
+                "sample_count": 8,
+                "minimum_round_trip_us": 200,
+            },
+        },
     ]
     for i, (lower_ms, upper_ms) in enumerate([(48, 49), (49, 51), (51, 52)]):
         start = 1_000_000 + i * 200_000
@@ -811,28 +769,31 @@ def test_switching_report_distinguishes_deadline_uncertainty(tmp_path):
         struct.pack_into("!I", grant, 36, zlib.crc32(grant[:36]))
         events.extend(
             [
-                dict(
-                    kind="radio_event",
-                    host_monotonic_ns=begin + i * 200_000_000,
-                    payload_hex=grant.hex(),
-                ),
-                dict(
-                    kind="channel_interval",
-                    grant_id=i + 1,
-                    receiver_id=inv.receivers[0].id,
-                    start_lower_ns=start * 1000 + 10_000_000,
-                    end_lower_ns=start * 1000 + lower_ms * 1_000_000,
-                    end_upper_ns=start * 1000 + upper_ms * 1_000_000,
-                ),
+                {
+                    "kind": "radio_event",
+                    "host_monotonic_ns": begin + i * 200_000_000,
+                    "payload_hex": grant.hex(),
+                },
+                {
+                    "kind": "channel_interval",
+                    "grant_id": i + 1,
+                    "receiver_id": inv.receivers[0].id,
+                    "start_lower_ns": start * 1000 + 10_000_000,
+                    "end_lower_ns": start * 1000 + lower_ms * 1_000_000,
+                    "end_upper_ns": start * 1000 + upper_ms * 1_000_000,
+                },
             ]
         )
     (tmp_path / "events.jsonl").write_text(
         "".join(json.dumps(e) + "\n" for e in events)
     )
     report = evaluate(tmp_path, warmup_s=0, measurement_s=1, qualification=False)
-    assert report["slot_return_evidence"] == dict(
-        before_deadline=1, after_deadline=1, uncertain=1, unmapped=0
-    )
+    assert report["slot_return_evidence"] == {
+        "before_deadline": 1,
+        "after_deadline": 1,
+        "uncertain": 1,
+        "unmapped": 0,
+    }
     assert report["upload_start_spacing_ms"]["mean"] == 200
     assert (
         report["receivers"][inv.receivers[0].id]["observed_recovery_upper_ms"][
@@ -850,34 +811,34 @@ def test_qualification_reports_losses_uncertainty_and_incomplete_evidence(tmp_pa
     inv = inventory()
     (tmp_path / "manifest.json").write_text(
         json.dumps(
-            dict(inventory=inv.as_dict(), transport_config={"queue_capacity": 64})
+            {"inventory": inv.as_dict(), "transport_config": {"queue_capacity": 64}}
         )
     )
     events = [
-        dict(kind="round", host_capture_ns=begin),
-        dict(kind="round", host_capture_ns=begin + 1_000_000_000),
+        {"kind": "round", "host_capture_ns": begin},
+        {"kind": "round", "host_capture_ns": begin + 1_000_000_000},
     ]
     for receiver in inv.receivers:
         for i in range(50):
             captured = begin + i * 20_000_000
             events.append(
-                dict(
-                    kind="record",
-                    receiver_id=receiver.id,
-                    capture_host_ns=captured,
-                    available_ns=captured + 10_000_000,
-                    clock_uncertainty_us=10,
-                )
+                {
+                    "kind": "record",
+                    "receiver_id": receiver.id,
+                    "capture_host_ns": captured,
+                    "available_ns": captured + 10_000_000,
+                    "clock_uncertainty_us": 10,
+                }
             )
         for t in [begin + 1, begin + 999_999_999]:
             events.append(
-                dict(
-                    kind="receiver_status",
-                    receiver_id=receiver.id,
-                    host_monotonic_ns=t,
-                    queued=1,
-                    peak=4,
-                )
+                {
+                    "kind": "receiver_status",
+                    "receiver_id": receiver.id,
+                    "host_monotonic_ns": t,
+                    "queued": 1,
+                    "peak": 4,
+                }
             )
     (tmp_path / "events.jsonl").write_text(
         "".join(json.dumps(e) + "\n" for e in events)
@@ -913,7 +874,7 @@ def test_ackless_host_validates_deduplicates_without_ack(tmp_path):
     records = []
     m = manager(tmp_path, lambda r, t: records.append(r))
     m.config = EspnowTransportConfig(
-        schema_version=5, application_acknowledgements=False, maximum_retries=0
+        schema_version=7, application_acknowledgements=False, maximum_retries=0
     )
     assert m.accept(batch().encode(), time.monotonic_ns())
     assert m.accept(batch().encode(), time.monotonic_ns())
@@ -931,7 +892,7 @@ def test_ackless_recorder_failure_remains_fatal(tmp_path):
 
     m = manager(tmp_path, fail)
     m.config = EspnowTransportConfig(
-        schema_version=5, application_acknowledgements=False, maximum_retries=0
+        schema_version=7, application_acknowledgements=False, maximum_retries=0
     )
     with pytest.raises(OSError, match="disk full"):
         m.accept(batch().encode(), time.monotonic_ns())

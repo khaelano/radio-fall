@@ -3,8 +3,7 @@
 This document describes the deferred direct-C5 BLE experiment. Current operation
 uses `configs/radio.json` and the [dedicated C6 UART relay](uart-transmitter-relay.md).
 The split-file commands below are historical; their preset filenames have been
-removed from the live configuration directory. For deliberate BLE experiments,
-copy the single file and set `connection.transmitter_link` to `ble`.
+removed from the live configuration directory. Direct BLE transmitter control has been removed from the host software.
 
 
 These notes describe the direct-C5 BLE experiment. The separate

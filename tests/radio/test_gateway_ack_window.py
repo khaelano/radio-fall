@@ -1,10 +1,13 @@
 """Exercise gateway acceptance caching while immediate ACK forwarding is limited."""
 
+import shutil
+import subprocess
 from pathlib import Path
-import shutil, subprocess
+
 import pytest
 from test_gateway_io import _idf_headers
 from test_gateway_tuning import identities
+
 from fall_detection.radio.espnow_config import EspnowTransportConfig
 
 
@@ -155,7 +158,7 @@ int main(int argc,char **argv){
         [
             str(exe),
             EspnowTransportConfig(
-                schema_version=5 if ackless else 4,
+                schema_version=7,
                 maximum_retries=0 if ackless else 2,
                 application_acknowledgements=not ackless,
             )

@@ -22,11 +22,11 @@ def test_complete_application_closes_inputs_and_windows(
     application_name, fail_start, tmp_path, monkeypatch
 ):
     if application_name == "viewer":
-        from fall_detection.radio.visualization import app as command
+        from fall_detection.apps.csi_viewer import app as command
 
         title = "CSI viewer"
     else:
-        from fall_detection.collection import app as command
+        from fall_detection.apps.collector import app as command
 
         title = "Collection operator"
         monkeypatch.setattr(
@@ -118,7 +118,7 @@ def test_complete_application_closes_inputs_and_windows(
 
 
 def test_canceling_collection_setup_releases_unstarted_camera(tmp_path, monkeypatch):
-    from fall_detection.collection import app as command
+    from fall_detection.apps.collector import app as command
     from fall_detection.collection import video
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
@@ -163,7 +163,7 @@ def test_canceling_collection_setup_releases_unstarted_camera(tmp_path, monkeypa
 def test_canceling_scenario_file_selection_does_not_initialize_inputs(
     tmp_path, monkeypatch
 ):
-    from fall_detection.collection import app as command
+    from fall_detection.apps.collector import app as command
     from fall_detection.collection import video
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
@@ -188,8 +188,8 @@ def test_canceling_scenario_file_selection_does_not_initialize_inputs(
 
 
 def test_scenario_file_selection_recovers_from_invalid_json(tmp_path, monkeypatch):
-    from fall_detection.collection import app as command
-    from fall_detection.collection.views.dialogs import choose_protocol
+    from fall_detection.apps.collector import app as command
+    from fall_detection.apps.collector.views.dialogs import choose_protocol
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     invalid = tmp_path / "invalid.json"

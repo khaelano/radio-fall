@@ -5,13 +5,13 @@ import json
 
 import pytest
 
+from fall_detection.apps.collector.app import _parser as collection_parser
+from fall_detection.apps.csi_viewer.app import _parser as viewer_parser
 from fall_detection.radio.settings import (
     DEFAULT_CONFIG,
     RadioSettings,
     resolve_settings,
 )
-from fall_detection.radio.visualization.app import _parser as viewer_parser
-from fall_detection.collection.app import _parser as collection_parser
 
 
 def test_default_configuration_preserves_provisioned_sensing_contract():
@@ -27,6 +27,24 @@ def test_default_configuration_preserves_provisioned_sensing_contract():
     assert settings.transport.maximum_age_ms == 750
     assert not settings.transport.application_acknowledgements
     settings.transport.validate(settings.inventory, settings.profile)
+
+
+@pytest.mark.parametrize("section", ["inventory", "sensing"])
+def test_operational_configuration_rejects_retired_profile_schema(tmp_path, section):
+    value = json.loads(DEFAULT_CONFIG.read_text())
+    value[section]["schema_version"] = 1
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match=f"{section}.schema_version must be 2"):
+        RadioSettings.load(path)
+
+
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6])
+def test_retired_gateway_policy_versions_are_rejected(version):
+    from fall_detection.radio.espnow_config import EspnowTransportConfig
+
+    with pytest.raises(ValueError, match="policy/PHY"):
+        EspnowTransportConfig(schema_version=version)
 
 
 @pytest.mark.parametrize("parser", [viewer_parser, collection_parser])
@@ -89,6 +107,7 @@ def test_configuration_rejects_unknown_fields(tmp_path, section):
         {"sensing": []},
         {"transport": {"schema_version": 7, "queue_capacity": 97}},
         {"connection": {"transmitter_link": "typo"}},
+        {"connection": {"transmitter_link": "ble"}},
         {"connection": {"gateway_port": ""}},
     ],
 )
@@ -99,19 +118,6 @@ def test_configuration_rejects_invalid_settings(tmp_path, change):
     path.write_text(json.dumps(value))
     with pytest.raises(ValueError):
         RadioSettings.load(path)
-
-
-def test_configuration_rejects_conflicting_legacy_flags():
-    args = viewer_parser().parse_args(
-        [
-            "--config",
-            str(DEFAULT_CONFIG),
-            "--receiver-config",
-            "old-inventory.json",
-        ]
-    )
-    with pytest.raises(ValueError, match="cannot be combined"):
-        resolve_settings(args)
 
 
 def test_dry_run_uses_configuration_without_opening_usb(monkeypatch, capsys):

@@ -1,8 +1,8 @@
 """Exercise actual send serialization with a deterministic ESP-IDF callback seam."""
 
-from pathlib import Path
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -162,7 +162,7 @@ int main(void){
     subprocess.run([str(executable)], check=True)
 
 
-@pytest.mark.parametrize("config_version", [3, 4])
+@pytest.mark.parametrize("config_version", [7])
 def test_receiver_retries_return_notice_until_new_grant(tmp_path, config_version):
     from fall_detection.radio.espnow_config import EspnowTransportConfig
     from fall_detection.radio.profile import RadioInventory, RadioProfile
@@ -291,31 +291,40 @@ int main(int argc,char **argv){
     # stdio is a harness dependency, not an addition to the firmware module.
     source.write_text("#include <stdio.h>\n" + source.read_text())
     inventory = RadioInventory.from_mapping(
-        dict(
-            schema_version=2,
-            transmitter=dict(
-                id="tx", role="transmitter", target="esp32c5", mac="02:00:00:00:00:01"
-            ),
-            receivers=[
-                dict(
-                    id="rx", role="receiver", target="esp32c5", mac="02:00:00:00:00:02"
-                )
+        {
+            "schema_version": 2,
+            "transmitter": {
+                "id": "tx",
+                "role": "transmitter",
+                "target": "esp32c5",
+                "mac": "02:00:00:00:00:01",
+            },
+            "receivers": [
+                {
+                    "id": "rx",
+                    "role": "receiver",
+                    "target": "esp32c5",
+                    "mac": "02:00:00:00:00:02",
+                }
             ],
-            gateway=dict(
-                id="gw", role="gateway", target="esp32c6", mac="02:00:00:00:00:03"
-            ),
-        )
+            "gateway": {
+                "id": "gw",
+                "role": "gateway",
+                "target": "esp32c6",
+                "mac": "02:00:00:00:00:03",
+            },
+        }
     )
     profile = RadioProfile.from_mapping(
-        dict(
-            schema_version=1,
-            profile_id="test",
-            country_code="ID",
-            band="5ghz",
-            channel=44,
-            bandwidth_mhz=20,
-            nominal_rate_hz=80,
-        )
+        {
+            "schema_version": 1,
+            "profile_id": "test",
+            "country_code": "ID",
+            "band": "5ghz",
+            "channel": 44,
+            "bandwidth_mhz": 20,
+            "nominal_rate_hz": 80,
+        }
     )
     config = EspnowTransportConfig(
         schema_version=config_version,

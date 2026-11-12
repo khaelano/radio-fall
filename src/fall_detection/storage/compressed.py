@@ -1,7 +1,7 @@
 """Logical access to independently framed Zstandard recording files."""
 
-from contextlib import contextmanager
 import io
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -57,7 +57,7 @@ def physical_path(path: Path) -> Path:
 
 @contextmanager
 def open_binary(path: Path):
-    """Read legacy bytes or all concatenated Zstandard frames."""
+    """Read plain files or all concatenated Zstandard frames."""
     path = physical_path(path)
     with path.open("rb") as stream:
         if path.suffix == ".zst":

@@ -1,31 +1,31 @@
 """ACK-less mode is versioned and cannot silently enable retries or bitmap ACKs."""
 
-from dataclasses import replace
-from pathlib import Path
 import shutil
 import subprocess
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
+from test_gateway_tuning import identities
 
 from fall_detection.radio.espnow_config import EspnowTransportConfig
-from test_gateway_tuning import identities
 
 
 def test_ackless_config_contract_and_c_decoder(tmp_path):
     inventory, profile = identities()
     config = EspnowTransportConfig(
-        schema_version=5, application_acknowledgements=False, maximum_retries=0
+        schema_version=7, application_acknowledgements=False, maximum_retries=0
     )
     raw = config.encode(123, inventory, profile)
-    assert raw[4] == 5 and raw[103] == 4 and len(raw) == 108
+    assert raw[4] == 7 and raw[103] == 4 and len(raw) == 108
     assert config.fingerprint(inventory, profile) != replace(
         config, application_acknowledgements=True
     ).fingerprint(inventory, profile)
     for change in [
-        dict(schema_version=4),
-        dict(maximum_retries=1),
-        dict(batch_acknowledgements=True),
-        dict(application_acknowledgements=0),
+        {"schema_version": 4},
+        {"maximum_retries": 1},
+        {"batch_acknowledgements": True},
+        {"application_acknowledgements": 0},
     ]:
         with pytest.raises(ValueError):
             replace(config, **change)

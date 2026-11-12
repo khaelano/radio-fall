@@ -1,13 +1,13 @@
 """Synthetic live-worker/GIL and offscreen GUI checks; never opens radio hardware."""
 
 import argparse
-from dataclasses import fields
 import json
 import os
-from pathlib import Path
 import statistics
 import sys
 import time
+from dataclasses import fields
+from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
@@ -56,13 +56,13 @@ def synthetic_runtime(bundle: ModelBundle) -> dict:
                 for record in records:
                     adapter = NativeRecord(
                         record,
-                        dict(
-                            capture_host_monotonic_ns=captured,
-                            capture_clock_uncertainty_us=1.0,
-                            run_id=1,
-                            transmitter_boot_id=2,
-                            receiver_boot_id=3,
-                        ),
+                        {
+                            "capture_host_monotonic_ns": captured,
+                            "capture_clock_uncertainty_us": 1.0,
+                            "run_id": 1,
+                            "transmitter_boot_id": 2,
+                            "receiver_boot_id": 3,
+                        },
                     )
                     engine.on_record(adapter, captured)
                 next_packet = now + 0.01
@@ -78,11 +78,11 @@ def synthetic_runtime(bundle: ModelBundle) -> dict:
                 finally:
                     sys.setswitchinterval(previous)
                 after = json.loads(engine.native.stats_json())["windows"]
-                gap_check = dict(
-                    before=before,
-                    after=after,
-                    native_windows_during_gil_hold=after - before,
-                )
+                gap_check = {
+                    "before": before,
+                    "after": after,
+                    "native_windows_during_gil_hold": after - before,
+                }
                 injected = True
             time.sleep(0.001)
         events.extend(engine.tick())
@@ -92,20 +92,20 @@ def synthetic_runtime(bundle: ModelBundle) -> dict:
         assert state["native"]["overflow"] == 0, state
         assert predictions, "Synthetic scorer produced no valid predictions"
         assert gap_check["native_windows_during_gil_hold"] > 0, gap_check
-        return dict(
-            scope="Synthetic repeated CSI, not a hardware rate/accuracy result",
-            duration_s=time.monotonic() - began,
-            native=state["native"],
-            predictions=len(predictions),
-            gil_hold=gap_check,
-            median_native_window_ms=statistics.median(
+        return {
+            "scope": "Synthetic repeated CSI, not a hardware rate/accuracy result",
+            "duration_s": time.monotonic() - began,
+            "native": state["native"],
+            "predictions": len(predictions),
+            "gil_hold": gap_check,
+            "median_native_window_ms": statistics.median(
                 p["preprocessing_ms"] for p in predictions
             ),
-            median_inference_ms=statistics.median(
+            "median_inference_ms": statistics.median(
                 p["inference_ms"] for p in predictions
             ),
-            skipped_inference=state["skipped_inference"],
-        )
+            "skipped_inference": state["skipped_inference"],
+        }
     finally:
         engine.close()
 
@@ -114,7 +114,8 @@ def gui_smoke(bundle: ModelBundle, output: Path) -> dict:
     """Run real widgets with explicitly synthetic snapshots and save an offscreen image."""
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6 import QtCore, QtWidgets
-    from fall_detection.detection.app import _gui
+
+    from fall_detection.apps.detector.app import _gui
     from fall_detection.radio.acquisition.gateway_diagnostics import (
         GatewayDiagnostics,
         ReceiverDiagnostics,
@@ -157,13 +158,13 @@ def gui_smoke(bundle: ModelBundle, output: Path) -> dict:
             self.bundle = bundle
 
         def status(self):
-            return dict(
-                prediction=dict(probability=0.62, candidate=True),
-                quality=dict(valid=True, phase_change_coverage=[0.84] * 4),
-                failure="",
-                native=dict(kernel="avx2", pending=0, overflow=0),
-                skipped_inference=0,
-            )
+            return {
+                "prediction": {"probability": 0.62, "candidate": True},
+                "quality": {"valid": True, "phase_change_coverage": [0.84] * 4},
+                "failure": "",
+                "native": {"kernel": "avx2", "pending": 0, "overflow": 0},
+                "skipped_inference": 0,
+            }
 
     def snapshot():
         for widget in application.topLevelWidgets():
@@ -172,13 +173,13 @@ def gui_smoke(bundle: ModelBundle, output: Path) -> dict:
                 widget.grab().save(str(output))
 
     QtCore.QTimer.singleShot(500, snapshot)
-    result = _gui(SimpleNamespace(duration=0.8), radio, Engine(), lambda: [])
+    result = _gui(SimpleNamespace(duration=0.8), radio, Engine(), list)
     assert result == 0 and output.is_file()
-    return dict(
-        exit_code=result,
-        image=str(output),
-        scope="Offscreen synthetic GUI lifecycle only",
-    )
+    return {
+        "exit_code": result,
+        "image": str(output),
+        "scope": "Offscreen synthetic GUI lifecycle only",
+    }
 
 
 def main() -> None:
@@ -193,10 +194,10 @@ def main() -> None:
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     bundle = ModelBundle.load(args.model)
-    result = dict(
-        runtime=synthetic_runtime(bundle),
-        gui=gui_smoke(bundle, args.output_dir / "gui-smoke.png"),
-    )
+    result = {
+        "runtime": synthetic_runtime(bundle),
+        "gui": gui_smoke(bundle, args.output_dir / "gui-smoke.png"),
+    }
     (args.output_dir / "summary.json").write_text(
         json.dumps(result, indent=2, allow_nan=False) + "\n"
     )

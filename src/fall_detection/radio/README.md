@@ -8,8 +8,8 @@ for another setup or `--transmitter-link usb` for USB reference recovery.
 
 See the [gateway procedure](../../../docs/espnow-gateway.md) for builds, stable
 identity provisioning, commands, wire contracts, and staged hardware evaluation.
-Historical BLE and USB recordings remain readable. Live BLE discovery and
-hardware collection have been retired; no Bluetooth package is required.
+Live BLE discovery, hardware collection, and BLE-specific readers have been
+retired; no Bluetooth package is required.
 
 The viewer and collector share acquisition setup, plotting, diagnostics pacing
 and display caches. Their **CSI gaps** tab compares all receivers on a common

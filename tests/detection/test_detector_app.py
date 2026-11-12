@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from fall_detection.detection import app
+from fall_detection.apps.detector import app
 
 
 def test_help_does_not_open_hardware(capsys):
@@ -35,10 +35,10 @@ def test_headless_program_owns_startup_logging_and_cleanup(tmp_path, monkeypatch
             calls.append("engine-closed")
 
         def tick(self, **kw):
-            return [dict(kind="prediction", probability=0.4)]
+            return [{"kind": "prediction", "probability": 0.4}]
 
         def status(self):
-            return dict(prediction=None)
+            return {"prediction": None}
 
     class Radio:
         def __init__(self, *a, **kw):
@@ -122,6 +122,7 @@ def test_headless_phase_models_start_before_radio_and_log_each_score_once(
     tmp_path, monkeypatch
 ):
     import json
+
     from fall_detection.detection import phase_models
 
     calls = []

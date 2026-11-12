@@ -4,9 +4,9 @@ import os
 
 import pytest
 
+from fall_detection.apps.csi_viewer.app import _parser
 from fall_detection.radio.acquisition.gateway_reader import GatewayReceiverManager
 from fall_detection.radio.live import LiveRadio
-from fall_detection.radio.visualization.app import _parser
 
 
 class OfflineManager(GatewayReceiverManager):
@@ -79,7 +79,8 @@ def test_live_dashboard_limits_diagnostics_and_updates_selection_immediately(
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
-    from fall_detection.radio.visualization.live import LiveDashboard
+
+    from fall_detection.presentation.radio.live import LiveDashboard
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     radio = LiveRadio(_parser().parse_args([]), manager_factory=OfflineManager)

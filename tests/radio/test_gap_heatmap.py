@@ -6,8 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from fall_detection.radio.acquisition.availability import AvailabilityGrid
-from fall_detection.radio.visualization.gaps import (
+from fall_detection.presentation.radio.gaps import (
     GAP,
     PENDING,
     RECEIVED,
@@ -15,6 +14,7 @@ from fall_detection.radio.visualization.gaps import (
     CsiGapPanel,
     gap_values,
 )
+from fall_detection.radio.acquisition.availability import AvailabilityGrid
 
 
 def test_gap_snapshot_matches_deadlines_and_never_backfills_late_delivery():
@@ -69,7 +69,7 @@ def qt_app():
 
 
 def test_gap_panel_shows_all_receivers_and_refreshes_silence_at_four_hz(qt_app):
-    from fall_detection.radio.visualization.dashboard import qt_modules
+    from fall_detection.presentation.radio.dashboard import qt_modules
 
     grid = AvailabilityGrid(("rx-1", "rx-2", "rx-3", "rx-4"), 0)
     panel = CsiGapPanel(
@@ -97,8 +97,8 @@ def test_gap_tab_skips_phase_work_obeys_backlog_guard_and_rebinds_after_recovery
     qt_app,
     monkeypatch,
 ):
-    from fall_detection.radio.visualization.live import LiveDashboard
-    from fall_detection.radio.visualization.state import LiveState
+    from fall_detection.presentation.radio.live import LiveDashboard
+    from fall_detection.radio.state import LiveState
 
     state = LiveState(120)
     for method in ("snapshot", "prepare_phase_views"):

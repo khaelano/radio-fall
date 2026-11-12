@@ -244,11 +244,25 @@ dependencies = [
  "memchr",
  "num-complex",
  "pyo3",
+ "radio-preprocessing",
+ "radio-signal",
  "rayon",
  "serde",
  "serde_json",
  "zstd",
 ]
+
+[[package]]
+name = "radio-preprocessing"
+version = "0.1.0"
+dependencies = [
+ "pyo3",
+ "rayon",
+]
+
+[[package]]
+name = "radio-signal"
+version = "0.1.0"
 
 [[package]]
 name = "rayon"

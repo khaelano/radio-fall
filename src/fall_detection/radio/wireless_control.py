@@ -5,20 +5,21 @@ from __future__ import annotations
 import argparse
 import json
 import secrets
-from threading import Event, Lock, Thread
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from threading import Event, Lock, Thread
+from typing import Any
 
 from .acquisition.serial_framing import SerialFrameStreamDecoder, encode_serial_frame
 from .acquisition.wireless_reference import WirelessReferenceSerial
 from .profile import RadioInventory
-from .settings import add_config_argument, resolve_settings
 from .provisioning import (
     DeviceStatus,
+    ProvisioningError,
     RadioProvisioner,
     SerialProvisioningDevice,
-    ProvisioningError,
 )
+from .settings import add_config_argument, resolve_settings
 
 
 class WirelessProvisioningDevice(SerialProvisioningDevice):
@@ -43,12 +44,12 @@ class GatewayWirelessPort:
         self,
         port: str,
         serial_factory: Callable[..., Any] | None = None,
-        transmitter_link: str = "ble",
+        transmitter_link: str = "espnow_uart",
     ) -> None:
-        if transmitter_link not in {"ble", "espnow_uart"}:
+        if transmitter_link != "espnow_uart":
             raise ValueError("unsupported wireless transmitter link")
-        self._prefix = "relay" if transmitter_link == "espnow_uart" else "wireless"
-        self._version = 1 if transmitter_link == "espnow_uart" else 2
+        self._prefix = "relay"
+        self._version = 1
         if serial_factory is None:
             from serial import Serial
 
@@ -74,10 +75,7 @@ class GatewayWirelessPort:
                 raise RuntimeError(
                     "gateway lacks the paired wireless reference firmware"
                 )
-            if (
-                transmitter_link == "espnow_uart"
-                and self.gateway_status.get("relay_transport") != "espnow_uart"
-            ):
+            if self.gateway_status.get("relay_transport") != "espnow_uart":
                 raise RuntimeError("gateway relay transport mismatch")
             deadline = time.monotonic() + 8
             while (
@@ -122,7 +120,7 @@ class GatewayWirelessPort:
                                 )
                                 + "; reset both endpoints"
                             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — thread error boundary
             if not self._stop.is_set():
                 self.failure = str(exc)
                 self.serial.close()
@@ -154,7 +152,7 @@ def pair_devices(
     gateway_port: str,
     inventory: RadioInventory,
     *,
-    transmitter_link: str = "ble",
+    transmitter_link: str = "espnow_uart",
     channel: int = 6,
 ) -> None:
     """Verify both identities before storing a fresh shared key over USB.
@@ -164,9 +162,8 @@ def pair_devices(
     """
     from serial import Serial
 
-    if transmitter_link not in {"ble", "espnow_uart"} or not 1 <= channel <= 13:
+    if transmitter_link != "espnow_uart" or not 1 <= channel <= 13:
         raise ValueError("invalid pairing transport/channel")
-    relay = transmitter_link == "espnow_uart"
     if not inventory.gateway or tx_port == gateway_port:
         raise ValueError("distinct identified transmitter/gateway ports required")
     devices = []
@@ -182,14 +179,14 @@ def pair_devices(
             devices.append(connection)
             raw = discover_port(connection)
             identities.append(raw)
-            if relay and expected is inventory.transmitter:
+            if expected is inventory.transmitter:
                 if (raw.get("role"), raw.get("target"), raw.get("relay_version")) != (
                     "relay",
                     "esp32c6",
                     1,
                 ):
                     raise ValueError("pairing requires the UART companion C6 USB port")
-            elif relay:
+            else:
                 if (
                     raw.get("role"),
                     raw.get("target"),
@@ -197,24 +194,16 @@ def pair_devices(
                     raw.get("relay_version"),
                 ) != ("gateway", "esp32c6", expected.mac, 1):
                     raise ValueError("pairing relay gateway identity mismatch")
-            elif (
-                raw.get("role"),
-                raw.get("target"),
-                raw.get("mac"),
-                raw.get("wireless_version"),
-            ) != (expected.role, expected.target, expected.mac, 2):
-                raise ValueError("pairing firmware/identity mismatch")
             if raw.get("radio_active") or raw.get("configured"):
                 raise ValueError("stop sensing before pairing")
-        source_mac = identities[0]["mac"] if relay else inventory.transmitter.mac
+        source_mac = identities[0]["mac"]
         payload = (
-            (b"CRPS" if relay else b"CWPS")
+            b"CRPS"
             + bytes.fromhex(source_mac.replace(":", ""))
             + bytes.fromhex(inventory.gateway.mac.replace(":", ""))
             + secrets.token_bytes(32)
         )
-        if relay:
-            payload += bytes([channel])
+        payload += bytes([channel])
         for connection in devices:
             # A separate response adapter avoids printing the pairing payload.
             adapter = SerialProvisioningDevice(
@@ -232,11 +221,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="csi-radio transmitter", description=__doc__)
     parser.add_argument("action", choices=("pair", "status", "provision"))
     parser.add_argument("--gateway-port")
-    parser.add_argument("--transmitter-link", choices=("ble", "espnow_uart"))
+    parser.add_argument("--transmitter-link", choices=("espnow_uart",))
     parser.add_argument("--channel", type=int, help="paired ESP-NOW backhaul channel")
-    parser.add_argument(
-        "--port", help="initial pairing USB: C5 for BLE, companion C6 for espnow_uart"
-    )
+    parser.add_argument("--port", help="initial pairing USB for the companion C6")
     add_config_argument(parser)
     args = parser.parse_args(argv)
     pairing_port = args.port
@@ -246,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(exc))
     inventory = settings.inventory
     if args.transmitter_link == "usb":
-        parser.error("wireless control requires espnow_uart or ble transmitter_link")
+        parser.error("wireless control requires espnow_uart transmitter_link")
     if not args.gateway_port:
         parser.error("gateway port is required")
     if args.channel is not None and args.channel != settings.transport.channel:
@@ -256,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
     args.channel = settings.transport.channel
     if args.action == "pair":
         # Pairing uses the companion USB port, while USB fallback uses the C5.
-        if args.transmitter_link == "espnow_uart" and pairing_port is None:
+        if pairing_port is None:
             args.port = settings.connection.get("companion_port")
         if not args.port:
             parser.error("pair requires --port for the identified source board")
@@ -267,9 +254,7 @@ def main(argv: list[str] | None = None) -> int:
             transmitter_link=args.transmitter_link,
             channel=args.channel,
         )
-        source = (
-            "companion C6" if args.transmitter_link == "espnow_uart" else "transmitter"
-        )
+        source = "companion C6"
         print(
             f"Paired identified {source} and gateway; keys stored only on the boards."
         )

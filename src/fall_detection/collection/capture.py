@@ -2,22 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import os
 import re
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from threading import RLock
 from typing import Any, TextIO
 
-from ..storage.compressed import physical_path, read_bytes
 from ..contracts import ARTIFACT_SCHEMA_VERSION
 from ..radio.acquisition.clock_sync import ClockSyncEstimate, ClockSyncSample
 from ..radio.acquisition.protocol import CSI_HEADER, CsiRecord, format_csi_record
 from ..radio.acquisition.recording_io import RecordingIO
+from ..storage.compressed import read_bytes
 from .protocol import CollectionProtocol, Trial
-
 
 TIMING_HEADER = (
     "sequence,receiver_mac,transport_sequence,tx_enqueue_timestamp_us,"
@@ -69,36 +68,6 @@ def _lock_events(stream: TextIO) -> None:
             raise ValueError("session is already open in another collector") from exc
 
 
-def _reject_legacy_writer(path: Path) -> None:
-    """Detect Linux writers launched before session locks were introduced."""
-    if not Path("/proc").is_dir():
-        return
-    target = path.stat()
-    for process in Path("/proc").iterdir():
-        if not process.name.isdigit() or int(process.name) == os.getpid():
-            continue
-        try:
-            for descriptor in (process / "fd").iterdir():
-                try:
-                    value = descriptor.stat()
-                    if (value.st_dev, value.st_ino) != (target.st_dev, target.st_ino):
-                        continue
-                    for line in (
-                        (process / "fdinfo" / descriptor.name).read_text().splitlines()
-                    ):
-                        if (
-                            line.startswith("flags:")
-                            and int(line.split()[1], 8) & os.O_ACCMODE
-                        ):
-                            raise ValueError(
-                                "session is already open in another collector"
-                            )
-                except (OSError, PermissionError):
-                    continue
-        except (OSError, PermissionError):
-            continue
-
-
 class TrialCapture:
     """Thread-safe, receiver-split writers for one trial attempt."""
 
@@ -124,7 +93,7 @@ class TrialCapture:
             mac.lower(): receiver_id for mac, receiver_id in receiver_ids.items()
         }
         self._receiver_streams: dict[str, tuple[TextIO, TextIO]] = {}
-        self._ble_streams: dict[str, TextIO] = {}
+        self._gateway_streams: dict[str, TextIO] = {}
         self._clock_streams: dict[str, TextIO] = {}
         for receiver_id in sorted(set(self.receiver_ids.values())):
             receiver_path = self.path / "receivers" / _slug(receiver_id)
@@ -156,7 +125,9 @@ class TrialCapture:
         if self._io:
             self._io.check()
         streams = [s for pair in self._receiver_streams.values() for s in pair]
-        streams += list(self._clock_streams.values()) + list(self._ble_streams.values())
+        streams += list(self._clock_streams.values()) + list(
+            self._gateway_streams.values()
+        )
         return all(getattr(s, "saved", s.closed) for s in streams)
 
     def write_radio(self, record: CsiRecord, host_receive_monotonic_ns: int) -> None:
@@ -182,33 +153,30 @@ class TrialCapture:
                 f"{host_receive_monotonic_ns}\n"
             )
             if record.run_id is not None:
-                self._write_ble_timing(receiver_id, record, host_receive_monotonic_ns)
+                self._write_gateway_timing(
+                    receiver_id, record, host_receive_monotonic_ns
+                )
 
-    def _write_ble_timing(
+    def _write_gateway_timing(
         self, receiver_id: str, record: CsiRecord, arrival_ns: int
     ) -> None:
-        if receiver_id not in self._ble_streams:
-            filename = (
-                "gateway_timing.jsonl"
-                if record.transport == "espnow_gateway"
-                else "ble_timing.jsonl"
-            )
-            path = self.path / "receivers" / _slug(receiver_id) / filename
-            self._ble_streams[receiver_id] = self._open(path, "x", encoding="utf-8")
-        value = dict(
-            schema_version=1,
-            sequence=record.sequence,
-            receiver_mac=record.receiver_mac,
-            run_id=str(record.run_id),
-            transmitter_boot_id=record.transmitter_boot_id,
-            receiver_boot_id=record.receiver_boot_id,
-            rx_radio_timestamp_us=record.timestamp_us,
-            tx_enqueue_timestamp_us=record.tx_timestamp_us,
-            capture_host_monotonic_ns=record.capture_host_monotonic_ns,
-            clock_uncertainty_us=record.capture_clock_uncertainty_us,
-            host_receive_monotonic_ns=arrival_ns,
-        )
-        self._ble_streams[receiver_id].write(
+        if receiver_id not in self._gateway_streams:
+            path = self.path / "receivers" / _slug(receiver_id) / "gateway_timing.jsonl"
+            self._gateway_streams[receiver_id] = self._open(path, "x", encoding="utf-8")
+        value = {
+            "schema_version": 1,
+            "sequence": record.sequence,
+            "receiver_mac": record.receiver_mac,
+            "run_id": str(record.run_id),
+            "transmitter_boot_id": record.transmitter_boot_id,
+            "receiver_boot_id": record.receiver_boot_id,
+            "rx_radio_timestamp_us": record.timestamp_us,
+            "tx_enqueue_timestamp_us": record.tx_timestamp_us,
+            "capture_host_monotonic_ns": record.capture_host_monotonic_ns,
+            "clock_uncertainty_us": record.capture_clock_uncertainty_us,
+            "host_receive_monotonic_ns": arrival_ns,
+        }
+        self._gateway_streams[receiver_id].write(
             json.dumps(value, separators=(",", ":")) + "\n"
         )
 
@@ -234,7 +202,7 @@ class TrialCapture:
             )
 
     def close_streams(self) -> None:
-        """Close writers after the optional BLE drain interval."""
+        """Close writers after the optional radio drain interval."""
         with self._lock:
             for csi_file, timing_file in self._receiver_streams.values():
                 if not csi_file.closed:
@@ -243,7 +211,10 @@ class TrialCapture:
                     csi_file.close()
                     timing_file.close()
 
-            for stream in (*self._ble_streams.values(), *self._clock_streams.values()):
+            for stream in (
+                *self._gateway_streams.values(),
+                *self._clock_streams.values(),
+            ):
                 if not stream.closed:
                     stream.flush()
                     stream.close()
@@ -251,7 +222,7 @@ class TrialCapture:
     def finish(
         self, status: str, *, defer_close: bool = False, **updates: Any
     ) -> dict[str, Any]:
-        """Publish final metadata, optionally deferring stream closure for BLE."""
+        """Publish final metadata, optionally deferring stream closure during radio drain."""
 
         with self._lock:
             if not defer_close:
@@ -316,7 +287,7 @@ class SessionArtifactStore:
             "notes": metadata.notes,
             "protocol_id": protocol.protocol_id,
             "protocol_hash": protocol.source_hash,
-            "started_at_utc": datetime.now(timezone.utc).isoformat(),
+            "started_at_utc": datetime.now(UTC).isoformat(),
             "status": "open",
             "environment": environment or {},
         }
@@ -328,7 +299,6 @@ class SessionArtifactStore:
         """Lock and validate an existing session before allowing any mutation."""
         from .resume import load_session_resume
 
-        _reject_legacy_writer(physical_path(root / "events.jsonl"))
         stream = (
             recording_io.open(root / "events.jsonl", "a")
             if recording_io
@@ -367,13 +337,13 @@ class SessionArtifactStore:
         """Append the new process epoch while retaining original session inputs."""
         previous = self._session.get("status")
         ended = self._session.pop("ended_monotonic_ns", None)
-        value = dict(
-            resumed_at_utc=datetime.now(timezone.utc).isoformat(),
-            resumed_monotonic_ns=monotonic_ns,
-            previous_status=previous,
-            previous_ended_monotonic_ns=ended,
-            environment=environment,
-        )
+        value = {
+            "resumed_at_utc": datetime.now(UTC).isoformat(),
+            "resumed_monotonic_ns": monotonic_ns,
+            "previous_status": previous,
+            "previous_ended_monotonic_ns": ended,
+            "environment": environment,
+        }
         boot = Path("/proc/sys/kernel/random/boot_id")
         value["host_boot_id"] = boot.read_text().strip() if boot.exists() else None
         self._session.setdefault("resumptions", []).append(value)

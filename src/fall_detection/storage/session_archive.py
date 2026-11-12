@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
 import tempfile
 import zipfile
+from pathlib import Path, PurePosixPath
 
-from .compressed import physical_path, open_binary, decoded_stream
+from .compressed import decoded_stream, open_binary, physical_path
 from .tables import convert_csv_to_parquet
 
 _FORMAT = "fall-detection-session-archive"
@@ -59,7 +59,7 @@ def verify_archive(path: str | Path) -> dict:
         if len(set(names)) != len(names) or "manifest.json" not in names:
             raise ValueError("duplicate members or missing manifest")
         manifest = json.loads(archive.read("manifest.json"))
-        if manifest.get("format") != _FORMAT or manifest.get("version") not in {1, 2}:
+        if manifest.get("format") != _FORMAT or manifest.get("version") != 2:
             raise ValueError("unsupported archive format")
         entries = manifest["files"] + manifest["tables"]
         declared = []
@@ -169,7 +169,7 @@ def _create_archive(
     initial = _inventory(source)
     manifest = {
         "format": _FORMAT,
-        "version": 2 if any(p.endswith(".zst") for p in initial) else 1,
+        "version": 2,
         "session_id": session["session_id"],
         "files": [],
         "tables": [],

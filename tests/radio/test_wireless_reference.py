@@ -1,27 +1,27 @@
 """Connectionless bridge ordering, bounded buffering, and actual host startup."""
 
-import json
 import hashlib
 import hmac
-from pathlib import Path
+import json
 import shutil
 import struct
 import subprocess
 import time
 import zlib
+from pathlib import Path
 
 import pytest
+from test_gateway import FakeUsb, batch, inventory, profile
 
+from fall_detection.radio.acquisition.gateway_reader import GatewayReceiverManager
 from fall_detection.radio.acquisition.serial_framing import (
     decode_serial_frame,
     encode_serial_frame,
 )
-from fall_detection.radio.acquisition.wireless_reference import WirelessReferenceSerial
-from fall_detection.radio.acquisition.gateway_reader import GatewayReceiverManager
 from fall_detection.radio.acquisition.transmitter_reference import ROUND
+from fall_detection.radio.acquisition.wireless_reference import WirelessReferenceSerial
 from fall_detection.radio.espnow_config import EspnowTransportConfig
 from fall_detection.radio.profile import profile_fingerprint
-from test_gateway import FakeUsb, inventory, profile, batch
 
 
 def test_wireless_serial_demultiplexes_and_bounds_queue():
@@ -255,21 +255,21 @@ class WirelessUsb(FakeUsb):
     def write(self, data):
         frame = decode_serial_frame(data[1:-1])
         if frame.type == 5:
-            status = dict(
-                role="gateway",
-                target="esp32c6",
-                mac=self.mac,
-                protocol_version=3,
-                transport_config_max_version=7,
-                csi_transport="espnow_gateway",
-                boot_id=99,
-                wireless_version=2,
-                wireless_paired=self.paired,
-                wireless_ready=True,
-                wireless_fault=False,
-                wireless_drops=0,
-                wireless_peer_changes=0,
-            )
+            status = {
+                "role": "gateway",
+                "target": "esp32c6",
+                "mac": self.mac,
+                "protocol_version": 3,
+                "transport_config_max_version": 7,
+                "csi_transport": "espnow_gateway",
+                "boot_id": 99,
+                "wireless_version": 2,
+                "wireless_paired": self.paired,
+                "wireless_ready": True,
+                "wireless_fault": False,
+                "wireless_drops": 0,
+                "wireless_peer_changes": 0,
+            }
             if self.link == "espnow_uart":
                 status = {
                     (
@@ -284,17 +284,17 @@ class WirelessUsb(FakeUsb):
         elif frame.type == 26:
             kind, payload = frame.payload[0], frame.payload[1:]
             if kind == 5:
-                status = dict(
-                    role="transmitter",
-                    mac=inventory().transmitter.mac,
-                    protocol_version=3,
-                    ready=True,
-                    sensing_version=4,
-                    csi_transport="espnow_gateway",
-                    sensing_phy="he20",
-                    transport_config_max_version=7,
-                    profile_fingerprint=profile_fingerprint(profile(), inventory()),
-                )
+                status = {
+                    "role": "transmitter",
+                    "mac": inventory().transmitter.mac,
+                    "protocol_version": 3,
+                    "ready": True,
+                    "sensing_version": 4,
+                    "csi_transport": "espnow_gateway",
+                    "sensing_phy": "he20",
+                    "transport_config_max_version": 7,
+                    "profile_fingerprint": profile_fingerprint(profile(), inventory()),
+                }
                 self.inject(27, b"\x06" + json.dumps(status).encode())
             elif kind == 20:
                 self.wireless_commands.append(payload[:4])
@@ -328,7 +328,7 @@ class WirelessUsb(FakeUsb):
 
 
 @pytest.mark.parametrize("paired", [True, False])
-@pytest.mark.parametrize("link", ["ble", "espnow_uart"])
+@pytest.mark.parametrize("link", ["espnow_uart"])
 def test_gateway_only_usb_uses_real_wireless_reference(tmp_path, paired, link):
     usb = WirelessUsb(paired, link)
     seen = []
@@ -365,7 +365,7 @@ def test_gateway_only_usb_uses_real_wireless_reference(tmp_path, paired, link):
         assert b"CGGO" not in usb.wireless_commands
 
 
-@pytest.mark.parametrize("link", ["ble", "espnow_uart"])
+@pytest.mark.parametrize("link", ["espnow_uart"])
 def test_wireless_missing_boot_evidence_fails_within_bound(tmp_path, link):
     class MissingStatusUsb(WirelessUsb):
         def inject(self, kind, payload):

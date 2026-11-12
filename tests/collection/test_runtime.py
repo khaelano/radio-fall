@@ -4,12 +4,15 @@ from contextlib import ExitStack
 from types import SimpleNamespace
 
 import pytest
+from test_controller import FakeClock, make_controller
 
+from fall_detection.apps.collector.runtime import (
+    CollectionPresenter,
+    running_collection,
+)
 from fall_detection.collection.capture import SessionMetadata
 from fall_detection.collection.controller import OperatorCommand, SessionState
-from fall_detection.collection.runtime import CollectionPresenter, running_collection
-from fall_detection.radio.visualization.transport_status import TransportStatusText
-from test_controller import FakeClock, make_controller
+from fall_detection.presentation.radio.transport_status import TransportStatusText
 
 
 @pytest.mark.parametrize(
@@ -53,7 +56,7 @@ def test_collection_cleans_partial_startup_and_continues_after_cleanup_failure(f
 def test_presenter_checks_health_each_tick_without_reprobing_storage(
     tmp_path, monkeypatch
 ):
-    from fall_detection.collection import runtime
+    from fall_detection.apps.collector import runtime
 
     clock = FakeClock()
     controller = make_controller(tmp_path, clock)
@@ -126,7 +129,7 @@ def test_presenter_checks_health_each_tick_without_reprobing_storage(
 def test_output_writable_checks_actual_output_and_nearest_existing_parent(
     tmp_path, monkeypatch
 ):
-    from fall_detection.collection import runtime
+    from fall_detection.apps.collector import runtime
 
     checked = []
     monkeypatch.setattr(

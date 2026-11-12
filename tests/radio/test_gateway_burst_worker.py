@@ -1,10 +1,13 @@
 """Compare actual receiver-worker burst progress with deterministic radio timing."""
 
+import shutil
+import subprocess
 from pathlib import Path
-import shutil, subprocess
+
 import pytest
 from test_gateway_io import _idf_headers
 from test_gateway_tuning import identities
+
 from fall_detection.radio.espnow_config import EspnowTransportConfig
 
 
@@ -124,7 +127,7 @@ int main(int argc,char **argv){
     )
     inv, profile = identities()
     raw = EspnowTransportConfig(
-        schema_version=5 if ackless else 4,
+        schema_version=7,
         maximum_age_ms=750,
         maximum_retries=0 if ackless else 2,
         ack_timeout_ms=150,

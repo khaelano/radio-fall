@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from fall_detection.storage import Recording, create_archive
 from fall_detection.collection.archive import finalize_recording
+from fall_detection.storage import Recording, create_archive
 
 
 def test_archive_extracts_every_original_byte_and_reads_tables(tmp_path):
@@ -25,9 +25,8 @@ def test_archive_extracts_every_original_byte_and_reads_tables(tmp_path):
         assert recording.compare_source(source)["files"] == 3
         extracted = recording.extract(tmp_path / "extracted")
         assert recording.compare_source(extracted)["files"] == 3
-        with pytest.raises(FileNotFoundError):
-            with recording.open("../session.json"):
-                pass
+        with pytest.raises(FileNotFoundError), recording.open("../session.json"):
+            pass
         with pytest.raises(FileExistsError):
             recording.extract(extracted)
         (source / "binary.bin").write_bytes(b"changed")
@@ -38,7 +37,9 @@ def test_archive_extracts_every_original_byte_and_reads_tables(tmp_path):
 
 def test_collector_finalizes_after_resource_cleanup(tmp_path, monkeypatch):
     from types import SimpleNamespace
-    from fall_detection.collection import app, archive
+
+    from fall_detection.apps.collector import app
+    from fall_detection.collection import archive
 
     calls = []
     root = tmp_path / "session"

@@ -57,8 +57,7 @@ must be measured separately from C5. See the [C6 coexistence guide](https://docs
 
 ### Timing experiments
 
-`python -m fall_detection.radio.experiments.ble_timing` runs explicit development
-comparisons and records each command, policy, raw session, and derived report.
+The retired BLE timing runner recorded each command, policy, raw session, and derived report.
 It supports continuous submission, multi-round turns, batch size, requested
 connection interval, and submission pacing. Normal collection rejects a non-null
 `experiment` configuration. Collection defaults and existing fingerprints are

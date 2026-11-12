@@ -40,14 +40,19 @@ notebook = [
     "ipykernel>=6,<8",
     "nbconvert>=7,<8",
 ]
+onnx = [
+    "onnx>=1.17",
+    "onnxruntime>=1.20",
+    "onnxscript>=0.5",
+]
 
 [project.scripts]
-csi-viewer = "fall_detection.radio.visualization.app:main"
+csi-viewer = "fall_detection.apps.csi_viewer.app:main"
 csi-radio = "fall_detection.radio.provisioning:main"
 csi-gateway-benchmark = "fall_detection.radio.experiments.gateway:main"
-fall-collection = "fall_detection.collection.app:main"
-fall-session-inspector = "fall_detection.session_inspector.app:main"
-fall-detect = "fall_detection.detection.app:main"
+fall-collection = "fall_detection.apps.collector.app:main"
+fall-session-inspector = "fall_detection.apps.session_inspector.app:main"
+fall-detect = "fall_detection.apps.detector.app:main"
 
 [dependency-groups]
 dev = [
@@ -70,6 +75,9 @@ cache-keys = [
     { file = "src/native/radio_core/Cargo.toml" },
     { file = "src/native/radio_core/Cargo.lock" },
     { file = "src/native/radio_core/src/*.rs" },
+    { file = "src/native/radio_core/src/**/*.rs" },
+    { file = "src/native/radio_core/crates/**/*.rs" },
+    { file = "src/native/radio_core/crates/**/Cargo.toml" },
 ]
 
 [[tool.uv.index]]

@@ -41,6 +41,10 @@ uv run csi-radio provision --dry-run
 uv run csi-viewer --transmitter-link usb
 ```
 
+The host accepts gateway transport policy version 7 and operational inventory
+and sensing-profile schema 2 only. Older versions are rejected before hardware
+is opened.
+
 ## Applying changes
 
 Changes to the sensing profile require provisioning all C5 sensing boards before

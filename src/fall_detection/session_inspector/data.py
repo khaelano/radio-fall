@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import csv
+import json
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from io import StringIO
-import json
 from math import atan2, hypot
 from pathlib import Path
-from typing import Callable, Iterable
 
 import numpy as np
 
@@ -22,9 +22,8 @@ from ..radio.preprocessing.phase import (
     HT20_SLOT_INDICES,
     HT20_VALID_SUBCARRIERS,
 )
-from ..radio.visualization.rendering import PreparedCsiFrame, prepare_frame
+from ..radio.preprocessing.rendering import PreparedCsiFrame, prepare_frame
 from .models import RecordedAttempt
-
 
 CancellationCallback = Callable[[], bool]
 MAX_PLOT_RECORDS = 800
@@ -461,7 +460,7 @@ def _attempt_times(attempt, receiver_id, records, row_indices, csi, timing, cloc
     sidecar = next(
         (
             directory / name
-            for name in ["gateway_timing.jsonl", "ble_timing.jsonl"]
+            for name in ["gateway_timing.jsonl"]
             if (directory / name).is_file()
         ),
         None,

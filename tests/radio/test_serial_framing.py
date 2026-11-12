@@ -1,18 +1,16 @@
-from pathlib import Path
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from fall_detection.radio.acquisition.serial_framing import (
     MAX_PAYLOAD,
-    TYPE_CSI_PACKET,
     TYPE_CLOCK_SYNC,
+    TYPE_CSI_PACKET,
     TYPE_GATEWAY_STATS,
     SerialFrameError,
     SerialFrameStreamDecoder,
-    cobs_decode,
-    cobs_encode,
     decode_serial_frame,
     encode_serial_frame,
 )
@@ -28,11 +26,10 @@ from fall_detection.radio.acquisition.serial_framing import (
         bytes(index % 251 for index in range(MAX_PAYLOAD)),
     ],
 )
-def test_cobs_round_trip(payload: bytes):
-    encoded = cobs_encode(payload)
-
-    assert b"\x00" not in encoded
-    assert cobs_decode(encoded) == payload
+def test_frame_round_trip_with_zeros(payload: bytes):
+    framed = encode_serial_frame(TYPE_CSI_PACKET, payload)
+    assert b"\x00" not in framed[1:-1]
+    assert decode_serial_frame(framed[1:-1]).payload == payload
 
 
 def test_serial_frame_round_trip_preserves_type_and_maximum_payload():

@@ -1,0 +1,22 @@
+# BEGIN jupyter-agent-bridge MCP server
+[mcp_servers.jupyter-agent-bridge]
+command = "node"
+args = [
+  "/home/fall-detector/.vscodium-server/extensions/alendit.jupyter-agent-bridge-0.12.1-universal/frontend-mcp/dist/frontend-mcp/src/main.js",
+  "/home/fall-detector/radio-fall/.jupyter-agent-bridge/bridge/port",
+]
+
+[mcp_servers.jupyter-agent-bridge.env]
+
+[mcp_servers.jupyter-agent-bridge.tools.open_notebook]
+approval_mode = "approve"
+
+[mcp_servers.jupyter-agent-bridge.tools.patch_cell_source]
+approval_mode = "approve"
+
+[mcp_servers.jupyter-agent-bridge.tools.replace_cell_source]
+approval_mode = "approve"
+
+[mcp_servers.jupyter-agent-bridge.tools.delete_cell]
+approval_mode = "approve"
+# END jupyter-agent-bridge MCP server

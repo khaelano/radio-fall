@@ -18,7 +18,7 @@ Bachelor’s thesis on fall detection using WiFi CSI recorded with ESP32-C5 radi
 - Preserve raw data; create derived artifacts only. Never commit large data files to Git. DVC is installed: use `uv run dvc` for data versioning, inspect existing tracking/configuration first, and commit relevant DVC metadata with code. Do not overwrite raw data or change remotes casually.
 - Keep thesis text and literature syntheses in descriptive `draft/*.md` files, supporting material in `docs/`, code in `src/`, and experiments in `notebooks/`.
 - Never invent results; state uncertainty and unfinished work. Fix random seeds and record dataset versions.
-- Hard requirement: use the provided jupyter-agent-bridge MCP tools for all interactions with notebook files, including reading, editing, executing, and saving. Before editing, save any pending notebook changes through the bridge and confirm they are saved. Refuse to write directly to `.ipynb` files or bypass the bridge; if the bridge is unavailable, stop notebook work and report the blocker. Disobedience will result in a severe penalty.
+- Hard requirement: use the provided jupyter-agent-bridge MCP tools for all interactions with notebook files, including reading, editing, and executing. Before editing, ensure there is no stale code in the notebook buffer. Refuse to write directly to `.ipynb` files or bypass the bridge; if the bridge is unavailable, stop notebook work and report the blocker. Disobedience will result in a severe penalty.
 - After modifying any piece of code, inspect its direct upstream and downstream relationships, including callers, dependencies, and consumers of its outputs. Assess how the change affects directly connected code and adjust these codes when necessary.
 
 ## Development and Validation

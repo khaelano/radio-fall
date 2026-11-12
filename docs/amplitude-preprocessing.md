@@ -1,96 +1,67 @@
 # Amplitude preprocessing with Polars and Rust
 
-## Synchronized raw magnitude at 96 Hz
+## Current sequence experiment
 
-`notebooks/latest/02_preprocess.ipynb` uses
-`analysis/sequence_preprocessing.py` to process Khaelano
-(`20261104T081805521126Z`), Akmal (`20261109T131546367822Z`), and continuous
-non-fall (`20261109T161519702956Z`). It selects accepted attempts unless review
-metadata excludes them. The existing archive-aware loader verifies source
-checksums and reuses the canonical Parquet cache. Raw archives and previous
-derived datasets remain unchanged.
+[`02_preprocess.ipynb`](../notebooks/latest/02_preprocess.ipynb) defines the
+experiment directly: source sessions, attempt selection, sampling rate, filtering,
+squared differences, cue labels, windows, export transformation, and figures.
+`analysis/sequence_preprocessing.py` provides alignment primitives and verified
+source/export access. The notebook calls the shared Rust-backed magnitude and
+Hampel operations; moving orchestration does not move these kernels to Python.
 
-Projected Parquet reads and Polars handle metadata. The magnitude-only Rust
-entry point keeps the existing HE20 masks without min–max scaling. Rayon defaults
-to all available logical CPUs (16 on this laptop). Restart an existing notebook
-kernel before changing its already initialized Rayon pool.
+The default selects Khaelano (`20261104T081805521126Z`), Akmal
+(`20261109T131546367822Z`), and continuous non-fall
+(`20261109T161519702956Z`). Accepted attempts are retained unless review metadata
+excludes them. Verified version-2 sources are selected by the shared archive
+loader. Raw archives are preserved.
 
-Intermediate arrays are uncompressed NPY files, loaded through read-only memory
-maps. Hampel and squared differences add only their new arrays; existing arrays
-are not rewritten. Stage checkpoints bind source fingerprints, parameters, code,
-and output file identities. A completed dataset reuses its audit tables and index
-without opening signal arrays. Source-cache hits check file identities and the
-previously verified archive/Parquet manifest; changed source files return to the
-canonical validation path. Normal cache reads are not forensic integrity audits.
+At 120 Hz, retain every source round. At 96 Hz, select nearest source rounds
+with ties upward, without interpolation or an anti-alias filter. Receivers share
+a sequence anchor and nominal grid. Missing rounds remain NaN; actual capture
+times remain separate, with −1 indicating absence. Keep the first duplicate,
+unwrap uint32 rollover, and reject unresolved backward jumps. Attempts, runs,
+transmitter boots, receiver reboots, and all-receiver recording gaps remain
+separate. The notebook sets the gap threshold to one second.
 
-All receivers share one sequence anchor per segment. Nearest-round selection
-converts nominal 120 Hz to 96 Hz, with ties upward, without interpolation or an
-anti-alias filter. Missing selected rounds remain NaN. The first duplicate wins;
-duplicate and rollover counts are reported. Legitimate uint32 rollover unwraps;
-unresolved backward jumps fail. Attempts, run changes, transmitter boots, and
-receiver reboots remain separate. A recording gap is defined here as at least
-one second without any sensing packet in the union of receiver streams. Shorter
-losses remain explicit holes; this boundary rule does not impose a coverage
-cutoff. The gap duration is recorded in the manifest.
+The default centered Hampel neighborhood is 0.5 seconds, with threshold 3,
+scaled-MAD factor 1.4826, and at least five finite values. Zero MAD leaves the
+center unchanged. Consecutive squared differences propagate missingness and
+never cross segment boundaries. Centered filtering uses future samples; this
+representation is exploratory and offline.
 
-Grid times use nominal 96 Hz ticks anchored by the median of observed capture
-time minus sequence offset/120. Retained source sequence numbers and actual
-per-receiver capture times are also stored; capture time −1 means no selected
-packet. Grid time is a nominal coordinate, not an interpolation of signal values.
+The notebook defines 2-, 4-, and 6-second windows with 50% overlap. Complete
+windows must fit within the recorded attempt. Fall windows receive target 1
+when their center falls inside the action cue; other windows from fall attempts
+are omitted. Recognized non-fall activities receive target 0. Cues are not
+measured impact annotations. Boundary and label omissions are counted separately;
+coverage is reported without imposing an exclusion threshold.
 
-Centered Hampel uses a 0.5 s inclusive neighborhood, threshold 3, at least five
-finite samples, and the existing scaled-MAD factor 1.4826. Zero MAD leaves the
-center unchanged. Missing values remain missing. Squared consecutive differences
-follow filtering and propagate missing values from either endpoint. Each
-segment starts with an invalid difference; no difference crosses a boundary.
+Outputs live in `data/processed/amplitude_sequence/<rate>hz/<dataset>/`.
+Each segment signal is float32 `log1p(squared_difference)` in
+`[time, receiver, subcarrier]` order, with NaNs for invalid samples. At 120 Hz,
+a separate receiver-presence mask distinguishes packet absence from signal
+invalidity. The window index records slices, labels, coverage, and grouping
+identifiers. A signal ledger and manifest record sizes, hashes, source identity,
+parameters, notebook code, and numerical-helper fingerprints. Signal publication
+is atomic; Btrfs compression is disabled for new signal files when supported.
 
-Window start plus duration must fit inside the recorded attempt interval,
-even when nominal grid timing drifts slightly beyond an edge. Boundary omissions
-and cue-label omissions are reported separately. Complete 2/4/6 s windows contain
-192/384/576 samples with 50% overlap. All four
-receivers share each boundary. Fall windows receive target 1 only when their
-center lies in the recorded action cue [start, end); other windows from fall
-attempts are omitted. Non-fall activities, including continuous non-fall,
-receive target 0. Action cues approximate an activity interval and are not
-impact annotations. Coverage never causes an exclusion, and missing values
-are never filled. Centered filtering uses future samples and may extend beyond
-an interior window boundary within the same segment. This is an offline
-representation; causal live preprocessing needs a separate design.
+Intermediate NPY arrays are memory-mapped and retained for inspection. Stage
+checkpoints reuse unchanged files only when source and processing identities
+match. Completed exports are checked against the explicit experiment parameters
+before reuse. `dataset.load_exported(verify_hashes=True)` performs a full signal
+checksum audit. Normal cache reads are not forensic integrity audits.
 
-Training outputs live in `data/processed/amplitude_sequence_v2/<dataset>/`.
-Each `signals/<segment_id>.npy` contains one float32
-`log1p(squared_difference)` matrix in `[time, receiver, subcarrier]` order.
-Invalid samples are NaN. The memory-mapped loader derives validity from finite
-values, then zero fills and standardizes valid values before appending mask
-channels. `window_index.parquet` stores the 2/4/6-second slice boundaries,
-targets, coverage, grouping IDs, and recording provenance. `signals.parquet`
-records each file's logical length, byte size, and SHA-256; `manifest.json`
-records the schema version, source, parameters, coordinates, counts, and table
-hashes. Btrfs compression is disabled on newly written signal files; other
-filesystems use the same NPY format. Copy-on-write and checksums remain enabled.
+Figure definitions live beside their processing stages. Shared preview reads
+select at most 1,200 time points; window overlays are limited to 24 per duration.
+Availability aggregates each display bin so short gaps remain visible. Other
+previews can omit short transients. Shared robust magnitude scales support
+cross-dataset comparisons. Figures are rendered inline; set `ENABLE_PLOTS=False`
+to skip them. Summary tables cover the full selected data.
 
-Intermediate preprocessing arrays retain amplitude, filtering, masks, phase,
-and timing needed for audit figures while the workflow runs. After a direct v2
-export, only the representative segment cache remains. Migrated datasets also
-retain their review tables, figures, and representative cache. The raw archives
-remain authoritative for regenerating other audit arrays. Full signal checksum
-scans require `load_exported(verify_hashes=True)`. The migration tool verifies
-overlap consistency while writing and compares every saved window with v1 in a
-separate pass. No training split is assigned here. The earlier v1 NPZ contract
-and run measurements remain in the dated v1 report.
-Stage figures show deterministic representative
-segments, while summary tables cover the complete datasets; figures are saved
-beside the derived reports in `reports/figures/`.
-
-Figure previews sample at most 1,200 time points and overlay at most 24 windows
-per duration. Availability is shown as the fraction of available source samples
-inside each display bin; preview thinning can omit short signal transients, but
-does not affect exported tensors or full-dataset summaries. Each stage reads
-only arrays needed for its figure. Saved PNGs and robust shared color scales are
-reused when their inputs and display settings match; `plot_stage(...,
-refresh=True)` forces a redraw. A new figure is rendered once and that PNG is
-embedded in the notebook, avoiding a second inline render. The notebook uses
-`ENABLE_PLOTS = True`; set it to `False` to skip rendering.
+`03_training.ipynb` selects datasets, durations, split fractions, and seed
+explicitly. Shared splitting preserves attempt groups across durations, and the
+normalizer fits only training windows. The notebook defines CNN, LSTM, GRU, and
+the training loop; the separate standalone trainer has been removed.
 
 Reproduce with:
 
@@ -98,6 +69,10 @@ Reproduce with:
 uv sync --inexact --extra analysis --extra notebook --reinstall-package radio-fall-detection
 uv run --no-sync jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=1800 notebooks/latest/02_preprocess.ipynb
 ```
+
+Restart the kernel after changing the initialized Rayon thread count or rebuilding
+the native extension. Historical measurements below describe earlier runs, not
+performance measurements of the notebook refactor.
 
 ## Earlier per-recording workflow
 

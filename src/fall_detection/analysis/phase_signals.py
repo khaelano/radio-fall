@@ -1,13 +1,12 @@
 """Load a single receiver's physical CSI phase matrices for exploratory plots."""
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from ..radio.acquisition.clock_sync import ClockSyncEstimator, ClockSyncSample
 from ..radio.preprocessing.phase import decode_ltf_blocks
 
 
@@ -44,10 +43,8 @@ def load_capture_packets(
     """Load all CSI rows with validated timing and recording identifiers.
 
     Uses the canonical LTF decoder and its amplitude/physical-slot masks.
-    BLE captures use their validated mapped enqueue-time sidecar. USB receiver
-    callbacks use the recorded affine fit; unavailable USB sync falls back to
-    host receive timestamps, explicitly identified by ``time_source``. BLE
-    captures never silently substitute delivery time for sensing time.
+    Gateway captures require their validated mapped capture-time sidecar;
+    delivery time is never substituted for sensing time.
 
     Args:
         session_dir: Schema-2 session directory.
@@ -57,7 +54,7 @@ def load_capture_packets(
     Returns:
         Packet rows, including non-sensing packets, on the host event clock.
         Raw CSV payloads and flags remain unchanged. Capture time is distinct
-        from delivery time; ``time_source`` identifies any USB fallback.
+        from delivery time; ``time_source`` identifies the gateway clock mapping.
 
     Raises:
         ValueError: Identity, CSV alignment, payload, or timeline is invalid,
@@ -94,32 +91,32 @@ def load_capture_packets(
         raise ValueError("CSI and radio timing receiver timestamps do not align")
     if csi.empty:
         return csi
-    ble_path = receiver / "gateway_timing.jsonl"
-    if not ble_path.is_file():
-        ble_path = receiver / "ble_timing.jsonl"
-    if ble_path.is_file():
-        ble = pd.read_json(ble_path, lines=True, dtype={"run_id": str})
-        if (
-            len(ble) != len(timing)
-            or not ble["schema_version"].eq(1).all()
-            or not np.array_equal(ble["sequence"], timing["sequence"])
-            or not np.array_equal(
-                ble["rx_radio_timestamp_us"], timing["rx_radio_timestamp_us"]
-            )
-        ):
-            raise ValueError("BLE timing sidecar does not align with CSI")
-        if ble["run_id"].nunique() != 1 or ble["transmitter_boot_id"].nunique() != 1:
-            raise ValueError("BLE attempt mixes transmitter epochs")
-        timing["capture_host_monotonic_ns"] = ble["capture_host_monotonic_ns"]
-        timing["capture_clock_uncertainty_us"] = ble["clock_uncertainty_us"]
-        for name in ("run_id", "transmitter_boot_id", "receiver_boot_id"):
-            if name in ble:
-                timing[name] = ble[name].astype(str)
-        # Transport delivery can reorder records. Sort derived views only.
-        order = timing["capture_host_monotonic_ns"].sort_values(kind="stable").index
-        csi, timing = csi.loc[order], timing.loc[order]
-    elif manifest.get("environment", {}).get("transport") in {"ble", "espnow_gateway"}:
-        raise ValueError("BLE capture requires its capture-time sidecar")
+    gateway_path = receiver / "gateway_timing.jsonl"
+    if not gateway_path.is_file():
+        raise ValueError("Gateway capture requires its capture-time sidecar")
+    gateway = pd.read_json(gateway_path, lines=True, dtype={"run_id": str})
+    if (
+        len(gateway) != len(timing)
+        or not gateway["schema_version"].eq(1).all()
+        or not np.array_equal(gateway["sequence"], timing["sequence"])
+        or not np.array_equal(
+            gateway["rx_radio_timestamp_us"], timing["rx_radio_timestamp_us"]
+        )
+    ):
+        raise ValueError("Gateway timing sidecar does not align with CSI")
+    if (
+        gateway["run_id"].nunique() != 1
+        or gateway["transmitter_boot_id"].nunique() != 1
+    ):
+        raise ValueError("Gateway attempt mixes transmitter epochs")
+    timing["capture_host_monotonic_ns"] = gateway["capture_host_monotonic_ns"]
+    timing["capture_clock_uncertainty_us"] = gateway["clock_uncertainty_us"]
+    for name in ("run_id", "transmitter_boot_id", "receiver_boot_id"):
+        if name in gateway:
+            timing[name] = gateway[name].astype(str)
+    # Transport delivery can reorder records. Sort derived views only.
+    order = timing["capture_host_monotonic_ns"].sort_values(kind="stable").index
+    csi, timing = csi.loc[order], timing.loc[order]
     environment = manifest.get("environment", {})
     transmitter = (
         environment.get("radio_inventory", {})
@@ -130,9 +127,7 @@ def load_capture_packets(
     if not transmitter:
         raise ValueError("Session radio inventory must specify a transmitter MAC")
     origin = int(attempt["started_monotonic_ns"])
-    times, time_source, uncertainty = _event_times(
-        timing, receiver / "usb_clock_sync.csv", origin
-    )
+    times, time_source = _event_times(timing, origin)
     rate = environment.get("nominal_rate_hz") or environment.get(
         "radio_profile", {}
     ).get("nominal_rate_hz")
@@ -142,18 +137,12 @@ def load_capture_packets(
     for name in timing:
         if name not in packets:
             packets[name] = timing[name].to_numpy()
-    packets["capture_time_ns"] = (
-        timing["capture_host_monotonic_ns"].to_numpy(dtype=np.int64)
-        if "capture_host_monotonic_ns" in timing
-        else origin + np.rint(times * 1e9).astype(np.int64)
+    packets["capture_time_ns"] = timing["capture_host_monotonic_ns"].to_numpy(
+        dtype=np.int64
     )
     packets["time_seconds"] = times
     packets["time_source"] = time_source
-    packets["clock_uncertainty_us"] = (
-        timing["capture_clock_uncertainty_us"].to_numpy()
-        if "capture_clock_uncertainty_us" in timing
-        else uncertainty
-    )
+    packets["clock_uncertainty_us"] = timing["capture_clock_uncertainty_us"].to_numpy()
     packets["attempt_id"] = attempt_id
     packets["receiver_id"] = receiver_id
     packets["attempt_started_monotonic_ns"] = origin
@@ -304,64 +293,10 @@ def _phase_trend(raw, values, indices):
     return float(slope), float(mean_y - slope * mean_x)
 
 
-def _event_times(timing, sync_path, origin_ns):
-    if "capture_host_monotonic_ns" in timing:
-        captured = pd.to_numeric(
-            timing["capture_host_monotonic_ns"], errors="coerce"
-        ).to_numpy()
-        if not np.isfinite(captured).all():
-            raise ValueError("BLE capture clock alignment is unavailable")
-        uncertainty = pd.to_numeric(
-            timing["capture_clock_uncertainty_us"], errors="coerce"
-        ).to_numpy()
-        bound = float(np.max(uncertainty)) if np.isfinite(uncertainty).all() else None
-        return (
-            (captured - origin_ns) / 1e9,
-            "transmitter enqueue mapped by USB affine fit (BLE)",
-            bound,
-        )
-    host_times = (
-        timing["host_receive_monotonic_ns"].to_numpy(dtype=np.int64) - origin_ns
-    ) / 1e9
-    fallback = (host_times, "host receive (USB buffering included)", None)
-    if not sync_path.is_file() or "rx_callback_timestamp_us" not in timing:
-        return fallback
-    callbacks = pd.to_numeric(
-        timing["rx_callback_timestamp_us"], errors="coerce"
+def _event_times(timing, origin_ns):
+    captured = pd.to_numeric(
+        timing["capture_host_monotonic_ns"], errors="coerce"
     ).to_numpy()
-    if not np.isfinite(callbacks).all():
-        return fallback
-    sync = pd.read_csv(sync_path)
-    if sync.empty or sync["receiver_boot_id"].nunique() != 1:
-        return fallback
-    # The legacy gateway uses transmitter time as its reference. Only the USB
-    # exchange (zero radio timestamps) has the same host clock as phase events.
-    if not (sync["rx_radio_t2_us"].eq(0) & sync["tx_radio_t4_us"].eq(0)).all():
-        return fallback
-    estimator = ClockSyncEstimator()
-    for row in sync.sort_values("host_receive_monotonic_ns").itertuples(index=False):
-        sample = ClockSyncSample(
-            sync_id=int(row.sync_id),
-            sensing_sequence=int(row.sensing_sequence),
-            receiver_boot_id=int(row.receiver_boot_id),
-            tx_t1_us=int(row.tx_t1_us),
-            rx_t2_us=int(row.rx_t2_us),
-            rx_t3_us=int(row.rx_t3_us),
-            tx_t4_us=int(row.tx_t4_us),
-            rx_radio_t2_us=int(row.rx_radio_t2_us),
-            tx_radio_t4_us=int(row.tx_radio_t4_us),
-            receiver_mac=str(row.receiver_mac),
-        )
-        if (
-            sample.round_trip_us < 0
-            or sample.tx_t4_us < sample.tx_t1_us
-            or sample.rx_t3_us < sample.rx_t2_us
-        ):
-            raise ValueError("Invalid clock-sync exchange")
-        estimator.add(sample)
-    estimate = estimator.estimate
-    mapped = np.fromiter(
-        (estimate.receiver_to_transmitter(value) for value in callbacks), dtype=float
-    )
-    seconds = (mapped - origin_ns / 1000) / 1e6
-    return seconds, "receiver callback → host (USB affine fit)", estimate.uncertainty_us
+    if not np.isfinite(captured).all():
+        raise ValueError("Gateway capture clock alignment is unavailable")
+    return (captured - origin_ns) / 1e9, "gateway capture clock mapping"

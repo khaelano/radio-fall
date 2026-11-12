@@ -28,6 +28,7 @@ def phase_capture(tmp_path):
             {
                 "artifact_schema_version": 2,
                 "environment": {
+                    "transport": "espnow_gateway",
                     "nominal_rate_hz": 100,
                     "radio_inventory": {
                         "transmitter": {"mac": "aa:bb:cc:dd:ee:ff"},
@@ -84,24 +85,22 @@ def phase_capture(tmp_path):
         )
     _write_csv(receiver / "csi.csv", csi_rows)
     _write_csv(receiver / "radio_timing.csv", timing_rows)
-    sync_rows = []
-    for index, host in enumerate([1_000_000, 1_200_000, 1_400_000]):
-        sync_rows.append(
-            {
-                "host_receive_monotonic_ns": (host + 15_000) * 1000,
-                "sync_id": index,
-                "sensing_sequence": index,
-                "receiver_boot_id": 1,
-                "tx_t1_us": host,
-                "tx_t4_us": host + 2,
-                "rx_t2_us": host + 5000,
-                "rx_t3_us": host + 5002,
-                "rx_radio_t2_us": 0,
-                "tx_radio_t4_us": 0,
-                "receiver_mac": "11:22:33:44:55:66",
-            }
-        )
-    _write_csv(receiver / "usb_clock_sync.csv", sync_rows)
+    sidecar = [
+        {
+            "schema_version": 1,
+            "sequence": index,
+            "rx_radio_timestamp_us": 100_000 + index * 100_000,
+            "run_id": "123",
+            "transmitter_boot_id": 11,
+            "receiver_boot_id": 21,
+            "capture_host_monotonic_ns": 1_100_000_000 + index * 100_000_000,
+            "clock_uncertainty_us": 100,
+        }
+        for index in range(4)
+    ]
+    (receiver / "gateway_timing.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in sidecar)
+    )
     return root, receiver
 
 
@@ -130,28 +129,25 @@ def test_load_phase_signal_preserves_physical_axis_and_canonical_calibration(
         )
     assert np.nanstd(signal.calibrated_phase[1]) > np.nanstd(signal.calibrated_phase[0])
     np.testing.assert_allclose(signal.time_seconds, [0.1, 0.2, 0.3], atol=1e-12)
-    assert "USB affine fit" in signal.time_source
+    assert "gateway" in signal.time_source
     assert signal.skipped_layout_rows == 0
 
 
-def test_load_phase_signal_labels_host_receive_fallback(phase_capture):
+def test_load_phase_signal_requires_gateway_capture_time(phase_capture):
     root, receiver = phase_capture
-    (receiver / "usb_clock_sync.csv").unlink()
-    signal = load_phase_signal(root, "001/01", "rx-1")
-    np.testing.assert_allclose(signal.time_seconds, [0.15, 0.25, 0.35])
-    assert "buffering included" in signal.time_source
-    assert signal.sync_uncertainty_us is None
+    (receiver / "gateway_timing.jsonl").unlink()
+    with pytest.raises(ValueError, match="capture-time sidecar"):
+        load_phase_signal(root, "001/01", "rx-1")
 
 
-def test_load_phase_signal_does_not_mix_receiver_boots(phase_capture):
+def test_load_phase_signal_rejects_mixed_transmitter_epochs(phase_capture):
     root, receiver = phase_capture
-    path = receiver / "usb_clock_sync.csv"
-    with path.open() as stream:
-        rows = list(csv.DictReader(stream))
-    rows[-1]["receiver_boot_id"] = 2
-    _write_csv(path, rows)
-    signal = load_phase_signal(root, "001/01", "rx-1")
-    assert "host receive" in signal.time_source
+    path = receiver / "gateway_timing.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    rows[-1]["transmitter_boot_id"] = 12
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    with pytest.raises(ValueError, match="mixes transmitter epochs"):
+        load_phase_signal(root, "001/01", "rx-1")
 
 
 def test_load_phase_signal_rejects_misaligned_timing(phase_capture):
@@ -194,40 +190,31 @@ def test_load_phase_signal_requires_existing_receiver(phase_capture):
         load_phase_signal(root, "001/01", "rx-2")
 
 
-def test_ble_phase_uses_capture_clock_sidecar_and_sorts_derived_view(phase_capture):
+def test_gateway_phase_uses_capture_clock_sidecar_and_sorts_derived_view(phase_capture):
     root, receiver = phase_capture
     values = [1_100_000_000, 1_050_000_000, 1_200_000_000, 1_300_000_000]
     rows = [
-        dict(
-            schema_version=1,
-            sequence=i,
-            rx_radio_timestamp_us=100000 + i * 100000,
-            run_id="123",
-            transmitter_boot_id=11,
-            capture_host_monotonic_ns=value,
-            clock_uncertainty_us=100,
-        )
+        {
+            "schema_version": 1,
+            "sequence": i,
+            "rx_radio_timestamp_us": 100000 + i * 100000,
+            "run_id": "123",
+            "transmitter_boot_id": 11,
+            "capture_host_monotonic_ns": value,
+            "clock_uncertainty_us": 100,
+        }
         for i, value in enumerate(values)
     ]
-    (receiver / "ble_timing.jsonl").write_text(
+    (receiver / "gateway_timing.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in rows)
     )
     signal = load_phase_signal(root, "001/01", "rx-1")
     np.testing.assert_allclose(signal.time_seconds, [0.05, 0.1, 0.2])
-    assert "BLE" in signal.time_source and signal.sync_uncertainty_us == 100
+    assert "gateway" in signal.time_source and signal.sync_uncertainty_us == 100
     # The view is sorted; immutable source rows retain their original order.
     assert (
-        json.loads((receiver / "ble_timing.jsonl").read_text().splitlines()[0])[
+        json.loads((receiver / "gateway_timing.jsonl").read_text().splitlines()[0])[
             "sequence"
         ]
         == 0
     )
-
-
-def test_ble_analysis_refuses_arrival_time_fallback_when_sidecar_missing(phase_capture):
-    root, _ = phase_capture
-    manifest = json.loads((root / "session.json").read_text())
-    manifest["environment"]["transport"] = "ble"
-    (root / "session.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="capture-time sidecar"):
-        load_phase_signal(root, "001/01", "rx-1")

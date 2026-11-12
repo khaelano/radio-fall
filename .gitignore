@@ -27,6 +27,9 @@ src/*.egg-info/
 # Regenerable figures
 /docs/figures/
 
+# Local notebook runs, figures, and temporary outputs; models are tracked via DVC.
+/artifacts/
+
 # Codex artifacts
 .codex-build/
 .codex-finalizer/

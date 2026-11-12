@@ -23,7 +23,7 @@ verified identities, sensing profile, upload policy and stable USB paths.
 The [configuration guide](docs/radio-configuration.md) explains the defaults and
 which edits require provisioning. The [relay procedure](docs/uart-transmitter-relay.md)
 records the five-minute hardware qualification and its limits. Historical
-BLE/USB recordings and research reports remain available.
+recordings and research reports remain on disk.
 
 ## Repository layout
 
@@ -37,7 +37,9 @@ BLE/USB recordings and research reports remain available.
 | `draft/` | Local thesis drafts and exports; ignored by Git |
 | `resources/Papers/` | Local, ignored literature library (PDFs plus Markdown conversions) |
 | [`tools/`](tools/README.md) | Paper, data, analysis, runtime, and draft tools |
-| `data/` | Local raw recordings and derived datasets; only directory guides are versioned |
+| `data/` | Raw recordings and reusable derived datasets, versioned with DVC |
+| `artifacts/notebooks/` | Local notebook run metrics, splits, and figures; ignored by Git |
+| [`models/`](models/README.md) | Sequence checkpoints, normalizers, and ONNX bundles; binaries versioned with DVC |
 | [`notebooks/`](notebooks/README.md) | Current analysis and experiment notebooks |
 
 ## Setup
@@ -65,8 +67,6 @@ For new boards, follow the [gateway build and provisioning procedure](docs/espno
 and [relay pairing procedure](docs/uart-transmitter-relay.md).
 Use `uv run csi-radio discover` to inspect connected boards and
 `uv run csi-radio provision --dry-run` to validate the radio settings.
-The historical UDP interference experiment remains available through
-`uv run python -m fall_detection.radio.experiments.transport`.
 
 Both live applications use `espnow_gateway`; receiver IDs and model channels
 remain stable regardless of USB arrival order. Firmware protocol 3 is required.

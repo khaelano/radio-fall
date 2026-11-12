@@ -23,12 +23,12 @@ tools/
 
 - `tools/processing/prune_data.py` previews local cleanup candidates;
   `--apply` removes only the paths it reports.
+- `tools/processing/upgrade_session_archive.py` copies version-1 session
+  archives into verified version-2 derived archives without changing sources.
 - `tools/processing/pilot_session_archive.py` creates or verifies archives;
   `migrate_session_archives.py` validates and migrates session directories.
-- `migrate_sequence_segments.py` and `compact_sequence_shards.py` maintain
-  sequence segment stores.
-- `benchmark_*.py`, `check_*.py`, and
-  `run_pytorch_cpu_sequence.py` measure or inspect processing and model paths.
+- `benchmark_*.py` and `check_*.py` measure or inspect processing and model paths.
+  Sequence model training is defined in `notebooks/latest/03_training.ipynb`.
   `benchmark_live_detector.py` requires an experiment directory via
   `--experiment`.
 

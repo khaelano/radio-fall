@@ -1,14 +1,14 @@
 """Packet-level phase-motion measurements for within-session exploratory plots."""
 
-from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass
 import hashlib
 import json
 import multiprocessing
 import os
+from collections.abc import Sequence
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Sequence
 from zipfile import BadZipFile
 
 import numpy as np
@@ -348,7 +348,6 @@ def _source_files(job, attempt_paths):
                 "csi.csv",
                 "radio_timing.csv",
                 "usb_clock_sync.csv",
-                "ble_timing.jsonl",
                 "gateway_timing.jsonl",
             )
         )

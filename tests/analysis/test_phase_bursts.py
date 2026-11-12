@@ -3,8 +3,6 @@
 import numpy as np
 import pytest
 
-from fall_detection.analysis.phase_bursts import summarize_phase_bursts
-
 
 @pytest.fixture
 def trace():
@@ -15,7 +13,9 @@ def trace():
     return seconds, scores, intervals
 
 
-def test_summarize_phase_bursts_measures_known_burst_and_rise(trace):
+def test_summarize_phase_bursts_measures_known_burst_and_rise(
+    trace, summarize_phase_bursts
+):
     result = summarize_phase_bursts(*trace)
     assert result["usable"]
     assert result["threshold_rad"] == pytest.approx(0.1)
@@ -33,7 +33,9 @@ def test_summarize_phase_bursts_measures_known_burst_and_rise(trace):
 
 
 @pytest.mark.parametrize("missing", ["nan", "gap"])
-def test_summarize_phase_bursts_breaks_runs_at_missing_data(trace, missing):
+def test_summarize_phase_bursts_breaks_runs_at_missing_data(
+    trace, missing, summarize_phase_bursts
+):
     seconds, scores, intervals = trace
     if missing == "nan":
         scores[140:150] = np.nan
@@ -47,7 +49,9 @@ def test_summarize_phase_bursts_breaks_runs_at_missing_data(trace, missing):
     assert result["peak_burst_right_censored"]
 
 
-def test_summarize_phase_bursts_distinguishes_no_burst_from_no_data(trace):
+def test_summarize_phase_bursts_distinguishes_no_burst_from_no_data(
+    trace, summarize_phase_bursts
+):
     seconds, scores, intervals = trace
     scores[:] = 0.1
     no_burst = summarize_phase_bursts(seconds, scores, intervals)
@@ -63,7 +67,9 @@ def test_summarize_phase_bursts_distinguishes_no_burst_from_no_data(trace):
     assert np.isnan(no_data["above_threshold_s"])
 
 
-def test_summarize_phase_bursts_requires_countdown_and_marks_boundary_rise(trace):
+def test_summarize_phase_bursts_requires_countdown_and_marks_boundary_rise(
+    trace, summarize_phase_bursts
+):
     seconds, scores, intervals = trace
     scores[100:140] = 1.1
     censored = summarize_phase_bursts(seconds, scores, intervals)
@@ -75,7 +81,9 @@ def test_summarize_phase_bursts_requires_countdown_and_marks_boundary_rise(trace
     assert np.isnan(no_baseline["threshold_rad"])
 
 
-def test_summarize_phase_bursts_limits_recovery_to_initial_window(trace):
+def test_summarize_phase_bursts_limits_recovery_to_initial_window(
+    trace, summarize_phase_bursts
+):
     seconds, scores, intervals = trace
     scores[250:] = 2
     initial = summarize_phase_bursts(
@@ -91,7 +99,9 @@ def test_summarize_phase_bursts_limits_recovery_to_initial_window(trace):
     assert np.isnan(sparse["recovery_median_excess_rad"])
 
 
-def test_summarize_phase_bursts_does_not_infer_time_support_from_packet_count(trace):
+def test_summarize_phase_bursts_does_not_infer_time_support_from_packet_count(
+    trace, summarize_phase_bursts
+):
     _, scores, intervals = trace
     seconds = np.repeat([0.5, 1.5, 2.5], 100)
     result = summarize_phase_bursts(seconds, scores, intervals)
@@ -101,7 +111,9 @@ def test_summarize_phase_bursts_does_not_infer_time_support_from_packet_count(tr
     assert np.isnan(result["above_threshold_s"])
 
 
-def test_summarize_phase_bursts_rejects_overlapping_intervals(trace):
+def test_summarize_phase_bursts_rejects_overlapping_intervals(
+    trace, summarize_phase_bursts
+):
     seconds, scores, intervals = trace
     intervals["action"] = (0.9, 2)
     with pytest.raises(ValueError, match="disjoint"):

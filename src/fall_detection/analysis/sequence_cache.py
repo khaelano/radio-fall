@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 from contextlib import contextmanager
-from functools import wraps
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -19,12 +18,12 @@ def fingerprint(value: object) -> str:
 def stamp(path: Path) -> dict:
     """Identify an unchanged local file without reading its contents."""
     stat = path.stat()
-    return dict(
-        size=stat.st_size,
-        mtime_ns=stat.st_mtime_ns,
-        inode=stat.st_ino,
-        device=stat.st_dev,
-    )
+    return {
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "inode": stat.st_ino,
+        "device": stat.st_dev,
+    }
 
 
 def file_hash(path: Path) -> str:
@@ -33,29 +32,21 @@ def file_hash(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def array_directory(path: Path) -> Path:
-    """Locate a new array store, including legacy NPZ migration paths."""
-    return path.with_suffix(".arrays") if path.suffix == ".npz" else path
-
-
 @contextmanager
 def read_segment(path: str | Path):
-    """Map NPY files without decompression; support existing NPZ fixtures/reports."""
-    path = Path(path)
-    directory = array_directory(path)
-    if directory.is_dir():
-        yield {
-            p.stem: np.load(p, mmap_mode="r", allow_pickle=False)
-            for p in directory.glob("*.npy")
-        }
-    else:
-        with np.load(path, allow_pickle=False) as data:
-            yield data
+    """Map the current directory of NPY arrays without decompression."""
+    directory = Path(path)
+    if not directory.is_dir():
+        raise FileNotFoundError(f"segment directory not found: {directory}")
+    yield {
+        p.stem: np.load(p, mmap_mode="r", allow_pickle=False)
+        for p in directory.glob("*.npy")
+    }
 
 
 def save_segment(path: Path, arrays: dict) -> None:
     """Atomically write only new arrays; retain existing read-only memory maps."""
-    directory = array_directory(path)
+    directory = path
     directory.mkdir(parents=True, exist_ok=True)
     for name, value in arrays.items():
         target = directory / f"{name}.npy"
@@ -75,48 +66,31 @@ def save_segment(path: Path, arrays: dict) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def stage_cache(name: str, tables: dict[str, str], keys: tuple[str, ...] = ()):
-    """Cache stage results using source/parameter keys and output file stamps."""
+def restore_stage(output: Path, name: str, key: str) -> dict | None:
+    """Restore metadata tables only when every checkpointed file is unchanged."""
+    import polars as pl
 
-    def decorate(function):
-        @wraps(function)
-        def cached(self):
-            if self._completed_cache_valid():
-                self.cache_hits.append(name)
-                return self._stage_summary(name)
-            key = self._processing_key()
-            checkpoint = self.output / ".cache" / f"{name}.json"
-            try:
-                receipt = json.loads(checkpoint.read_text())
-                valid = receipt["key"] == key and all(
-                    stamp(Path(p)) == expected
-                    for p, expected in receipt["files"].items()
-                )
-            except (OSError, ValueError, KeyError):
-                valid = False
-            if valid:
-                import polars as pl
+    try:
+        receipt = json.loads((output / ".cache" / f"{name}.json").read_text())
+        if receipt["key"] != key or not all(
+            stamp(Path(p)) == expected for p, expected in receipt["files"].items()
+        ):
+            return None
+        return {
+            attribute: pl.read_parquet(output / filename)
+            for attribute, filename in receipt["tables"].items()
+        }
+    except (OSError, ValueError, KeyError):
+        return None
 
-                for attribute, filename in tables.items():
-                    setattr(self, attribute, pl.read_parquet(self.output / filename))
-                self.cache_hits.append(name)
-                return self._stage_summary(name)
-            result = function(self)
-            files = [self.output / filename for filename in tables.values()]
-            if keys:
-                for segment in self.segments.iter_rows(named=True):
-                    path = Path(segment["path"])
-                    directory = array_directory(path)
-                    files.extend(
-                        directory / f"{k}.npy" for k in keys
-                    ) if directory.is_dir() else files.append(path)
-            from .sequence_preprocessing import atomic_json
 
-            atomic_json(
-                dict(key=key, files={str(p): stamp(p) for p in files}), checkpoint
-            )
-            return result
+def checkpoint_stage(
+    output: Path, name: str, key: str, tables: dict, files: list[Path]
+) -> None:
+    """Publish a receipt after all stage arrays and tables have been written."""
+    from .sequence_preprocessing import atomic_json
 
-        return cached
-
-    return decorate
+    atomic_json(
+        {"key": key, "tables": tables, "files": {str(p): stamp(p) for p in files}},
+        output / ".cache" / f"{name}.json",
+    )

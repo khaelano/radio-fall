@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -187,7 +187,6 @@ def _source_fingerprint(session: SessionBundle) -> str:
                     "radio_timing.csv",
                     "usb_clock_sync.csv",
                     "gateway_timing.jsonl",
-                    "ble_timing.jsonl",
                 )
             )
     entries = []

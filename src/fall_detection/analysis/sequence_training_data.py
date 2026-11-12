@@ -2,39 +2,40 @@
 
 from __future__ import annotations
 
-from collections import OrderedDict
-from dataclasses import dataclass
 import hashlib
 import json
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Full, Queue
 from threading import Event, Thread
-from typing import Iterator
 
 import numpy as np
 import polars as pl
 from sklearn.model_selection import train_test_split
 
-DATASET_NAMES = ("khaelano", "akmal", "continuous_non_fall")
-DURATIONS = (2, 4, 6)
 LABELS = ("non_fall", "fall")
 
 
-def load_sequence_index(root: Path) -> tuple[pl.DataFrame, dict]:
+def load_sequence_index(
+    root: Path, *, datasets: tuple[str, ...], durations: tuple[int, ...]
+) -> tuple[pl.DataFrame, dict]:
     """Read completed export metadata without materializing signal tensors.
 
     Args:
-        root: Directory containing the three amplitude_sequence_v2 datasets.
+        root: Directory containing the selected amplitude-sequence exports.
+        datasets: Dataset directory names selected by the experiment.
+        durations: Window durations required by the experiment.
 
     Returns:
         Window index and source metadata, including declared signal hashes.
     """
     frames, sources = [], {}
-    for name in DATASET_NAMES:
+    for name in datasets:
         folder = root / name
         manifest_path = folder / "manifest.json"
         manifest = json.loads(manifest_path.read_text())
-        if manifest["schema"] not in ("amplitude_sequence", "amplitude_sequence_v2"):
+        if manifest["schema"] != "amplitude_sequence":
             raise ValueError(f"Unsupported export schema: {folder}")
         if manifest["coordinates"] != {
             "receivers": [f"rx-{i}" for i in range(1, 5)],
@@ -77,7 +78,8 @@ def load_sequence_index(root: Path) -> tuple[pl.DataFrame, dict]:
                 pl.lit(manifest["parameters"]["target_hz"]).alias("rate_hz"),
                 pl.col("signal")
                 .map_elements(
-                    lambda p: str((folder / p).resolve()), return_dtype=pl.String
+                    lambda p, folder=folder: str((folder / p).resolve()),
+                    return_dtype=pl.String,
                 )
                 .alias("path"),
             )
@@ -93,8 +95,8 @@ def load_sequence_index(root: Path) -> tuple[pl.DataFrame, dict]:
     index = pl.concat(frames).sort("dataset", "duration", "signal", "start")
     if not set(index["target"].unique()) <= {0, 1}:
         raise ValueError("Expected binary targets")
-    if set(index["duration"].unique()) != set(DURATIONS):
-        raise ValueError("Expected 2/4/6-second windows")
+    if set(index["duration"].unique()) != set(durations):
+        raise ValueError("Export window durations differ from the experiment")
     if (
         index.select("dataset", "segment_id", "duration", "start").unique().height
         != index.height
@@ -103,18 +105,27 @@ def load_sequence_index(root: Path) -> tuple[pl.DataFrame, dict]:
     return index.with_row_index("window_id"), sources
 
 
-def split_sequence_attempts(index: pl.DataFrame, seed: int = 42) -> pl.DataFrame:
-    """Assign stratified 60/20/20 attempt groups once for every duration."""
+def split_sequence_attempts(
+    index: pl.DataFrame, *, seed: int, test_fraction: float, validation_fraction: float
+) -> pl.DataFrame:
+    """Assign stratified attempt groups consistently across all input durations."""
+    if not (0 < test_fraction < 1 and 0 < validation_fraction < 1 - test_fraction):
+        raise ValueError(
+            "Split fractions must leave nonempty train/validation/test sets"
+        )
     groups = index.select("group", "dataset", "activity_label").unique().sort("group")
     if groups["group"].n_unique() != len(groups):
         raise ValueError("An attempt has conflicting dataset/activity metadata")
     strata = [f"{r['dataset']}::{r['activity_label']}" for r in groups.to_dicts()]
     train_val, test = train_test_split(
-        np.arange(len(groups)), test_size=0.2, random_state=seed, stratify=strata
+        np.arange(len(groups)),
+        test_size=test_fraction,
+        random_state=seed,
+        stratify=strata,
     )
     train, validation = train_test_split(
         train_val,
-        test_size=0.25,
+        test_size=validation_fraction / (1 - test_fraction),
         random_state=seed + 1,
         stratify=np.asarray(strata)[train_val],
     )
@@ -128,7 +139,7 @@ def split_sequence_attempts(index: pl.DataFrame, seed: int = 42) -> pl.DataFrame
         for i in members
     }
     result = index.with_columns(pl.col("group").replace_strict(mapping).alias("split"))
-    for duration in DURATIONS:
+    for duration in sorted(index["duration"].unique()):
         for label in ("train", "validation", "test"):
             subset = result.filter(
                 (pl.col("duration") == duration) & (pl.col("split") == label)
@@ -136,57 +147,6 @@ def split_sequence_attempts(index: pl.DataFrame, seed: int = 42) -> pl.DataFrame
             if set(subset["target"].unique()) != {0, 1}:
                 raise ValueError(f"Both classes required in {duration}s {label}")
     return result
-
-
-class ShardStore:
-    """Cache only log-transformed differences and masks within a byte budget."""
-
-    def __init__(self, max_bytes: int = 512 * 1024**2):
-        self.max_bytes = max_bytes
-        self.cache: OrderedDict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = (
-            OrderedDict()
-        )
-        self.bytes = 0
-        self.coordinates: tuple[np.ndarray, np.ndarray] | None = None
-
-    def clear(self) -> None:
-        """Release cached signals while retaining coordinate validation."""
-        self.cache.clear()
-        self.bytes = 0
-
-    def read(self, path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Read one shard; invalid values become zero before log1p."""
-        if path in self.cache:
-            self.cache.move_to_end(path)
-            return self.cache[path]
-        with np.load(path, allow_pickle=False) as archive:
-            raw = archive["squared_difference"]
-            mask = archive["difference_valid"].astype(bool)
-            targets = archive["target"].copy()
-            coordinates = (archive["receivers"].copy(), archive["subcarriers"].copy())
-        if raw.ndim != 4 or raw.shape != mask.shape or len(raw) != len(targets):
-            raise ValueError(f"Invalid signal/mask/target shapes: {path}")
-        if self.coordinates is None:
-            self.coordinates = coordinates
-        elif any(
-            not np.array_equal(a, b) for a, b in zip(self.coordinates, coordinates)
-        ):
-            raise ValueError(f"Receiver/subcarrier order differs: {path}")
-        mask &= np.isfinite(raw)
-        if np.any(raw[mask] < 0):
-            raise ValueError(f"Negative squared difference: {path}")
-        values = np.log1p(np.where(mask, raw, 0)).astype(np.float32)
-        values = values.reshape(*values.shape[:2], -1)
-        mask = mask.reshape(*mask.shape[:2], -1)
-        item = (values, mask, targets)
-        size = sum(a.nbytes for a in item)
-        while self.cache and self.bytes + size > self.max_bytes:
-            _, previous = self.cache.popitem(last=False)
-            self.bytes -= sum(a.nbytes for a in previous)
-        if size <= self.max_bytes:
-            self.cache[path] = item
-            self.bytes += size
-        return item
 
 
 class SegmentStore:
@@ -238,39 +198,31 @@ class Normalizer:
 
 
 def _selected(
-    store: ShardStore | SegmentStore, path: str, rows: list[dict]
+    store: SegmentStore, path: str, rows: list[dict]
 ) -> tuple[np.ndarray, np.ndarray]:
-    if isinstance(store, SegmentStore):
-        signal = store.read(path)
-        if any(
-            r["stop"] > len(signal)
-            or r["start"] < 0
-            or r["stop"] - r["start"] != r["duration"] * r.get("rate_hz", 96)
-            for r in rows
-        ):
-            raise ValueError(f"Window bounds differ: {path}")
-        values = np.stack([signal[r["start"] : r["stop"]] for r in rows]).reshape(
-            len(rows), rows[0]["duration"] * rows[0].get("rate_hz", 96), -1
-        )
-        mask = np.isfinite(values)
-        return np.where(mask, values, 0), mask
-    values, mask, targets = store.read(path)
-    positions = np.asarray([r["shard_row"] for r in rows])
-    if not np.array_equal(targets[positions], [r["target"] for r in rows]):
-        raise ValueError(f"Index/shard targets differ: {path}")
-    if any(values.shape[1] != r["duration"] * 96 for r in rows):
-        raise ValueError(f"Window length differs: {path}")
-    return values[positions], mask[positions]
+    signal = store.read(path)
+    if any(
+        r["stop"] > len(signal)
+        or r["start"] < 0
+        or r["stop"] - r["start"] != r["duration"] * r.get("rate_hz", 96)
+        for r in rows
+    ):
+        raise ValueError(f"Window bounds differ: {path}")
+    values = np.stack([signal[r["start"] : r["stop"]] for r in rows]).reshape(
+        len(rows), rows[0]["duration"] * rows[0].get("rate_hz", 96), -1
+    )
+    mask = np.isfinite(values)
+    return np.where(mask, values, 0), mask
 
 
-def fit_normalizer(frame: pl.DataFrame, store: ShardStore | SegmentStore) -> Normalizer:
+def fit_normalizer(frame: pl.DataFrame, store: SegmentStore) -> Normalizer:
     """Accumulate statistics exclusively from the training partition."""
     train = frame.filter(pl.col("split") == "train")
     if train.is_empty():
         raise ValueError("Training partition is empty")
     total = square = count = None
     for part in train.partition_by("path", maintain_order=True):
-        ordered = part.sort("start") if "start" in part.columns else part
+        ordered = part.sort("start")
         for chunk in ordered.iter_slices(32):
             values, mask = _selected(store, part["path"][0], chunk.to_dicts())
             values = values.astype(np.float64)
@@ -297,19 +249,98 @@ class SequenceDataset:
         self,
         frame: pl.DataFrame,
         normalizer: Normalizer,
-        store: ShardStore | SegmentStore,
+        store: SegmentStore,
     ):
         self.frame, self.normalizer, self.store = frame, normalizer, store
         self.parts = [
             (
                 p["path"][0],
-                p.sort("start").to_dicts() if "start" in p.columns else p.to_dicts(),
+                p.sort("start").to_dicts(),
             )
             for p in frame.partition_by("path", maintain_order=True)
         ]
+        self._prepared: np.ndarray | None = None
+        self._positions: dict[int, int] = {}
+
+    @property
+    def prepared_bytes(self) -> int:
+        """Return resident prepared-input bytes, excluding transient batches."""
+        return 0 if self._prepared is None else self._prepared.nbytes
+
+    def prepare(self, max_bytes: int) -> bool:
+        """Cache normalized windows once if they fit the supplied RAM budget.
+
+        Returns False without reading signals when the complete cache cannot fit.
+        Existing streaming behavior remains available for oversized datasets.
+        Call before starting any batch producer; keep the frame and normalizer
+        unchanged for this dataset's lifetime.
+        """
+        if max_bytes < 0:
+            raise ValueError("Cache budget must be nonnegative")
+        if self._prepared is not None:
+            return self.prepared_bytes <= max_bytes
+        if not len(self):
+            return False
+        shapes = {
+            (
+                row["duration"] * row.get("rate_hz", 96),
+                len(self.normalizer.mean) * 2 + (4 if row.get("rate_hz") == 120 else 0),
+            )
+            for _, rows in self.parts
+            for row in rows
+        }
+        if len(shapes) != 1:
+            raise ValueError("Prepared inputs require one duration and feature layout")
+        shape = (len(self), *next(iter(shapes)))
+        required = int(np.prod(shape)) * np.dtype(np.float32).itemsize
+        if required > max_bytes:
+            return False
+        prepared = np.empty(shape, dtype=np.float32)
+        positions = {}
+        offset = 0
+        for values, rows in self.batches(16):
+            prepared[offset : offset + len(rows)] = values
+            positions.update((id(row), offset + i) for i, row in enumerate(rows))
+            offset += len(rows)
+        prepared.flags.writeable = False
+        self._positions = positions
+        self._prepared = prepared
+        return True
 
     def __len__(self) -> int:
         return len(self.frame)
+
+    def _ordered_groups(self, seed: int | None) -> Iterator[tuple[str, list[dict]]]:
+        rng = np.random.default_rng(seed)
+        groups = [
+            (path, rows[offset : offset + 16])
+            for path, rows in self.parts
+            for offset in range(0, len(rows), 16)
+        ]
+        paths = np.arange(len(groups))
+        if seed is not None:
+            rng.shuffle(paths)
+        for i in paths:
+            path, original = groups[int(i)]
+            rows = original.copy()
+            if seed is not None:
+                rng.shuffle(rows)
+            yield path, rows
+
+    def batch_rows(
+        self, batch_size: int, seed: int | None = None
+    ) -> Iterator[list[dict]]:
+        """Yield metadata in the same seeded order as streamed input batches."""
+        if batch_size < 1:
+            raise ValueError("batch_size must be positive")
+        pending = []
+        for _, rows in self._ordered_groups(seed):
+            pending.extend(rows)
+            while len(pending) >= batch_size:
+                yield pending[:batch_size]
+                pending = pending[batch_size:]
+        if pending:
+            yield pending
 
     def batches(
         self, batch_size: int, seed: int | None = None
@@ -317,25 +348,12 @@ class SequenceDataset:
         """Yield contiguous float32 batches; shuffle only when a seed is given."""
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
-        rng = np.random.default_rng(seed)
-        groups = (
-            [
-                (path, rows[offset : offset + 16])
-                for path, rows in self.parts
-                for offset in range(0, len(rows), 16)
-            ]
-            if isinstance(self.store, SegmentStore)
-            else self.parts
-        )
-        paths = np.arange(len(groups))
-        if seed is not None:
-            rng.shuffle(paths)
+        if self._prepared is not None:
+            for rows in self.batch_rows(batch_size, seed):
+                yield self._prepared[[self._positions[id(row)] for row in rows]], rows
+            return
         batch, batch_masks, batch_presence, metadata = [], [], [], []
-        for i in paths:
-            path, original = groups[int(i)]
-            rows = original.copy()
-            if seed is not None:
-                rng.shuffle(rows)
+        for path, rows in self._ordered_groups(seed):
             values, masks = _selected(self.store, path, rows)
             presence = None
             if rows[0].get("rate_hz") == 120:
@@ -404,7 +422,7 @@ def prefetched_batches(
             for batch in dataset.batches(batch_size, seed):
                 if not put(batch):
                     break
-        except BaseException as error:
+        except BaseException as error:  # noqa: BLE001 — propagate worker failures
             put(error)
         finally:
             put(finished)

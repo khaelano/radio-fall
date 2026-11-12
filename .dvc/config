@@ -1,5 +1,7 @@
 [core]
-    remote = local
+    remote = laptop-remote
     autostage = true
 ['remote "local"']
     url = /home/fall-detector/dvcstore
+['remote "laptop-remote"']
+    url = ssh://khaelano@100.93.136.64/home/khaelano/dvcstore

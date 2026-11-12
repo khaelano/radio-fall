@@ -57,6 +57,7 @@ fall-detect = "fall_detection.apps.detector.app:main"
 [dependency-groups]
 dev = [
     "dvc>=3.67.1",
+    "dvc-ssh>=4.3.0",
     "pytest>=8.0",
     "ruff>=0.17.4",
 ]

@@ -74,6 +74,8 @@ def load_session_resume(root: Path) -> SessionResume:
             resolved[ordinal] = disposition
     abandoned = []
     accepted = set()
+    if any(not item.is_dir() for item in (root / "trials").glob("*/attempt_*")):
+        raise ValueError("invalid saved attempt path")
     for key in source.attempt_keys():
         folder = root / key
         if not folder.resolve().is_relative_to(root):

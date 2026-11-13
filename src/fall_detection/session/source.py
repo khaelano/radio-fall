@@ -114,10 +114,6 @@ class SessionSource:
             }
         return sorted(keys)
 
-    def has_trials(self) -> bool:
-        """Return whether any attempt directory exists."""
-        return bool(self.attempt_keys())
-
     def fingerprint(self) -> str:
         """Return a cheap identity of the archive, used to key extracted media."""
         if not self._fingerprint:
@@ -127,10 +123,11 @@ class SessionSource:
     def materialize(self, relative: str, cache_dir: Path) -> Path:
         """Return a real file for ``relative``, extracting it only when needed.
 
-        A directory session returns its own file. An archive session writes just
-        this one member under ``cache_dir`` and reuses it on later calls; the
-        cache path includes the archive fingerprint, so a changed archive never
-        reuses a stale file.
+        A directory session returns its own file; when only ``<name>.zst`` is
+        stored, the decoded file is written under ``cache_dir`` instead. An
+        archive session writes just this one member under ``cache_dir`` and
+        reuses it on later calls. The cache path includes the source
+        fingerprint, so a changed session never reuses a stale file.
 
         Args:
             relative: File relative to the session root.
@@ -143,7 +140,16 @@ class SessionSource:
             OSError: If the member is missing or cannot be written.
         """
         if not self.is_archive:
-            return self.path / relative
+            plain = self.path / relative
+            if plain.is_file() or not self.exists(relative):
+                return plain
+            target = cache_dir / self.fingerprint()[:16] / relative
+            if not target.is_file():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                partial = target.with_name(target.name + ".partial")
+                partial.write_bytes(self.read_bytes(relative))
+                partial.replace(target)
+            return target
         target = cache_dir / self.fingerprint()[:16] / relative
         if not target.is_file():
             try:

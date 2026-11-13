@@ -471,7 +471,7 @@ def _is_session(path: Path) -> bool:
     """Return whether ``path`` is a session directory or a session archive."""
 
     if path.is_dir():
-        return (path / "session.json").is_file()
+        return SessionSource(path).exists("session.json")
     return path.is_file() and path.suffix == ".zip"
 
 

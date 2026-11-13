@@ -188,6 +188,19 @@ def test_resume_uses_saved_protocol_and_rejects_corruption(tmp_path):
         load_session_resume(root)
 
 
+def test_resume_rejects_a_file_named_like_an_attempt(tmp_path):
+    clock = FakeClock()
+    old = controller(tmp_path, clock)
+    old.start_session(SessionMetadata("p01"))
+    old.dispatch(OperatorCommand.END_SESSION)
+    root = tmp_path / "session"
+    stray = root / "trials/001_one/attempt_01"
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_text("not a directory")
+    with pytest.raises(ValueError, match="invalid saved attempt path"):
+        load_session_resume(root)
+
+
 def test_accept_queues_while_saving_and_advances_without_another_click(tmp_path):
     from fall_detection.radio.recording_io import RecordingIO
 

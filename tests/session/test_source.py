@@ -61,3 +61,26 @@ def test_scan_lists_directories_and_archives(session_factory, tmp_path):
     assert [b.path for b in scan_sessions(archive)] == [archive.resolve()]
     (archive.parent / "broken.zip").write_bytes(b"not a zip")
     assert {b.path.name for b in scan_sessions(archive.parent)} == {archive.name}
+
+
+def test_compressed_directory_files_are_found_and_materialized(
+    session_factory, tmp_path
+):
+    zstandard = pytest.importorskip("zstandard")
+    root = session_factory("20260103T000000000000Z", attempts=((1, 1, "accepted"),))
+    manifest = root / "session.json"
+    plain = manifest.read_bytes()
+    manifest.with_name("session.json.zst").write_bytes(
+        zstandard.ZstdCompressor().compress(plain)
+    )
+    manifest.unlink()
+
+    assert [bundle.path.name for bundle in scan_sessions(root.parent)] == [root.name]
+    source = SessionSource(root)
+    assert source.exists("session.json")
+    decoded = source.materialize("session.json", tmp_path / "cache")
+    assert decoded.read_bytes() == plain
+    assert decoded.is_relative_to(tmp_path / "cache")
+    assert source.materialize("protocol.json", tmp_path / "cache") == (
+        root / "protocol.json"
+    )

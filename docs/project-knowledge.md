@@ -21,6 +21,10 @@ datasets belong under `data/` and are versioned with DVC. Notebook run history
 belong under `artifacts/model/<model-name>/`. The two directories are versioned
 independently by `artifacts/notebooks.dvc` and `artifacts/model.dvc`, with contents
 excluded from Git.
+CSI viewer journals default to `data/experiments/viewer/`, outside the
+DVC-tracked `data/raw/`. Git ignores detector run folders
+(`data/experiments/detector/native-*`); runs worth keeping are added with DVC,
+as the 12 November runs are in `runs-20261112`.
 Retired `data/processed/amplitude_sequence_v2/` and `_v3/` were removed from
 the workspace; current exports use `amplitude_sequence/{96,120}hz/`. Historical
 split tables can still reference the retired paths and require the earlier DVC
@@ -46,7 +50,9 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   `data/interim/frames/<session-id>/{frames,attempts,phases}.parquet` and writes
   version-3 archives in `data/raw/sessions/` (the pre-schema-3 originals moved to `data/old_raw/sessions/`). On the three non-empty
   archives 4,527,879 CSV rows matched the tables with no mismatch, and the
-  archives shrank from 11.9 GB to 6.63 GB (video unchanged). The analysis
+  archives shrank from 11.9 GB to 6.63 GB (video unchanged). `FrameStore.ensure`
+  holds an advisory lock on `<frames_dir>.lock`, so concurrent conversions of
+  one session run one at a time and later callers reuse the result. The analysis
   pipeline, phase and integrity analysis, and the session inspector read the
   tables; the collector still writes the CSV sidecars by default
   (`--no-csv-sidecars` disables them) as a safety net until one Rust-era hardware
@@ -102,7 +108,9 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   version 7, operational inventory/profile schema 2 and the `espnow_uart`
   reference link only. `configs/radio.json` is the shared operational settings
   file and the only source of transport values: `EspnowTransportConfig` has no
-  defaults for them.
+  defaults for them. `CsiRecord` is the only Python record type; it wraps a Rust
+  record built by decoding or from Python values, so both origins derive the
+  same I/Q means, calibrated phase, and CSV line.
   C5 receivers send scheduled ESP-NOW batches to a C6 USB gateway; hardware
   qualification evidence and limitations are in the
   [gateway guide](espnow-gateway.md) and [dated reports](reports/README.md).
@@ -192,9 +200,13 @@ modules in live application code.
 | `apps/` | collector, CSI viewer, session inspector, detector, and `common/` shared Qt code | all of the above |
 
 The inspector backend (frame loading, review, export, video) lives in
-`apps/session_inspector/` beside its `ui/` package. `analysis/` keeps its
+`apps/session_inspector/` beside its `ui/` package, where the main window is
+split into concern mixins (`ui/window_*.py`). `analysis/` keeps its
 private helpers (`_io`, `_cache_keys`, `_frames`) at the top level, and no
 package `__init__.py` re-exports names; import from the defining module.
+Core dependencies exclude pandas and zstandard, which come with the `analysis`
+extra. The grant-timing model is a tool (`tools/radio/grant_timing.py`), not a
+package module.
 
 ## Sources of truth
 

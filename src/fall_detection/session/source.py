@@ -17,6 +17,7 @@ from .._radio_native import (
     storage_extract_member,
     storage_files,
     storage_read,
+    storage_read_file,
     storage_read_many,
     storage_source_fingerprint,
 )
@@ -60,16 +61,22 @@ class SessionSource:
         """Return whether the file exists."""
         if self.is_archive:
             return relative in self._files()
-        return (self.path / relative).is_file()
+        path = self.path / relative
+        return path.is_file() or path.with_name(path.name + ".zst").is_file()
 
     def read_bytes(self, relative: str) -> bytes:
         """Read a file's decoded bytes.
+
+        A directory file stored as ``<name>.zst`` is decoded like a plain one.
 
         Raises:
             OSError: If the file cannot be read.
         """
         if not self.is_archive:
-            return (self.path / relative).read_bytes()
+            try:
+                return storage_read_file(self.path / relative)
+            except RuntimeError as exc:
+                raise OSError(str(exc)) from exc
         if relative in self._loaded:
             return self._loaded[relative]
         try:

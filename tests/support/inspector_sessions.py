@@ -8,12 +8,21 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from fall_detection._radio_native import storage_archive_session
 from journal_builder import RUN, RX1, RX2, TX, envelope, record
 
 RECEIVERS = {"rx-1": RX1, "rx-2": RX2}
 FIRST_ATTEMPT_NS = 1_000_000_000_000
 ATTEMPT_SPACING_NS = 10_000_000_000
 ATTEMPT_LENGTH_NS = 2_000_000_000
+
+
+def archive_of(directory: Path, root: Path) -> Path:
+    """Archive ``directory`` at ``<root>/data/raw/sessions/<name>.zip``."""
+    destination = root / "data/raw/sessions" / f"{directory.name}.zip"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    storage_archive_session(str(directory), str(destination))
+    return destination
 
 
 def attempt_origin(position: int) -> int:

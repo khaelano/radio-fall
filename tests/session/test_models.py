@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from inspector_sessions import FrameSpec, attempt_origin
 
-from fall_detection.session_inspector.models import (
+from fall_detection.session import (
     SessionReadError,
     load_session,
     scan_sessions,

@@ -11,8 +11,7 @@ from fractions import Fraction
 from pathlib import Path
 from threading import Condition, Thread
 
-from .models import RecordedAttempt
-from .source import SessionSource
+from ..session import RecordedAttempt, SessionSource
 
 
 @dataclass(frozen=True)

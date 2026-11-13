@@ -7,7 +7,7 @@ from bisect import bisect_right
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from fall_detection.session_inspector.models import RecordedAttempt
+from fall_detection.session import RecordedAttempt
 from fall_detection.session_inspector.video import VideoTimeline, VideoWorker
 
 

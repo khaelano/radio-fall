@@ -11,11 +11,9 @@ The attempt window rule, the capture-time sort, the single-epoch check, and the
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
-import tempfile
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,11 +25,9 @@ import pyarrow.compute as pc
 
 from .._radio_native import (
     FrameStore,
-    storage_files,
     storage_open_source,
-    storage_read,
 )
-from ..session_inspector.models import SessionBundle, load_session
+from ..session import SessionBundle, SessionSource, load_session
 
 ANALYSIS_SCHEMA_VERSION = 1
 """Version of the attempt, phase, and packet semantics defined in this module."""
@@ -40,7 +36,6 @@ PHASE_NAMES = {"countdown": "preparation", "action": "action", "recovery": "rest
 TIME_SOURCE = "gateway capture clock mapping"
 ANNOTATION_SOURCE = "collection_cue"
 
-_MANIFESTS = {"session.json", "protocol.json", "events.jsonl", "session_review.json"}
 _ATTEMPT_COLUMNS = [
     "session_id",
     "participant_id",
@@ -167,25 +162,6 @@ PACKET_TYPES: dict[str, pa.DataType] = {
 """Canonical Arrow type of every packet column, so empty recordings agree."""
 
 
-@contextlib.contextmanager
-def _manifest_root(source: Path) -> Iterator[Path]:
-    """Yield a directory holding only the small manifests of a session.
-
-    The library decodes archive members and compressed streams, so directories
-    and archives are handled alike and no receiver data is copied.
-    """
-    with tempfile.TemporaryDirectory(prefix=".manifests-") as temporary:
-        root = Path(temporary) / "session"
-        for name in storage_files(str(source)):
-            if name in _MANIFESTS or (
-                name.startswith("trials/") and name.endswith("/attempt.json")
-            ):
-                target = root / name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(storage_read(str(source), name))
-        yield root
-
-
 def _attempt_table(
     session: SessionBundle,
     frames: FrameStore,
@@ -240,14 +216,13 @@ def _attempt_table(
 
 def _phase_table(session: SessionBundle, attempts: pd.DataFrame) -> pd.DataFrame:
     transitions: dict[tuple[int, int], list[dict]] = {}
-    events_path = session.path / "events.jsonl"
-    if events_path.exists():
-        with events_path.open(encoding="utf-8") as stream:
-            for line in stream:
-                event = json.loads(line)
-                if event.get("kind") == "phase_changed":
-                    key = (int(event["trial_ordinal"]), int(event["attempt"]))
-                    transitions.setdefault(key, []).append(event)
+    source = SessionSource(session.path)
+    if source.exists("events.jsonl"):
+        for line in source.read_text("events.jsonl").splitlines():
+            event = json.loads(line)
+            if event.get("kind") == "phase_changed":
+                key = (int(event["trial_ordinal"]), int(event["attempt"]))
+                transitions.setdefault(key, []).append(event)
     rows = []
     for attempt in attempts.to_dict("records"):
         events = sorted(
@@ -752,54 +727,53 @@ def load_analysis_session(
         str(source), None if annotations_dir is None else str(annotations_dir)
     )
     frames = FrameStore.ensure(str(source), str(frames_dir), rebuild, progress)
-    with _manifest_root(source) as root:
-        bundle = load_session(root)
-        if bundle.active:
-            raise ValueError("Analysis requires a closed session")
-        window_index = {
-            (int(row["trial_ordinal"]), int(row["attempt"])): index
-            for index, row in enumerate(pa.table(frames.attempts()).to_pylist())
-        }
-        attempts = _attempt_table(bundle, frames, window_index, opened)
-        phases = _phase_table(bundle, attempts)
-        environment = bundle.manifest.get("environment", {})
-        transmitter = (
-            environment.get("radio_inventory", {})
-            .get("transmitter", {})
-            .get("mac", "")
-            .lower()
-        )
-        rate = environment.get("nominal_rate_hz") or environment.get(
-            "radio_profile", {}
-        ).get("nominal_rate_hz")
-        manifest = {
-            "schema_version": ANALYSIS_SCHEMA_VERSION,
-            "session_id": bundle.session_id,
-            "source_directory": str(source),
-            "source_fingerprint": _identity(frames, bundle, opened),
-            "frames_fingerprint": frames.source_fingerprint,
-            "review": opened["review"],
-            "protocol_hash": bundle.protocol_hash,
-            "source_manifest": bundle.manifest,
-            "packet_count": int(frames.manifest["frames"]),
-            "recording_count": int(sum(len(r) for r in attempts["receiver_ids"])),
-            "phase_names": PHASE_NAMES,
-            "phase_interval": "[start_ns, end_ns)",
-            "annotation_source": ANNOTATION_SOURCE,
-            "csi_layout": "raw slots; I=real, Q=imaginary; no aggregation",
-        }
-        keys = {
-            row.attempt_key: window_index[(row.trial_ordinal, row.attempt)]
-            for row in attempts.itertuples(index=False)
-            if (row.trial_ordinal, row.attempt) in window_index
-        }
-        return AnalysisSession(
-            frames_dir,
-            manifest,
-            attempts,
-            phases,
-            frames,
-            transmitter,
-            float(rate) if rate else 0.0,
-            keys,
-        )
+    bundle = load_session(source)
+    if bundle.active:
+        raise ValueError("Analysis requires a closed session")
+    window_index = {
+        (int(row["trial_ordinal"]), int(row["attempt"])): index
+        for index, row in enumerate(pa.table(frames.attempts()).to_pylist())
+    }
+    attempts = _attempt_table(bundle, frames, window_index, opened)
+    phases = _phase_table(bundle, attempts)
+    environment = bundle.manifest.get("environment", {})
+    transmitter = (
+        environment.get("radio_inventory", {})
+        .get("transmitter", {})
+        .get("mac", "")
+        .lower()
+    )
+    rate = environment.get("nominal_rate_hz") or environment.get(
+        "radio_profile", {}
+    ).get("nominal_rate_hz")
+    manifest = {
+        "schema_version": ANALYSIS_SCHEMA_VERSION,
+        "session_id": bundle.session_id,
+        "source_directory": str(source),
+        "source_fingerprint": _identity(frames, bundle, opened),
+        "frames_fingerprint": frames.source_fingerprint,
+        "review": opened["review"],
+        "protocol_hash": bundle.protocol_hash,
+        "source_manifest": bundle.manifest,
+        "packet_count": int(frames.manifest["frames"]),
+        "recording_count": int(sum(len(r) for r in attempts["receiver_ids"])),
+        "phase_names": PHASE_NAMES,
+        "phase_interval": "[start_ns, end_ns)",
+        "annotation_source": ANNOTATION_SOURCE,
+        "csi_layout": "raw slots; I=real, Q=imaginary; no aggregation",
+    }
+    keys = {
+        row.attempt_key: window_index[(row.trial_ordinal, row.attempt)]
+        for row in attempts.itertuples(index=False)
+        if (row.trial_ordinal, row.attempt) in window_index
+    }
+    return AnalysisSession(
+        frames_dir,
+        manifest,
+        attempts,
+        phases,
+        frames,
+        transmitter,
+        float(rate) if rate else 0.0,
+        keys,
+    )

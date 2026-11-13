@@ -1,8 +1,7 @@
-"""Shared session, annotation, and prediction contracts.
+"""On-disk schema version of recorded sessions.
 
-Contracts will be added here when the radio acquisition, collection, and
-evaluation modules need to exchange concrete artifacts. Acquisition-specific
-samples remain in their own modules.
+Kept in a leaf module so ``collection`` can import it without loading the
+session models, which in turn depend on ``collection.protocol``.
 """
 
 ARTIFACT_SCHEMA_VERSION = 2

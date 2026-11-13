@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
 from uuid import uuid4
 
 from .._radio_native import storage_extract_archive
-from .models import SessionBundle
+from ..session import SessionBundle
 from .review import ReviewDocument
 
 
@@ -93,7 +93,7 @@ def export_curated_bundle(
     files = tuple(path for path in source.rglob("*") if path.is_file())
     total = sum(path.stat().st_size for path in files)
     copied = 0
-    exported_at = datetime.now(timezone.utc).isoformat()
+    exported_at = datetime.now(UTC).isoformat()
     try:
         temporary.mkdir()
         for source_file in files:

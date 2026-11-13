@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from fall_detection.session import load_session
 from fall_detection.session_inspector.exporter import (
     ExportCancelled,
     export_curated_bundle,
 )
-from fall_detection.session_inspector.models import load_session
 from fall_detection.session_inspector.review import (
     AttemptReview,
     ReviewConflictError,

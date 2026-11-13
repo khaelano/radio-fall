@@ -3,8 +3,8 @@
 Loading and scanning read only the small JSON manifests.  The receivers of an
 attempt come from the typed frame tables derived from the raw journals (see
 the Rust ``radio_storage`` library); they are resolved explicitly when a
-single session is opened.  A selected attempt is loaded by
-:mod:`fall_detection.session_inspector.data` on demand.
+single session is opened.  The session inspector loads a selected attempt
+on demand (:mod:`fall_detection.session_inspector.data`).
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from ..collection.protocol import (
     Trial,
     protocol_from_mapping,
 )
-from ..contracts import ARTIFACT_SCHEMA_VERSION
+from .schema import ARTIFACT_SCHEMA_VERSION
 from .source import SessionSource
 
 
@@ -216,9 +216,24 @@ class SessionBundle:
 _ATTEMPT_NUMBER = re.compile(r"attempt_(\d+)$")
 
 
-def _read_object(
+def read_json_object(
     source: SessionSource, relative: str, description: str
 ) -> dict[str, Any]:
+    """Read one JSON object of a session, directory or archive alike.
+
+    Args:
+        source: Where the session lives.
+        relative: File relative to the session root.
+        description: Short noun used in error messages, e.g. ``"session manifest"``.
+
+    Returns:
+        The decoded object.
+
+    Raises:
+        SessionReadError: If the file is unreadable, not valid JSON, or not an
+            object. It is a :class:`ValueError`.
+    """
+
     path = source.path / relative
     try:
         value = json.loads(source.read_text(relative))
@@ -292,7 +307,7 @@ def _load_attempt(
     manifest_relative = f"{key}/attempt.json"
     if source.exists(manifest_relative):
         try:
-            metadata = _read_object(source, manifest_relative, "attempt manifest")
+            metadata = read_json_object(source, manifest_relative, "attempt manifest")
         except SessionReadError as exc:
             metadata = {}
             warnings.append(str(exc))
@@ -392,7 +407,7 @@ def load_session(path: Path, *, resolve_receivers: bool = False) -> SessionBundl
         raise SessionReadError(f"unreadable session archive {root}: {exc}") from exc
     if not has_manifest:
         raise SessionReadError(f"missing session manifest: {manifest_path}")
-    manifest = _read_object(source, "session.json", "session manifest")
+    manifest = read_json_object(source, "session.json", "session manifest")
     schema_version = manifest.get("artifact_schema_version")
     if schema_version != ARTIFACT_SCHEMA_VERSION:
         raise SessionReadError(
@@ -405,7 +420,9 @@ def load_session(path: Path, *, resolve_receivers: bool = False) -> SessionBundl
     protocol: CollectionProtocol | None = None
     if source.exists("protocol.json"):
         try:
-            protocol_source = _read_object(source, "protocol.json", "protocol snapshot")
+            protocol_source = read_json_object(
+                source, "protocol.json", "protocol snapshot"
+            )
             protocol = protocol_from_mapping(protocol_source)
         except (SessionReadError, ProtocolError) as exc:
             warnings.append(str(exc))

@@ -734,7 +734,7 @@ explicitly; raw files remain unchanged. See
 from pathlib import Path
 
 from fall_detection.session_inspector.data import load_attempt_data
-from fall_detection.session_inspector.models import scan_sessions
+from fall_detection.session import scan_sessions
 
 sessions = scan_sessions(Path("data/raw/sessions"))
 for session in sessions:
@@ -784,7 +784,7 @@ regenerable; do not edit session files to add labels.
 from pathlib import Path
 import json
 
-from fall_detection.session_inspector.models import scan_sessions
+from fall_detection.session import scan_sessions
 
 rows = []
 for session in scan_sessions(Path("data/raw/sessions")):
@@ -999,7 +999,7 @@ Related documentation:
 - [`data/README.md`](../data/README.md) — directory roles and pruning
 - [`configs/collection/README.md`](../configs/collection/README.md) — protocol and scenario selection
 - [`src/fall_detection/collection/README.md`](../src/fall_detection/collection/README.md) — collector operation and schema-2 writer
-- [`src/fall_detection/session_inspector/`](../src/fall_detection/session_inspector/) — manifest reader, frame-table loader, review sidecar, exporter
+- [`src/fall_detection/session/`](../src/fall_detection/session/) — manifest reader and directory/archive source; [`src/fall_detection/session_inspector/`](../src/fall_detection/session_inspector/) — frame-table loader, review sidecar, exporter
 - [`src/fall_detection/radio/records.py`](../src/fall_detection/radio/records.py) — CSI record types and the exact `CSI_DATA` row formatter
 
 ## Derived frame tables (schema 3)

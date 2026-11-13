@@ -1,4 +1,4 @@
-"""Protect the dependency direction between domain code and presentation."""
+"""Protect the dependency direction between domain code and the applications."""
 
 import ast
 from importlib.util import resolve_name
@@ -7,12 +7,12 @@ from pathlib import Path
 PACKAGE = Path(__file__).resolve().parents[1] / "src" / "fall_detection"
 
 
-def test_domain_modules_do_not_import_presentation():
-    """Shared libraries must remain usable without importing application views."""
+def test_domain_modules_do_not_import_apps():
+    """Shared libraries, including ``session``, never import application code."""
     violations = []
     for path in PACKAGE.rglob("*.py"):
         relative = path.relative_to(PACKAGE)
-        if relative.parts[0] in {"apps", "presentation"}:
+        if relative.parts[0] == "apps":
             continue
         parts = ("fall_detection", *relative.with_suffix("").parts)
         package = ".".join(parts[:-1])
@@ -27,13 +27,10 @@ def test_domain_modules_do_not_import_presentation():
             if any(
                 name == prefix or name.startswith(prefix + ".")
                 for name in names
-                for prefix in (
-                    "fall_detection.apps",
-                    "fall_detection.presentation",
-                )
+                for prefix in ("fall_detection.apps",)
             ):
                 violations.append(f"{relative}:{node.lineno}")
-    assert not violations, f"Domain code imports presentation: {violations}"
+    assert not violations, f"Domain code imports apps: {violations}"
 
 
 def test_live_acquisition_is_owned_by_rust():
@@ -42,7 +39,6 @@ def test_live_acquisition_is_owned_by_rust():
         PACKAGE / "radio" / "live.py",
         *(PACKAGE / "apps").rglob("*.py"),
         *(PACKAGE / "collection").rglob("*.py"),
-        *(PACKAGE / "presentation").rglob("*.py"),
     ]
     retired = {
         f"fall_detection.radio.{name}"

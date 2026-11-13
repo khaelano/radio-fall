@@ -12,6 +12,7 @@ from fall_detection.radio.preprocessing.phase import (
     HT20_SLOT_INDICES,
 )
 from fall_detection.radio.records import CSI_HEADER, CsiRecord
+from fall_detection.session import load_session
 from fall_detection.session_inspector.data import (
     MAX_PLOT_RECORDS,
     AttemptData,
@@ -24,7 +25,6 @@ from fall_detection.session_inspector.data import (
     load_attempt_data_for_ui,
     prepare_attempt_signals,
 )
-from fall_detection.session_inspector.models import load_session
 
 
 def test_attempt_data_synthesizes_csv_rows_and_marks_invalid_first_word(
@@ -118,7 +118,9 @@ def test_compact_row_selection_never_reconverts_and_caches_the_window(
     second = csi_record_for_table_row(compact, 1)
     again = csi_record_for_table_row(compact, 0)
 
-    assert calls == {"ensure": 0, "open": 1}
+    # One cache miss opens the store twice (read, then fingerprint re-check);
+    # later selections hit the cache and open nothing.
+    assert calls == {"ensure": 0, "open": 2}
     assert first is not None and second is not None and again == first
     assert first.sequence == 1 and second.sequence == 2
 

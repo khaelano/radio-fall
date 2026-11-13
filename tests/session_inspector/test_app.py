@@ -20,12 +20,12 @@ from fall_detection.apps.session_inspector.app import (
     ValuesPanel,
     _parser,
 )
+from fall_detection.session import load_session
 from fall_detection.session_inspector.data import (
     TableData,
     load_attempt_data,
     load_attempt_data_for_ui,
 )
-from fall_detection.session_inspector.models import load_session
 
 
 @pytest.fixture

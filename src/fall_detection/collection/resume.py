@@ -7,8 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .._radio_native import storage_read_file
-from ..contracts import ARTIFACT_SCHEMA_VERSION
+from ..session import ARTIFACT_SCHEMA_VERSION, SessionSource, read_json_object
 from .capture import SessionMetadata
 from .protocol import CollectionProtocol, load_protocol
 
@@ -35,7 +34,8 @@ def load_session_resume(root: Path) -> SessionResume:
     reopened. Malformed or conflicting progress fails before any file mutation.
     """
     root = root.resolve()
-    manifest = json.loads((root / "session.json").read_text())
+    source = SessionSource(root)
+    manifest = read_json_object(source, "session.json", "session manifest")
     if manifest.get("artifact_schema_version") != ARTIFACT_SCHEMA_VERSION:
         raise ValueError("unsupported session artifact schema for resume")
     protocol = load_protocol(root / "protocol.json")
@@ -54,7 +54,7 @@ def load_session_resume(root: Path) -> SessionResume:
         raise ValueError("saved session has no participant identity")
     numbers: dict[int, int] = {}
     resolved: dict[int, str] = {}
-    for line in storage_read_file(root / "events.jsonl").decode("utf-8").splitlines():
+    for line in source.read_text("events.jsonl").splitlines():
         e = json.loads(line)
         if e.get("kind") not in {"attempt_started", "trial_resolved"}:
             continue
@@ -74,8 +74,9 @@ def load_session_resume(root: Path) -> SessionResume:
             resolved[ordinal] = disposition
     abandoned = []
     accepted = set()
-    for folder in sorted((root / "trials").glob("*/attempt_*")):
-        if not folder.is_dir() or not folder.resolve().is_relative_to(root):
+    for key in source.attempt_keys():
+        folder = root / key
+        if not folder.resolve().is_relative_to(root):
             raise ValueError("invalid saved attempt path")
         try:
             ordinal = int(folder.parent.name.split("_", 1)[0])
@@ -86,9 +87,9 @@ def load_session_resume(root: Path) -> SessionResume:
             raise ValueError("saved attempt is outside the protocol")
         numbers[ordinal] = max(numbers.get(ordinal, 0), attempt)
         path = folder / "attempt.json"
-        if not path.exists():
+        if not source.exists(f"{key}/attempt.json"):
             continue  # A crash before metadata publication still reserves its name.
-        value = json.loads(path.read_text())
+        value = read_json_object(source, f"{key}/attempt.json", "attempt manifest")
         if (
             value.get("session_id") != manifest["session_id"]
             or value.get("trial_ordinal") != ordinal

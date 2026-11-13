@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping
+from typing import Any
 
 from .._radio_native import storage_annotations_for
-from .models import SessionBundle
+from ..session import SessionBundle
 
 REVIEW_SCHEMA_VERSION = 1
 INCLUSION_VALUES = ("unreviewed", "include", "exclude")
@@ -328,7 +329,7 @@ class ReviewStore:
 
         saved = document.clone()
         saved.revision = current.document.revision + 1
-        saved.updated_at_utc = datetime.now(timezone.utc).isoformat()
+        saved.updated_at_utc = datetime.now(UTC).isoformat()
         saved.history = deepcopy(current.document.history)
         saved.history.append(
             {

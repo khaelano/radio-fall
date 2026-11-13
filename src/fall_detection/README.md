@@ -11,10 +11,11 @@
 
 The other packages contain reusable functionality: `radio/` provides acquisition
 and configuration; `collection/`
-provides collection protocols and session orchestration; `session_inspector/`
-provides session reading and review; `detection/` provides scoring and replay;
-`storage/`, `analysis/`, and `contracts/` provide shared data access, validation,
-and signal primitives. Experimental preprocessing, labels, plots, model definitions,
+provides collection protocols and session orchestration; `session/` provides the
+neutral session model and directory/archive reader; `session_inspector/`
+provides frame loading, review, export and video for the inspector;
+`detection/` provides scoring and replay; `analysis/` provides shared data
+access, validation, and signal primitives. Experimental preprocessing, labels, plots, model definitions,
 and training procedures live in `notebooks/latest/`.
 
 The installed commands are defined in `pyproject.toml`. Each application can

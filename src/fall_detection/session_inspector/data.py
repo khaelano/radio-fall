@@ -30,10 +30,11 @@ from ..radio.preprocessing.phase import (
 )
 from ..radio.preprocessing.rendering import PreparedCsiFrame, prepare_frame
 from ..radio.records import CSI_HEADER, CsiRecord, format_csi_record
-from .models import RecordedAttempt, attempt_indices
+from ..session import RecordedAttempt, attempt_indices
 
 CancellationCallback = Callable[[], bool]
 _FRAME_CACHE_SIZE = 4
+_FRAME_CACHE_BYTES = 256 * 1024 * 1024
 _FRAME_CACHE: OrderedDict[tuple[str, str, int, int, str], pa.Table] = OrderedDict()
 _FRAME_CACHE_LOCK = threading.Lock()
 MAX_PLOT_RECORDS = 800
@@ -601,11 +602,21 @@ def _receiver_frames(data: AttemptData) -> pa.Table | None:
         frames = pa.table(
             session.attempt_frames(index, data.receiver_id, columns=_FRAME_COLUMNS)
         )
+        # A re-conversion renames the tables before it rewrites the manifest, so
+        # confirm the fingerprint did not change while the rows were read.
+        if FrameStore.open(str(attempt.frames_path)).source_fingerprint != (
+            data.frames_fingerprint
+        ):
+            return None
     except StorageError:
         return None
     with _FRAME_CACHE_LOCK:
         _FRAME_CACHE[key] = frames
-        while len(_FRAME_CACHE) > _FRAME_CACHE_SIZE:
+        while len(_FRAME_CACHE) > _FRAME_CACHE_SIZE or (
+            len(_FRAME_CACHE) > 1
+            and sum(table.nbytes for table in _FRAME_CACHE.values())
+            > _FRAME_CACHE_BYTES
+        ):
             _FRAME_CACHE.popitem(last=False)
     return frames
 

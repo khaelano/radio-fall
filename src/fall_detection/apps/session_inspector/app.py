@@ -22,8 +22,17 @@ from typing import Any
 
 import numpy as np
 
+from fall_detection.apps.common.qt import qt_application
 from fall_detection.radio.preprocessing.rendering import (
     representative_subcarriers,
+)
+from fall_detection.session import (
+    RecordedAttempt,
+    RecordedTrial,
+    SessionBundle,
+    SessionReadError,
+    SessionSource,
+    scan_sessions,
 )
 from fall_detection.session_inspector.data import (
     AttemptData,
@@ -39,13 +48,6 @@ from fall_detection.session_inspector.exporter import (
     export_curated_bundle,
     session_size,
 )
-from fall_detection.session_inspector.models import (
-    RecordedAttempt,
-    RecordedTrial,
-    SessionBundle,
-    SessionReadError,
-    scan_sessions,
-)
 from fall_detection.session_inspector.review import (
     INCLUSION_VALUES,
     METADATA_FIELDS,
@@ -57,7 +59,6 @@ from fall_detection.session_inspector.review import (
     ReviewError,
     ReviewStore,
 )
-from fall_detection.session_inspector.source import SessionSource
 
 DEFAULT_SESSIONS_DIR = Path("data/raw/sessions")
 DEFAULT_ANNOTATIONS_DIR = Path("data/annotations")
@@ -1792,7 +1793,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
     source = args.session if args.session is not None else args.sessions_dir
-    application = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    application = qt_application("session inspector")
     pg.setConfigOptions(antialias=False, imageAxisOrder="row-major")
     window = SessionInspectorWindow(source, args.annotations_dir)
     window.show()

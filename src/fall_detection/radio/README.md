@@ -30,4 +30,3 @@ Rust owns the live session; this package holds the Python side of it.
 | `recording_io.py` | Native bounded recording writer used by the collector |
 | `provisioning.py`, `wireless_control.py` | USB discovery and profile provisioning, serial framing, one-time wireless pairing |
 | `phase.py` | HE20/HT20 LTF layouts and per-packet phase calibration (Rust-backed) |
-| `experiments/timing.py` | Conservative grant-timing model cited by a dated report; not part of acquisition |

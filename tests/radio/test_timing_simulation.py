@@ -1,12 +1,27 @@
 """Grant timing follows the actual single-authority C scheduling contract."""
 
-from pathlib import Path
+import importlib.util
 import shutil
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
-from fall_detection.radio.experiments.timing import simulate_receiver_timing
+TOOL = Path(__file__).resolve().parents[2] / "tools" / "radio" / "grant_timing.py"
+
+
+def _load_tool(name: str, path: Path):
+    """Load a standalone tool module by path, as the storage tool test does."""
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    # Dataclasses with postponed annotations look the module up in sys.modules.
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+simulate_receiver_timing = _load_tool("grant_timing", TOOL).simulate_receiver_timing
 
 
 @pytest.mark.parametrize(

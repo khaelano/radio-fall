@@ -38,6 +38,10 @@ tools/
   Markdown in the ignored `draft/` directory.
 - `tools/radio/csi_ap.sh` and `test-hostapd-coexist.conf` support local radio
   diagnostics.
+- `tools/radio/grant_timing.py` is the conservative ESP-NOW grant-timing model
+  used by the dated report `docs/reports/espnow-bulk-timing-2026-11-02.md`. It
+  is stdlib-only, produces no CSI or RF evidence, and is loaded by
+  `tests/radio/test_timing_simulation.py`.
 
 Read each tool's help and the matching guide in `docs/` before migrating or
 pruning local data.

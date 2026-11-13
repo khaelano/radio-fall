@@ -1,18 +1,12 @@
-"""Bounded, columnar amplitude preprocessing from Parquet to atomic NPZ files."""
+"""Columnar amplitude packet reading and native preparation from Parquet frames."""
 
-import json
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from time import perf_counter
-from zipfile import ZIP_DEFLATED, ZipFile
 
 import numpy as np
 import polars as pl
 
-from .._io import atomic_write
 from ..session_frames import AnalysisSession, load_analysis_session
-from .amplitude import hampel_subcarriers
 
 COLUMNS = [
     "attempt_key",
@@ -217,147 +211,3 @@ def prepare_recording(
         np.frombuffer(lower, dtype=np.float64),
         np.frombuffer(upper, dtype=np.float64),
     )
-
-
-def save_recording(path: Path, arrays: dict, *, compression_level: int = 1) -> None:
-    """Atomically save NumPy-compatible compressed arrays without pickled objects."""
-
-    def write(stream) -> None:
-        with ZipFile(
-            stream, "w", compression=ZIP_DEFLATED, compresslevel=compression_level
-        ) as archive:
-            for name, array in arrays.items():
-                with archive.open(name + ".npy", "w", force_zip64=True) as member:
-                    np.lib.format.write_array(
-                        member, np.asanyarray(array), allow_pickle=False
-                    )
-
-    atomic_write(path, write, suffix=".npz")
-
-
-def preprocess_dataset(
-    session,
-    recordings: pl.DataFrame,
-    output_dir: str | Path,
-    *,
-    window_seconds: float = 0.1,
-    min_periods: int = 5,
-    threshold: float = 5.0,
-    compression_level: int = 1,
-    progress=print,
-) -> pl.DataFrame:
-    """Stream projected Polars recordings through Rust and overlap one NPZ save.
-
-    Args:
-        session: Validated amplitude session; raw recordings are only read.
-        recordings: Selected attempt rows with scalar receiver_ids, in output order.
-        output_dir: Derived output directory, outside the raw session.
-        window_seconds: Centered Hampel duration.
-        min_periods: Minimum finite samples.
-        threshold: Scaled MAD threshold.
-        compression_level: ZIP deflate level (0–9); default favors throughput.
-        progress: Optional status callback.
-
-    Returns:
-        Polars summary in selection order, including individual stage durations.
-    """
-    output_dir = Path(output_dir).resolve()
-    raw_dir = Path(session.manifest["source_directory"]).resolve()
-    raw_root = raw_dir.parent.parent if raw_dir.parent.name == "sessions" else raw_dir
-    if output_dir == raw_root or raw_root in output_dir.parents:
-        raise ValueError("Preprocessing outputs must be outside raw data")
-    if not 0 <= compression_level <= 9:
-        raise ValueError("compression_level must be between 0 and 9")
-    reader = AmplitudePacketReader(session)
-    summary = []
-    pending = None
-    # A single bounded writer overlaps compression with the next read/native
-    # computation. No unbounded future queue or nested per-recording CPU pool.
-    try:
-        with ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="amplitude-save"
-        ) as writer:
-            for row in recordings.iter_rows(named=True):
-                attempt_key, receiver = row["attempt_key"], row["receiver_ids"]
-                relative = Path(attempt_key) / f"{receiver}.npz"
-                if relative.is_absolute() or ".." in relative.parts:
-                    raise ValueError("Invalid recording output identity")
-                started = perf_counter()
-                packets = reader.read(attempt_key, receiver)
-                loaded = perf_counter()
-                recording = prepare_recording(packets)
-                prepared = perf_counter()
-                filtered, replaced = hampel_subcarriers(
-                    recording.normalized,
-                    recording.time_seconds,
-                    window_seconds=window_seconds,
-                    min_periods=min_periods,
-                    threshold=threshold,
-                )
-                filtered_at = perf_counter()
-                metadata = recording.metadata
-                valid = np.isfinite(recording.masked)
-                provenance = {
-                    "session_id": session.manifest["session_id"],
-                    "attempt_key": attempt_key,
-                    "attempt_id": metadata["attempt_id"][0],
-                    "receiver_id": receiver,
-                    "activity_label": row["activity_label"],
-                    "scenario_id": row["scenario_id"],
-                    "quality": str(row["quality"]),
-                    "time_source": str(metadata["time_source"][0]),
-                    "source_parquet": str(session.path),
-                    "normalization": "per-recording, per-subcarrier min-max before Hampel",
-                    "hampel_backend": "rust-rayon-runtime-simd-v1",
-                    "preprocessing_backend": "polars-rust-he20-v1",
-                    "compression_level": compression_level,
-                    "hampel_window_seconds": window_seconds,
-                    "hampel_min_periods": min_periods,
-                    "hampel_threshold_scaled_mad": threshold,
-                }
-                arrays = {
-                    "amplitude": filtered.astype(np.float32),
-                    "valid": valid,
-                    "hampel_replaced": replaced,
-                    "time_seconds": recording.time_seconds,
-                    "capture_time_ns": metadata["capture_time_ns"]
-                    .to_numpy()
-                    .astype(np.int64),
-                    "phase": metadata["phase"]
-                    .fill_null("unknown")
-                    .to_numpy()
-                    .astype(str),
-                    "subcarriers": recording.subcarriers,
-                    "scale_min": recording.lower,
-                    "scale_max": recording.upper,
-                    "provenance_json": np.asarray(json.dumps(provenance)),
-                }
-                if pending is not None:
-                    pending.result()
-                path = output_dir / relative
-                pending = writer.submit(
-                    save_recording, path, arrays, compression_level=compression_level
-                )
-                summary.append(
-                    {
-                        "attempt": metadata["attempt_id"][0],
-                        "receiver": receiver,
-                        "packets": len(metadata),
-                        "subcarriers": 245,
-                        "valid_values": int(valid.sum()),
-                        "hampel_replaced": int(replaced.sum()),
-                        "output": str(path),
-                        "read_seconds": loaded - started,
-                        "prepare_seconds": prepared - loaded,
-                        "hampel_seconds": filtered_at - prepared,
-                    }
-                )
-                if progress and (
-                    len(summary) % 20 == 0 or len(summary) == len(recordings)
-                ):
-                    progress(f"Processed {len(summary)}/{len(recordings)} recordings")
-            if pending is not None:
-                pending.result()
-    finally:
-        reader.close()
-    return pl.DataFrame(summary)

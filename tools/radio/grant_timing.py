@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+import itertools
 import math
+from dataclasses import asdict, dataclass
 
 
 @dataclass(frozen=True)
@@ -136,7 +137,7 @@ def simulate_receiver_timing(
         {0.0, horizon, *(p.start_ms for p in phases), *(p.end_ms for p in phases)}
     )
     maximum = 0
-    for left, right in zip(points, points[1:]):
+    for left, right in itertools.pairwise(points):
         middle = (left + right) / 2
         owners = {p.owner for p in phases if p.start_ms <= middle < p.end_ms}
         maximum = max(maximum, len(owners))

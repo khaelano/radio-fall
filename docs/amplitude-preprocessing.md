@@ -78,7 +78,10 @@ performance measurements of the notebook refactor.
 
 The earlier notebook, `02_preprocess_old.ipynb` (removed on 13 November 2026;
 recoverable from Git history), used
-`analysis/preprocessing/amplitude_pipeline.py`. Polars selects accepted recordings and handles
+`analysis/preprocessing/amplitude_pipeline.py`. Its per-recording export,
+`preprocess_dataset` with `save_recording`, and the `benchmark_amplitude_pipeline.py`
+benchmark were also removed on 13 November 2026 and are recoverable from Git history.
+Polars selects accepted recordings and handles
 packet metadata. PyArrow's native Parquet reader reuses file metadata, projects
 17 required columns, and reads only candidate row groups. Rust decodes the
 batched signed-int16 I/Q arrays, aligns compact 245-slot or full 256-slot HE20
@@ -139,17 +142,20 @@ Install before starting the notebook kernel, or restart it after rebuilding:
 
 ```bash
 uv sync --inexact --extra analysis --reinstall-package radio-fall-detection
-uv run --no-sync python tools/processing/benchmark_amplitude_pipeline.py data/raw/sessions/20261104T081805521126Z --output-dir data/interim/amplitude_preprocessed_v3/20261104T081805521126Z --verify-dir data/interim/amplitude_preprocessed_v2/20261104T081805521126Z
 ```
 
-`--inexact` preserves separately installed notebook packages. The benchmark's
-`--recordings` option limits a run and `--compression-level` selects deflate
-level 0–9. Verification compares every saved array exactly, excluding the
+`--inexact` preserves separately installed notebook packages. The per-recording
+benchmark that produced the measurements below was removed on 13 November 2026
+and is recoverable from Git history; the current tree cannot reproduce those
+commands. Its verification compared every saved array exactly, excluding the
 provenance JSON whose backend/compression fields intentionally differ.
 Set `RAYON_NUM_THREADS` before starting Python to limit the offline worker pool.
 The standalone Hampel API also exposes scalar and serial comparison modes.
 
 ## Verification on 8 November 2026
+
+These measurements came from the removed per-recording benchmark. They are not
+reproducible with the current tree and are kept as a historical record.
 
 On an AMD Ryzen 7 PRO 4750U, Linux x86-64, Polars 2.1.0:
 
@@ -199,7 +205,7 @@ the 80 Hz representation has not been validated against held-out data.
 
 Tests cover canonical-decoder equivalence, mixed supported layouts, invalid
 metadata, projected/mixed row groups, cache reuse without pandas tables,
-atomic writer failures, and independent NumPy Hampel comparisons. Native tests
+and independent NumPy Hampel comparisons. Native tests
 cover SIMD/scalar magnitudes and tails. All 648 Python tests and nine Rust tests
 passed (one optional timing test ignored); strict Clippy also passed. Run:
 

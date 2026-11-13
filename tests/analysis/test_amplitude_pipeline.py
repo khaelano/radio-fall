@@ -1,4 +1,4 @@
-"""Check native physical CSI preparation and the Polars/NPZ pipeline."""
+"""Check native physical CSI preparation and the packet reader contract."""
 
 from types import SimpleNamespace
 
@@ -7,15 +7,10 @@ import polars as pl
 import pytest
 
 from fall_detection.analysis.diagnostics.phase_signals import phase_signal_from_packets
-from fall_detection.analysis.preprocessing.amplitude import (
-    hampel_subcarriers,
-    normalize_subcarriers,
-)
+from fall_detection.analysis.preprocessing.amplitude import normalize_subcarriers
 from fall_detection.analysis.preprocessing.amplitude_pipeline import (
     AmplitudePacketReader,
     prepare_recording,
-    preprocess_dataset,
-    save_recording,
 )
 
 
@@ -129,50 +124,3 @@ def test_packet_reader_returns_one_recording_with_projection():
         reader.close()
     with pytest.raises(ValueError, match="packets"):
         AmplitudePacketReader(SimpleNamespace(analysis=None))
-
-
-def test_preprocess_dataset_saves_arrays_and_summary_in_order(tmp_path):
-    frame = packets()
-    key = frame["attempt_key"][0]
-    session = SimpleNamespace(
-        path=tmp_path / "frames",
-        manifest={
-            "source_directory": str(tmp_path / "raw/session"),
-            "session_id": "test",
-        },
-        analysis=FakeAnalysis({(key, "rx-1"): frame}),
-    )
-    recordings = pl.DataFrame(
-        [
-            {
-                "attempt_key": key,
-                "receiver_ids": "rx-1",
-                "activity_label": "walk",
-                "scenario_id": "walk",
-                "quality": "good",
-            }
-        ]
-    )
-    summary = preprocess_dataset(
-        session, recordings, tmp_path / "derived", progress=None
-    )
-    actual = prepare_recording(frame)
-    filtered, replaced = hampel_subcarriers(actual.normalized, actual.time_seconds)
-    with np.load(summary["output"][0]) as saved:
-        np.testing.assert_array_equal(saved["amplitude"], filtered.astype(np.float32))
-        np.testing.assert_array_equal(saved["hampel_replaced"], replaced)
-        np.testing.assert_array_equal(saved["valid"], np.isfinite(actual.masked))
-        np.testing.assert_array_equal(saved["scale_min"], actual.lower)
-        assert saved["phase"].dtype.kind == "U"
-    with pytest.raises(ValueError, match="outside raw"):
-        preprocess_dataset(session, recordings, tmp_path / "raw/session", progress=None)
-
-
-def test_save_recording_failure_preserves_previous_file(tmp_path):
-    path = tmp_path / "recording.npz"
-    save_recording(path, {"value": np.arange(3)})
-    previous = path.read_bytes()
-    with pytest.raises(ValueError, match="Object arrays"):
-        save_recording(path, {"value": np.array([object()])})
-    assert path.read_bytes() == previous
-    assert list(tmp_path.iterdir()) == [path]

@@ -8,7 +8,7 @@ model is never substituted into hardware acquisition journals.
 
 ## Timing model
 
-`src/fall_detection/radio/experiments/timing.py` models one authorized receiver
+`tools/radio/grant_timing.py` (moved from `src/fall_detection/radio/experiments/timing.py` on 13 November 2026) models one authorized receiver
 at a time and requires its return confirmation before any successor departure.
 It assumes all receivers initially ready, 80 Hz sensing, two sensing rounds of
 announcement lead, and confirmation processed on the first sensing tick at or

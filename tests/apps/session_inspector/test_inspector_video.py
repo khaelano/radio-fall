@@ -14,8 +14,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from inspector_sessions import FrameSpec, attempt_origin
 
+from fall_detection.apps.session_inspector.video import VideoReader, load_video_timeline
 from fall_detection.session import load_session
-from fall_detection.session_inspector.video import VideoReader, load_video_timeline
 
 
 @pytest.fixture
@@ -90,7 +90,7 @@ def _wait(application, predicate):
 
 
 def test_csi_plots_use_attempt_clock_and_sort_only_derived_views(video_attempt):
-    from fall_detection.session_inspector.data import load_attempt_data
+    from fall_detection.apps.session_inspector.data import load_attempt_data
 
     data = load_attempt_data(video_attempt, "rx-1", prepare_signals=True)
     assert data.signal_times == (1.2, 0.2)
@@ -102,7 +102,7 @@ def test_csi_plots_use_attempt_clock_and_sort_only_derived_views(video_attempt):
 
 
 def test_frames_outside_the_attempt_window_are_not_plotted(session_factory):
-    from fall_detection.session_inspector.data import load_attempt_data
+    from fall_detection.apps.session_inspector.data import load_attempt_data
 
     origin = attempt_origin(0)
     root = session_factory(
@@ -122,7 +122,7 @@ def test_frames_outside_the_attempt_window_are_not_plotted(session_factory):
 
 
 def test_phase_heatmap_keeps_empty_time_cells_missing():
-    from fall_detection.session_inspector.data import timed_phase_image
+    from fall_detection.apps.session_inspector.data import timed_phase_image
 
     times = np.array([0.0, 0.1, 0.2, 1.0])
     phase = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]])
@@ -133,7 +133,7 @@ def test_phase_heatmap_keeps_empty_time_cells_missing():
 
 
 def test_missing_video_is_explicit_and_keeps_csi_available(video_attempt):
-    from fall_detection.session_inspector.data import load_attempt_data
+    from fall_detection.apps.session_inspector.data import load_attempt_data
 
     (video_attempt.path / "video.json").unlink()
     with pytest.raises(ValueError, match="No video recorded"):
@@ -147,8 +147,8 @@ def test_video_and_all_signal_cursors_share_attempt_time(video_attempt):
     pytest.importorskip("pyqtgraph")
     from PySide6 import QtWidgets
 
-    from fall_detection.apps.session_inspector.app import SignalsPanel
-    from fall_detection.session_inspector.data import load_attempt_data
+    from fall_detection.apps.session_inspector.data import load_attempt_data
+    from fall_detection.apps.session_inspector.ui.signals_panel import SignalsPanel
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     panel = SignalsPanel()
@@ -193,7 +193,7 @@ def test_video_panel_seeks_steps_and_clears_previous_attempt(video_attempt):
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
-    from fall_detection.apps.session_inspector.video_panel import VideoPanel
+    from fall_detection.apps.session_inspector.ui.video_panel import VideoPanel
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     panel = VideoPanel()

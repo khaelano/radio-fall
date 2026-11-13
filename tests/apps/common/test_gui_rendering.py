@@ -1,14 +1,14 @@
 import numpy as np
 from csi_line import record_from_csi_line
 
-from fall_detection.radio.buffer import BufferSnapshot, RollingCsiBuffer
-from fall_detection.radio.preprocessing.rendering import (
+from fall_detection.apps.common.rendering import (
     VALID_SUBCARRIERS,
     RenderGate,
     phase_column,
     prepare_frame,
     representative_subcarriers,
 )
+from fall_detection.radio.buffer import BufferSnapshot, RollingCsiBuffer
 from fall_detection.radio.records import CsiRecord
 
 PHASE_MODE_CALIBRATED = "Calibrated phase"
@@ -214,7 +214,7 @@ def test_render_gate_is_independent_per_view_and_configuration():
 def test_frame_cache_reuses_arrays_and_invalidates_on_buffer_window_or_mode_change(
     monkeypatch,
 ):
-    from fall_detection.radio.preprocessing.rendering import CsiFrameCache
+    from fall_detection.apps.common.rendering import CsiFrameCache
 
     first, second = RollingCsiBuffer(), RollingCsiBuffer()
     record = CsiRecord(7, "02:00:00:00:00:01", -40, -95, 1, (4 + 2j,) * 64)

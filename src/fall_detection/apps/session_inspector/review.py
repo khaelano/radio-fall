@@ -11,8 +11,8 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .._radio_native import storage_annotations_for
-from ..session import SessionBundle
+from fall_detection._radio_native import storage_annotations_for
+from fall_detection.session import SessionBundle
 
 REVIEW_SCHEMA_VERSION = 1
 INCLUSION_VALUES = ("unreviewed", "include", "exclude")

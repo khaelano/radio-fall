@@ -18,9 +18,10 @@ from typing import Any
 import numpy as np
 import pyarrow as pa
 
-from .._radio_native import FrameStore, StorageError
-from ..radio.buffer import BufferSnapshot
-from ..radio.preprocessing.phase import (
+from fall_detection._radio_native import FrameStore, StorageError
+from fall_detection.apps.common.rendering import PreparedCsiFrame, prepare_frame
+from fall_detection.radio.buffer import BufferSnapshot
+from fall_detection.radio.preprocessing.phase import (
     DEFAULT_PHASE_AMPLITUDE_FLOOR,
     HE20_COMPACT_SLOT_INDICES,
     HE20_SLOT_INDICES,
@@ -28,9 +29,8 @@ from ..radio.preprocessing.phase import (
     HT20_SLOT_INDICES,
     HT20_VALID_SUBCARRIERS,
 )
-from ..radio.preprocessing.rendering import PreparedCsiFrame, prepare_frame
-from ..radio.records import CSI_HEADER, CsiRecord, format_csi_record
-from ..session import RecordedAttempt, attempt_indices
+from fall_detection.radio.records import CSI_HEADER, CsiRecord, format_csi_record
+from fall_detection.session import RecordedAttempt, attempt_indices
 
 CancellationCallback = Callable[[], bool]
 _FRAME_CACHE_SIZE = 4

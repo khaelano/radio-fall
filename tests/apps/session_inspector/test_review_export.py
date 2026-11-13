@@ -6,18 +6,18 @@ from pathlib import Path
 
 import pytest
 
-from fall_detection.session import load_session
-from fall_detection.session_inspector.exporter import (
+from fall_detection.apps.session_inspector.exporter import (
     ExportCancelled,
     export_curated_bundle,
 )
-from fall_detection.session_inspector.review import (
+from fall_detection.apps.session_inspector.review import (
     AttemptReview,
     ReviewConflictError,
     ReviewDocument,
     ReviewError,
     ReviewStore,
 )
+from fall_detection.session import load_session
 
 
 def digest(path: Path) -> str:

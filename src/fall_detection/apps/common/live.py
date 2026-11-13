@@ -10,15 +10,15 @@ from fall_detection.apps.common.dashboard import (
     CsiDashboardPanel,
 )
 from fall_detection.apps.common.pacing import STATUS_INTERVAL_SECONDS
+from fall_detection.apps.common.rendering import (
+    DEFAULT_DASHBOARD_SUBCARRIERS,
+    DEFAULT_INSPECT_SUBCARRIER,
+)
 from fall_detection.apps.common.transport_status import (
     GatewayStatusPanel,
     TransportStatusText,
 )
 from fall_detection.radio.availability import AvailabilitySnapshot
-from fall_detection.radio.preprocessing.rendering import (
-    DEFAULT_DASHBOARD_SUBCARRIERS,
-    DEFAULT_INSPECT_SUBCARRIER,
-)
 
 if TYPE_CHECKING:
     from fall_detection.radio.live import LiveRadio

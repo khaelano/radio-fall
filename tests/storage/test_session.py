@@ -19,13 +19,13 @@ from fall_detection._radio_native import (
 from journal_builder import build_session
 
 from fall_detection.analysis.session_frames import load_analysis_session
-from fall_detection.session import load_session
-from fall_detection.session_inspector.review import (
+from fall_detection.apps.session_inspector.review import (
     AttemptReview,
     ReviewDocument,
     ReviewError,
     ReviewStore,
 )
+from fall_detection.session import load_session
 
 SessionResolutionError = StorageError
 

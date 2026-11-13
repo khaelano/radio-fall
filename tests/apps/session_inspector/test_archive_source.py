@@ -11,16 +11,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from inspector_sessions import archive_of
 
-from fall_detection.session import load_session
-from fall_detection.session_inspector.exporter import (
+from fall_detection.apps.session_inspector.exporter import (
     export_curated_bundle,
     session_size,
 )
-from fall_detection.session_inspector.review import (
+from fall_detection.apps.session_inspector.review import (
     AttemptReview,
     ReviewStore,
 )
-from fall_detection.session_inspector.video import VideoReader, load_video_timeline
+from fall_detection.apps.session_inspector.video import VideoReader, load_video_timeline
+from fall_detection.session import load_session
 
 
 def test_a_review_of_an_archived_session_is_saved_under_annotations(

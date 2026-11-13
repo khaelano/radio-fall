@@ -5,15 +5,7 @@ import pytest
 from inspector_sessions import ATTEMPT_LENGTH_NS, FrameSpec, attempt_origin
 from journal_builder import TX, mac_text
 
-from fall_detection.radio.buffer import RollingCsiBuffer
-from fall_detection.radio.preprocessing.phase import (
-    HE20_COMPACT_SLOT_INDICES,
-    HE20_SLOT_INDICES,
-    HT20_SLOT_INDICES,
-)
-from fall_detection.radio.records import CSI_HEADER, CsiRecord
-from fall_detection.session import load_session
-from fall_detection.session_inspector.data import (
+from fall_detection.apps.session_inspector.data import (
     MAX_PLOT_RECORDS,
     AttemptData,
     TableData,
@@ -25,6 +17,14 @@ from fall_detection.session_inspector.data import (
     load_attempt_data_for_ui,
     prepare_attempt_signals,
 )
+from fall_detection.radio.buffer import RollingCsiBuffer
+from fall_detection.radio.preprocessing.phase import (
+    HE20_COMPACT_SLOT_INDICES,
+    HE20_SLOT_INDICES,
+    HT20_SLOT_INDICES,
+)
+from fall_detection.radio.records import CSI_HEADER, CsiRecord
+from fall_detection.session import load_session
 
 
 def test_attempt_data_synthesizes_csv_rows_and_marks_invalid_first_word(
@@ -93,7 +93,7 @@ def test_attempt_data_synthesizes_csv_rows_and_marks_invalid_first_word(
 def test_compact_row_selection_never_reconverts_and_caches_the_window(
     session_factory, monkeypatch
 ):
-    from fall_detection.session_inspector import data as data_module
+    from fall_detection.apps.session_inspector import data as data_module
 
     root = session_factory(attempts=((1, 1, "accepted"),))
     compact = load_attempt_data_for_ui(load_session(root).attempts[0], "rx-1")
@@ -128,7 +128,7 @@ def test_compact_row_selection_never_reconverts_and_caches_the_window(
 def test_compact_row_selection_rejects_changed_frame_tables(session_factory):
     from dataclasses import replace
 
-    from fall_detection.session_inspector import data as data_module
+    from fall_detection.apps.session_inspector import data as data_module
 
     root = session_factory(attempts=((1, 1, "accepted"),))
     compact = load_attempt_data_for_ui(load_session(root).attempts[0], "rx-1")

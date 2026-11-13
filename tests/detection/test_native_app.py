@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from fall_detection.apps.detector import app, native_app
+from fall_detection.apps.detector import app, gui
 
 
 def test_parser_selects_current_four_second_models_on_webgpu():
@@ -35,10 +35,10 @@ def test_native_headless_polls_results_and_stops_on_failure(monkeypatch, capsys)
         def stop(self):
             calls.append("stop")
 
-    monkeypatch.setattr(native_app, "build_config", lambda args: {})
-    monkeypatch.setattr(native_app, "_new_backend", lambda config: Backend())
+    monkeypatch.setattr(gui, "build_config", lambda args: {})
+    monkeypatch.setattr(gui, "_new_backend", lambda config: Backend())
     with pytest.raises(RuntimeError, match="device lost"):
-        native_app.run(SimpleNamespace(headless=True, duration=None))
+        gui.run(SimpleNamespace(headless=True, duration=None))
     assert calls == ["start", "stop"]
     assert '"model_id": "cnn-4s"' in capsys.readouterr().out
 
@@ -53,9 +53,9 @@ def test_native_config_uses_model_files_and_wire_configuration_only(
     args = app.parser().parse_args(
         ["--ort-library", str(core), "--webgpu-plugin", str(plugin)]
     )
-    configuration = native_app.build_config(args)
+    configuration = gui.build_config(args)
     assert len(configuration["radio_config"]) == 108
-    assert configuration["models"] == list(native_app.DEFAULT_MODELS)
+    assert configuration["models"] == list(gui.DEFAULT_MODELS)
     assert configuration["core_library"] == str(core.resolve())
     assert configuration["model_root"] == str(Path("artifacts/model").resolve())
     assert not any("dataset" in key for key in configuration)
@@ -77,7 +77,7 @@ def test_native_config_replay_needs_no_radio_settings(tmp_path):
             "2",
         ]
     )
-    configuration = native_app.build_config(args)
+    configuration = gui.build_config(args)
     assert configuration["replay"] == {
         "captures": [str((tmp_path / "capture").resolve())],
         "speed": 2.0,
@@ -88,7 +88,7 @@ def test_native_config_replay_needs_no_radio_settings(tmp_path):
 
 
 def test_main_dispatches_to_native_frontend(monkeypatch):
-    monkeypatch.setattr(native_app, "run", lambda args: 17)
+    monkeypatch.setattr(gui, "run", lambda args: 17)
     assert app.main(["--headless"]) == 17
 
 
@@ -111,14 +111,12 @@ def test_preview_images_mask_missing_samples():
     model_input = np.zeros((2, 1964), dtype="<f4")
     model_input[:, :980] = 1.5
     model_input[0, 980:1960] = 1
-    magnitudes, signals = native_app.preview_images(
-        raw.tobytes(), model_input.tobytes(), 2
-    )
+    magnitudes, signals = gui.preview_images(raw.tobytes(), model_input.tobytes(), 2)
     assert np.isnan(magnitudes[0, 5]) and magnitudes[1, 0] == 980
     assert np.all(signals[0] == 1.5)
     assert np.all(np.isnan(signals[1]))
     with pytest.raises(ValueError):
-        native_app.preview_images(raw.tobytes(), model_input.tobytes(), 3)
+        gui.preview_images(raw.tobytes(), model_input.tobytes(), 3)
 
 
 def _magnitudes(values):
@@ -128,7 +126,7 @@ def _magnitudes(values):
 
 
 def test_add_places_rows_by_round_and_receiver():
-    buffer = native_app.StreamBuffer(rounds=8)
+    buffer = gui.StreamBuffer(rounds=8)
     assert buffer.add([1, 1], [5, 6], [0, 3], _magnitudes([1, 2]))
     assert buffer.latest == 6
     assert np.all(buffer.data[5, :245] == 1)
@@ -141,7 +139,7 @@ def test_add_places_rows_by_round_and_receiver():
 
 
 def test_add_out_of_order_round_lands_in_its_row():
-    buffer = native_app.StreamBuffer(rounds=8)
+    buffer = gui.StreamBuffer(rounds=8)
     buffer.add([1], [10], [0], _magnitudes([1]))
     assert buffer.add([1], [8], [1], _magnitudes([2]))
     assert buffer.latest == 10
@@ -151,7 +149,7 @@ def test_add_out_of_order_round_lands_in_its_row():
 
 
 def test_add_advance_clears_exposed_rows_only():
-    buffer = native_app.StreamBuffer(rounds=8)
+    buffer = gui.StreamBuffer(rounds=8)
     buffer.add([1] * 8, list(range(8)), [0] * 8, _magnitudes(range(1, 9)))
     buffer.add([1], [9], [1], _magnitudes([50]))
     assert buffer.latest == 9
@@ -168,7 +166,7 @@ def test_add_advance_clears_exposed_rows_only():
 
 
 def test_add_stale_round_is_ignored():
-    buffer = native_app.StreamBuffer(rounds=8)
+    buffer = gui.StreamBuffer(rounds=8)
     buffer.add([1], [20], [0], _magnitudes([1]))
     assert not buffer.add([1], [12], [1], _magnitudes([2]))  # latest - rounds
     assert buffer.latest == 20
@@ -179,7 +177,7 @@ def test_add_stale_round_is_ignored():
 
 
 def test_add_generation_change_resets_buffer_and_validates_input():
-    buffer = native_app.StreamBuffer(rounds=8)
+    buffer = gui.StreamBuffer(rounds=8)
     buffer.add([1], [4], [0], _magnitudes([1]))
     buffer.add([2], [1], [2], _magnitudes([7]))
     assert buffer.generation == 2

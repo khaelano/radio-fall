@@ -281,7 +281,7 @@ and resolved chair orientation are stored in scenario `attributes`. See the
 [collection configuration](../configs/collection/README.md) for the setup order.
 The expansion produces the
 `trial_ordinal` used by attempt directories and `attempt.json`. Use
-`fall_detection.collection.protocol.load_protocol()` to get the expanded
+`fall_detection.protocol.load_protocol()` to get the expanded
 `protocol.trials` rather than reimplementing the loop.
 
 `protocol_hash` is computed over the canonical JSON of the resolved source. Two
@@ -733,7 +733,7 @@ explicitly; raw files remain unchanged. See
 ```python
 from pathlib import Path
 
-from fall_detection.session_inspector.data import load_attempt_data
+from fall_detection.apps.session_inspector.data import load_attempt_data
 from fall_detection.session import scan_sessions
 
 sessions = scan_sessions(Path("data/raw/sessions"))
@@ -999,7 +999,7 @@ Related documentation:
 - [`data/README.md`](../data/README.md) — directory roles and pruning
 - [`configs/collection/README.md`](../configs/collection/README.md) — protocol and scenario selection
 - [`src/fall_detection/collection/README.md`](../src/fall_detection/collection/README.md) — collector operation and schema-2 writer
-- [`src/fall_detection/session/`](../src/fall_detection/session/) — manifest reader and directory/archive source; [`src/fall_detection/session_inspector/`](../src/fall_detection/session_inspector/) — frame-table loader, review sidecar, exporter
+- [`src/fall_detection/session/`](../src/fall_detection/session/) — manifest reader and directory/archive source; [`src/fall_detection/apps/session_inspector/`](../src/fall_detection/apps/session_inspector/) — frame-table loader, review sidecar, exporter
 - [`src/fall_detection/radio/records.py`](../src/fall_detection/radio/records.py) — CSI record types and the exact `CSI_DATA` row formatter
 
 ## Derived frame tables (schema 3)

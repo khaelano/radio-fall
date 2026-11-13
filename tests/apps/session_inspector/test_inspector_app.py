@@ -13,19 +13,17 @@ pytest.importorskip("pyqtgraph")
 from inspector_sessions import FrameSpec, attempt_origin
 from PySide6 import QtCore, QtWidgets
 
-from fall_detection.apps.session_inspector.app import (
-    SessionInspectorWindow,
-    SignalsPanel,
-    TextTableModel,
-    ValuesPanel,
-    _parser,
-)
-from fall_detection.session import load_session
-from fall_detection.session_inspector.data import (
+from fall_detection.apps.session_inspector.app import _parser
+from fall_detection.apps.session_inspector.data import (
     TableData,
     load_attempt_data,
     load_attempt_data_for_ui,
 )
+from fall_detection.apps.session_inspector.ui.signals_panel import SignalsPanel
+from fall_detection.apps.session_inspector.ui.tables import TextTableModel
+from fall_detection.apps.session_inspector.ui.values_panel import ValuesPanel
+from fall_detection.apps.session_inspector.ui.window import SessionInspectorWindow
+from fall_detection.session import load_session
 
 
 @pytest.fixture

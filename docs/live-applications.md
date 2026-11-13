@@ -14,7 +14,7 @@ writing and trial timing remain in the collection controller and capture modules
 | `apps/common/live.py` | Compose the dashboard and transport panel; limit diagnostics to four updates per second |
 | `apps/common/pacing.py` | Shared display rates, timer intervals and the `--fps` option |
 | `apps/common/qt.py` | Create the `QApplication` and report a missing PySide6 install uniformly |
-| `radio/preprocessing/rendering.py` | Numerical preparation and a bounded one-snapshot/one-frame cache |
+| `apps/common/rendering.py` | Numerical preparation and a bounded one-snapshot/one-frame cache |
 | `apps/common/gaps.py` | Receiver-by-time heatmap of CSI availability at delivery deadlines |
 | `apps/collector/app.py` | Parse options, gather metadata, compose the controller and windows, enter the Qt event loop |
 | `apps/collector/runtime.py` | Evaluate health, advance trial timing, update both windows and drain a run on exit |

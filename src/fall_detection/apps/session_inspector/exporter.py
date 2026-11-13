@@ -10,8 +10,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from .._radio_native import storage_extract_archive
-from ..session import SessionBundle
+from fall_detection._radio_native import storage_extract_archive
+from fall_detection.session import SessionBundle
+
 from .review import ReviewDocument
 
 

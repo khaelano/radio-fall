@@ -8,7 +8,8 @@ from bisect import bisect_right
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from fall_detection.session import RecordedAttempt
-from fall_detection.session_inspector.video import VideoTimeline, VideoWorker
+
+from ..video import VideoTimeline, VideoWorker
 
 
 class VideoPanel(QtWidgets.QWidget):

@@ -182,14 +182,16 @@ modules in live application code.
 `src/fall_detection/apps/` contains the collector, CSI viewer, session
 inspector, and detector application entry points and presentation code.
 `radio/` (settings, profile, live delivery, record types and display buffers,
-provisioning), `analysis/`, `collection/`, `session/` and `session_inspector/`
+provisioning), `analysis/`, `collection/`, `protocol/`, and `session/`
 contain the reusable radio, data, and domain
 components used by these applications and research tools. `session/` is the
 neutral session model (manifest models, directory/archive reader, schema
 version) that analysis, collection and the inspector all import; its only
-domain dependency is `collection.protocol`, for protocol parsing. `session_inspector/` keeps only inspector-specific frame loading,
-review, export and video. The viewer and
-collector share the dashboard, pacing and Qt bootstrap in `apps/common/`.
+domain dependency is `protocol` (the top-level package holding the collection protocol model and loader, which imports nothing else in `fall_detection`). `apps/session_inspector/` keeps the inspector-specific frame loading,
+review, export and video modules beside its `ui/` package; there is no
+standalone `session_inspector` package. The viewer and
+collector share the dashboard, pacing, display preparation (`rendering.py`)
+and Qt bootstrap in `apps/common/`.
 
 ## Sources of truth
 

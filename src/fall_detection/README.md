@@ -4,16 +4,16 @@
 
 - `collector/`: operator and performer interfaces and collection presenter.
 - `csi_viewer/`: live CSI viewer entry point.
-- `session_inspector/`: offline inspector interface and video panel.
+- `session_inspector/`: offline inspector; its Qt-free frame loading, review,
+  export and video modules sit beside the `ui/` window, panels and workers.
 - `detector/`: live detector interface and command.
-- `common/`: dashboard widgets, display pacing, shared `--fps` option and Qt
-  bootstrap used by several applications.
+- `common/`: dashboard widgets, display preparation (`rendering.py`), pacing,
+  shared `--fps` option and Qt bootstrap used by several applications.
 
 The other packages contain reusable functionality: `radio/` provides acquisition
 and configuration; `collection/`
 provides collection protocols and session orchestration; `session/` provides the
-neutral session model and directory/archive reader; `session_inspector/`
-provides frame loading, review, export and video for the inspector;
+neutral session model and directory/archive reader;
 `detection/` provides scoring and replay; `analysis/` provides shared data
 access, validation, and signal primitives. Experimental preprocessing, labels, plots, model definitions,
 and training procedures live in `notebooks/latest/`.

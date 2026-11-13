@@ -11,7 +11,7 @@ from fractions import Fraction
 from pathlib import Path
 from threading import Condition, Thread
 
-from ..session import RecordedAttempt, SessionSource
+from fall_detection.session import RecordedAttempt, SessionSource
 
 
 @dataclass(frozen=True)

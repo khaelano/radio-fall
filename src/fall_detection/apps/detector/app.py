@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fall_detection.radio.settings import add_live_arguments
 
-from .native_app import DEFAULT_MODELS, MODELS
+from .gui import DEFAULT_MODELS, MODELS
 
 
 def parser() -> argparse.ArgumentParser:
@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         cli.error("--duration must be positive")
     if not 0 <= args.threshold <= 1:
         cli.error("--threshold must be between 0 and 1")
-    from .native_app import run
+    from .gui import run
 
     try:
         return run(args)

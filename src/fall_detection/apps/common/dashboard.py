@@ -9,9 +9,7 @@ from typing import Any
 import numpy as np
 
 from fall_detection.apps.common.gaps import CsiGapPanel
-from fall_detection.radio.availability import AvailabilitySnapshot
-from fall_detection.radio.buffer import PreviewNotReady
-from fall_detection.radio.preprocessing.rendering import (
+from fall_detection.apps.common.rendering import (
     DASHBOARD_TRACE_COUNTS,
     DEFAULT_DASHBOARD_SUBCARRIERS,
     DEFAULT_INSPECT_SUBCARRIER,
@@ -22,6 +20,8 @@ from fall_detection.radio.preprocessing.rendering import (
     phase_column,
     representative_subcarriers,
 )
+from fall_detection.radio.availability import AvailabilitySnapshot
+from fall_detection.radio.buffer import PreviewNotReady
 from fall_detection.radio.state import HISTORY_SECONDS, LiveState
 
 DEFAULT_VIEW_SECONDS = 3.0

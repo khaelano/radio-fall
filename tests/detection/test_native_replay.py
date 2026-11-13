@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from fall_detection.apps.detector import native_app
+from fall_detection.apps.detector import gui
 
 ROOT = Path(__file__).resolve().parents[2]
 CAPTURE = ROOT / "data/experiments/detector/native-capture-20261112-c"
@@ -84,7 +84,7 @@ def _offline_inputs(capture: Path) -> tuple[int, int, np.ndarray, np.ndarray]:
 
 
 @pytest.mark.skipif(
-    not CAPTURE.is_dir() or native_app.runtime_library() is None,
+    not CAPTURE.is_dir() or gui.runtime_library() is None,
     reason="needs the DVC capture and the detect extra",
 )
 def test_native_replay_matches_offline_preprocessing(tmp_path):
@@ -96,7 +96,7 @@ def test_native_replay_matches_offline_preprocessing(tmp_path):
     config = {
         "replay": {"captures": [str(CAPTURE)], "speed": 2.0},
         "model_root": str(MODELS),
-        "core_library": str(native_app.runtime_library()),
+        "core_library": str(gui.runtime_library()),
         "backend": "cpu",
         "models": ["cnn-4s"],
         "output_dir": str(output),
@@ -153,7 +153,7 @@ def test_native_replay_matches_offline_preprocessing(tmp_path):
     metadata = json.loads(metadata)
     assert metadata["frames"] == 480
     assert metadata["end_ns"] == index[-1]["end_ns"]
-    magnitudes, signals = native_app.preview_images(raw, model_input, 480)
+    magnitudes, signals = gui.preview_images(raw, model_input, 480)
     assert magnitudes.shape == signals.shape == (480, 980)
     np.testing.assert_array_equal(
         np.frombuffer(model_input, dtype="<f4").reshape(480, 1964), tensors[-1]

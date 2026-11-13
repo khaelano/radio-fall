@@ -14,6 +14,10 @@ from ..data import (
 )
 from .tables import TextTableModel
 
+RECORD_UNAVAILABLE_MESSAGE = (
+    "Frame tables changed since this attempt was loaded; reload the attempt."
+)
+
 
 class ValuesPanel(QtWidgets.QWidget):
     """Exact attempt tables plus per-subcarrier detail for one CSI row."""
@@ -121,7 +125,16 @@ class ValuesPanel(QtWidgets.QWidget):
                 self.models["csi"].source_row(current.row()),
             )
         if record is None:
-            self.models["detail"].set_table(TableData(name=""))
+            self.models["detail"].set_table(
+                TableData(
+                    name="Selected CSI values",
+                    headers=("message",),
+                    rows=((RECORD_UNAVAILABLE_MESSAGE,),),
+                )
+            )
+            self.views["detail"].resizeColumnsToContents()
+            if self.tabs.currentIndex() == 2:
+                self._update_paging()
             return
         rows = csi_value_rows(record)
         table = TableData(

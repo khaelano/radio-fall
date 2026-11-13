@@ -19,9 +19,13 @@ from fall_detection.apps.session_inspector.data import (
     load_attempt_data,
     load_attempt_data_for_ui,
 )
+from fall_detection.apps.session_inspector.ui import values_panel
 from fall_detection.apps.session_inspector.ui.signals_panel import SignalsPanel
 from fall_detection.apps.session_inspector.ui.tables import TextTableModel
-from fall_detection.apps.session_inspector.ui.values_panel import ValuesPanel
+from fall_detection.apps.session_inspector.ui.values_panel import (
+    RECORD_UNAVAILABLE_MESSAGE,
+    ValuesPanel,
+)
 from fall_detection.apps.session_inspector.ui.window import SessionInspectorWindow
 from fall_detection.session import load_session
 
@@ -155,6 +159,34 @@ def test_values_panel_parses_compact_csi_row_on_demand(session_factory, applicat
     assert panel.models["detail"].rowCount() == 2
     assert panel.models["radio_timing"].rowCount() == 1
     assert panel.tabs.count() == 3
+    panel.close()
+
+
+def test_values_panel_explains_missing_csi_record(
+    session_factory, application, monkeypatch
+):
+    root = session_factory(
+        attempts=((1, 1, "accepted"),),
+        frames=(
+            FrameSpec(
+                10,
+                attempt_origin(0) + 100_000_000,
+                values=(complex(3, 4), complex(-2, 1)),
+            ),
+        ),
+    )
+    session = load_session(root)
+    data = load_attempt_data_for_ui(session.attempts[0], "rx-1")
+    panel = ValuesPanel()
+    monkeypatch.setattr(values_panel, "csi_record_for_table_row", lambda *_: None)
+
+    panel.set_data(data)
+    panel._csi_row_changed(panel.models["csi"].index(0, 0), QtCore.QModelIndex())
+
+    detail = panel.models["detail"]
+    assert detail.rowCount() == 1
+    assert detail.data(detail.index(0, 0)) == RECORD_UNAVAILABLE_MESSAGE
+    assert "reload the attempt" in RECORD_UNAVAILABLE_MESSAGE
     panel.close()
 
 

@@ -63,7 +63,7 @@ written or read.
    - [8.2 Cleanup performed on 2026-10-27](#82-cleanup-performed-on-2026-10-27)
    - [8.3 Pruning](#83-pruning)
 9. [Quick reference](#9-quick-reference)
-10. [Derived amplitude sequence v2 export](#derived-amplitude-sequence-v2-export)
+10. [Derived amplitude sequence exports](#derived-amplitude-sequence-exports)
 
 ## 1. Where the data lives
 

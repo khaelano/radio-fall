@@ -178,7 +178,11 @@ def _attempt_table(
     trials = {trial.ordinal: trial for trial in session.trials}
     rows = []
     for attempt in session.attempts:
-        decision = effective[attempt.key]
+        decision = effective.get(attempt.key)
+        if decision is None:
+            # A crash between creating the attempt directory and publishing its
+            # metadata leaves a directory the storage library does not list.
+            continue
         trial = trials.get(attempt.trial_ordinal)
         attributes = trial.attributes if trial else {}
         index = indices.get((attempt.trial_ordinal, attempt.attempt_number))

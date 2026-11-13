@@ -214,6 +214,18 @@ def test_packets_are_sorted_by_capture_time_and_decode_as_phase_signals(capture)
     assert list(action) == ["receiver_id", "csi_i", "status"]
 
 
+def test_attempt_directory_without_metadata_is_ignored(capture):
+    root, destination = capture
+    baseline = len(load_analysis_session(root, destination).attempts)
+    orphan = root / "trials/001_walk/attempt_03"
+    orphan.mkdir()
+    (orphan / "notes.txt").write_text("crash before attempt.json")
+
+    session = load_analysis_session(root, destination)
+
+    assert len(session.attempts) == baseline
+
+
 def test_unknown_columns_and_attempts_are_rejected(capture):
     root, destination = capture
     session = load_analysis_session(root, destination)

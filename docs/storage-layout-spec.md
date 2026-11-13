@@ -47,7 +47,7 @@ library. Video recording is unchanged except for how it is aligned
 | D10 | Derived exports under `data/interim/parquet` and `data/processed` are invalidated once and regenerated. No legacy-fingerprint compatibility. | Owner |
 | D11 | The derived tables live under `data/interim/frames/<session-id>/`, in the existing `data/interim` DVC output. | Owner |
 | D12 | Python receives Arrow data through the Arrow C stream capsule, not through an Arrow crate pyo3 feature, to avoid a pyo3 version clash. | Owner-approved plan |
-| D13 | `frames.parquet` holds frames captured inside an attempt window by default, which is exactly what the CSV sidecars held; `scope = all` keeps every journal frame ([section 7.2](#72-membership-rule)). | Measurement |
+| D13 | `frames.parquet` holds frames captured inside an attempt window by default, which is exactly what the CSV sidecars held; `scope = all` keeps every journal frame ([section 7.2](#72-membership-rule-and-frame-scope)). | Measurement |
 | D14 | Physical order is run-major journal order, not capture time, because capture time can step backwards ([section 6.2](#62-order-row-groups-encodings)). | Measurement |
 | D15 | Reviews live in `data/annotations/<session-id>/session_review.json`, tracked in Git; the library resolves them with the recording and applies them at read time. | Owner |
 

@@ -3,7 +3,7 @@
 Start with [project knowledge](project-knowledge.md) for current implementation
 facts and open questions.
 
-- **Collection:** [dataset format](dataset-format.md), [storage layout draft](storage-layout-spec.md) (proposal, not implemented), [radio setup](radio-configuration.md), [ESP-NOW gateway](espnow-gateway.md), [video](video-recording.md).
+- **Collection:** [dataset format](dataset-format.md), [storage layout specification](storage-layout-spec.md), [radio setup](radio-configuration.md), [ESP-NOW gateway](espnow-gateway.md), [video](video-recording.md).
 - **Operation:** [live apps](live-applications.md), [fall detection](live-fall-detection.md), [recovery](automatic-radio-recovery.md), [native pipeline](rust-radio-pipeline.md).
 - **Radio:** [UART relay](uart-transmitter-relay.md).
 - **Research:** [amplitude preprocessing](amplitude-preprocessing.md), [literature outline](peta-sumber-outline-landasan-kepustakaan.md), [Zotero](zotero.md), [presentations](presentations/).

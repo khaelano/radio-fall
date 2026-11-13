@@ -69,7 +69,9 @@ window ends. Coverage below 70% for any receiver, stale input and runtime
 errors produce unknown. Scores of at least 0.5 display a fall candidate; models
 remain independent. Changing the selection restarts the backend. Outputs go to
 a fresh directory under `data/experiments/detector/`: `predictions.jsonl`,
-`detector.json`, and raw gateway journals in live mode.
+`detector.json`, and raw gateway journals in live mode. Git ignores these
+`native-<timestamp>` folders; track a run worth keeping with `uv run dvc add`
+(the 12 November runs are in `runs-20261112`).
 
 A new run, an all-receiver gap of at least one second, or a history overflow
 discards buffered samples and starts a new segment and generation; pending

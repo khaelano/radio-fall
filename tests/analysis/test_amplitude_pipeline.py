@@ -54,7 +54,7 @@ def packets(counts=(245, 256, 245, 256, 245, 256)):
 
 def test_prepare_recording_matches_canonical_decoder():
     frame = packets()
-    signal = phase_signal_from_packets(frame.to_pandas())
+    signal = phase_signal_from_packets(frame)
     expected = np.abs(signal.complex_csi)
     valid = np.isfinite(signal.raw_phase) & frame["driver_valid"].to_numpy()[:, None]
     expected[~valid] = np.nan

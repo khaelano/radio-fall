@@ -1,19 +1,81 @@
 """Reconstruct collection phases from host-clock events and attempt manifests."""
 
 from collections import defaultdict
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import numpy as np
-import pandas as pd
+import polars as pl
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 PHASES = ("countdown", "action", "recovery")
 _COMPLETED = {"accepted", "rejected", "skipped", "pending_review"}
+INTERVAL_SCHEMA = {
+    "attempt_id": pl.String,
+    "trial_ordinal": pl.Int64,
+    "attempt_number": pl.Int64,
+    "activity_label": pl.String,
+    "status": pl.String,
+    "phase": pl.String,
+    "phase_start_monotonic_ns": pl.Int64,
+    "phase_end_monotonic_ns": pl.Int64,
+    "observed_seconds": pl.Float64,
+    "planned_seconds": pl.Float64,
+    "duration_delta_seconds": pl.Float64,
+}
+CHECK_SCHEMA = {
+    "attempt_id": pl.String,
+    "trial_ordinal": pl.Int64,
+    "activity_label": pl.String,
+    "status": pl.String,
+    "phase_sequence": pl.String,
+    "phase_order_valid": pl.Boolean,
+    "phase_bounds_valid": pl.Boolean,
+    "all_phases_present": pl.Boolean,
+    "completed_attempt_has_all_phases": pl.Boolean,
+    "action_confirmed_manifest": pl.Boolean,
+    "action_confirmed_event": pl.Boolean,
+    "action_confirmation_matches": pl.Boolean,
+    "confirmation_occurs_during_action": pl.Boolean,
+    "trial_resolution_matches_status": pl.Boolean,
+    **{f"{phase}_seconds": pl.Float64 for phase in PHASES},
+}
+
+
+def as_polars(frame: "pl.DataFrame | pd.DataFrame") -> pl.DataFrame:
+    """Return a polars frame, converting a pandas frame at the module boundary.
+
+    Args:
+        frame: A polars frame, or a pandas frame such as the one returned by
+            ``AnalysisSession.read_packets``.
+
+    Returns:
+        ``frame`` unchanged when it is already polars; otherwise its conversion.
+    """
+    return (
+        frame
+        if isinstance(frame, pl.DataFrame)
+        else pl.from_pandas(frame, nan_to_null=True)
+    )
 
 
 def reconstruct_phases(
     attempts: list[dict[str, Any]], events: list[dict[str, Any]], trials: dict
-) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
-    """Build interval and validation tables plus intervals keyed by attempt."""
+) -> tuple[pl.DataFrame, pl.DataFrame, dict]:
+    """Build interval and validation tables plus intervals keyed by attempt.
+
+    Unavailable durations are null rather than NaN.
+
+    Args:
+        attempts: Attempt records with ``key``, ``attempt_id``, ``trial_ordinal``,
+            ``attempt_number``, ``activity_label``, ``status`` and ``manifest``.
+        events: Host-clock events decoded from ``events.jsonl``.
+        trials: Protocol trials keyed by ordinal.
+
+    Returns:
+        Phase intervals, per-attempt validation checks, and the
+        ``(start_ns, stop_ns)`` intervals of every phase keyed by attempt.
+    """
     grouped = defaultdict(list)
     for event in events:
         if event.get("trial_ordinal") is not None and event.get("attempt") is not None:
@@ -52,8 +114,10 @@ def reconstruct_phases(
             stop = int(stop) if stop is not None else None
             bounded = stop is not None and stop >= start
             bounds_valid &= bounded and (start_ns is None or start >= start_ns)
-            observed = (stop - start) / 1e9 if bounded else np.nan
-            planned = getattr(trial.scenario, f"{phase}_seconds") if trial else np.nan
+            observed = (stop - start) / 1e9 if bounded else None
+            planned = (
+                float(getattr(trial.scenario, f"{phase}_seconds")) if trial else None
+            )
             intervals[phase] = (start, stop)
             durations[phase] = observed
             interval_rows.append(
@@ -68,7 +132,9 @@ def reconstruct_phases(
                     "phase_end_monotonic_ns": stop,
                     "observed_seconds": observed,
                     "planned_seconds": planned,
-                    "duration_delta_seconds": observed - planned,
+                    "duration_delta_seconds": None
+                    if observed is None or planned is None
+                    else observed - planned,
                 }
             )
         by_attempt[record["key"]] = intervals
@@ -107,43 +173,11 @@ def reconstruct_phases(
                 == record["status"]
                 if resolutions
                 else None,
-                **{
-                    f"{phase}_seconds": durations.get(phase, np.nan) for phase in PHASES
-                },
+                **{f"{phase}_seconds": durations.get(phase) for phase in PHASES},
             }
         )
-    interval_columns = [
-        "attempt_id",
-        "trial_ordinal",
-        "attempt_number",
-        "activity_label",
-        "status",
-        "phase",
-        "phase_start_monotonic_ns",
-        "phase_end_monotonic_ns",
-        "observed_seconds",
-        "planned_seconds",
-        "duration_delta_seconds",
-    ]
-    check_columns = [
-        "attempt_id",
-        "trial_ordinal",
-        "activity_label",
-        "status",
-        "phase_sequence",
-        "phase_order_valid",
-        "phase_bounds_valid",
-        "all_phases_present",
-        "completed_attempt_has_all_phases",
-        "action_confirmed_manifest",
-        "action_confirmed_event",
-        "action_confirmation_matches",
-        "confirmation_occurs_during_action",
-        "trial_resolution_matches_status",
-        *[f"{phase}_seconds" for phase in PHASES],
-    ]
     return (
-        pd.DataFrame(interval_rows, columns=interval_columns),
-        pd.DataFrame(checks, columns=check_columns),
+        pl.DataFrame(interval_rows, schema=INTERVAL_SCHEMA),
+        pl.DataFrame(checks, schema=CHECK_SCHEMA),
         by_attempt,
     )

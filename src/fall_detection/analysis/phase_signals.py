@@ -2,12 +2,17 @@
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 from ..radio.preprocessing.phase import decode_ltf_blocks
+from ._timeline import as_polars
 from .session_frames import AnalysisSession
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 _ATTEMPT_ID = re.compile(r"\d+/\d+")
 
@@ -41,7 +46,7 @@ class PhaseSignal:
 
 def load_capture_packets(
     session: AnalysisSession, attempt_id: str, receiver_id: str
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     """Load all CSI rows of one recording with validated timing and identifiers.
 
     Packets come from the converted frame tables and are sorted by capture
@@ -64,17 +69,17 @@ def load_capture_packets(
     """
     if not _ATTEMPT_ID.fullmatch(attempt_id):
         raise ValueError("attempt_id must look like '001/01'")
-    matches = session.attempts.loc[session.attempts["attempt_id"].eq(attempt_id)]
-    if len(matches) != 1:
+    matches = as_polars(session.attempts).filter(pl.col("attempt_id") == attempt_id)
+    if matches.height != 1:
         raise FileNotFoundError(
-            f"Expected one attempt {attempt_id}; found {len(matches)}"
+            f"Expected one attempt {attempt_id}; found {matches.height}"
         )
-    attempt = matches.iloc[0]
+    attempt = matches.row(0, named=True)
     if receiver_id not in attempt["receiver_ids"]:
         raise FileNotFoundError(
             f"Attempt {attempt_id} has no frames from receiver {receiver_id}"
         )
-    return session.packets(attempt["attempt_key"], receiver_id).to_pandas()
+    return pl.DataFrame(session.packets(attempt["attempt_key"], receiver_id))
 
 
 def load_phase_signal(
@@ -95,13 +100,13 @@ def load_phase_signal(
     )
 
 
-def phase_signal_from_packets(packets: pd.DataFrame) -> PhaseSignal:
+def phase_signal_from_packets(packets: "pl.DataFrame | pd.DataFrame") -> PhaseSignal:
     """Decode one attempt/receiver packet DataFrame without reading raw files.
 
     Args:
-        packets: Rows from ``load_capture_packets`` or
-            ``AnalysisSession.read_packets``. I/Q arrays retain raw slot order
-            and invalid-slot flags.
+        packets: Rows from ``load_capture_packets`` (polars) or
+            ``AnalysisSession.read_packets`` (pandas, converted on entry). I/Q
+            arrays retain raw slot order and invalid-slot flags.
 
     Returns:
         Sensing-link matrices decoded with the canonical masks and calibration.
@@ -109,21 +114,23 @@ def phase_signal_from_packets(packets: pd.DataFrame) -> PhaseSignal:
     Raises:
         ValueError: Multiple recordings, invalid payloads, or no sensing rows.
     """
-    if packets.empty or any(
-        packets[name].nunique(dropna=False) != 1
+    packets = as_polars(packets)
+    if packets.is_empty() or any(
+        packets[name].n_unique() != 1
         for name in ("attempt_id", "receiver_id", "attempt_started_monotonic_ns")
     ):
         raise ValueError("Expected one nonempty attempt/receiver recording")
-    csi = packets.loc[packets["is_sensing"]]
-    first = packets.iloc[0]
+    csi = packets.filter(pl.col("is_sensing"))
+    first = packets.row(0, named=True)
     attempt_id, receiver_id = first["attempt_id"], first["receiver_id"]
     origin = int(first["attempt_started_monotonic_ns"])
-    if csi.empty:
+    if csi.is_empty():
         raise ValueError(f"No sensing-link CSI in {attempt_id}/{receiver_id}")
-    times = csi["time_seconds"].to_numpy(dtype=float)
+    times = csi["time_seconds"].cast(pl.Float64).to_numpy()
     time_source = str(first["time_source"])
-    bounds = pd.to_numeric(csi["clock_uncertainty_us"], errors="coerce")
-    uncertainty = float(bounds.max()) if bounds.notna().all() else None
+    bounds = csi["clock_uncertainty_us"].cast(pl.Float64, strict=False)
+    known = bounds.is_not_null() & bounds.is_not_nan()
+    uncertainty = float(bounds.max()) if known.all() else None
     return _decode_phase_rows(csi, times, origin, first, uncertainty, time_source)
 
 
@@ -132,17 +139,25 @@ def _decode_phase_rows(csi, times, origin, first, uncertainty, time_source):
     values, raw, calibrated, slopes, offsets, retained = [], [], [], [], [], []
     subcarriers = None
     skipped = 0
-    for position, row in enumerate(csi.itertuples(index=False)):
-        payload = np.column_stack((row.csi_q, row.csi_i)).ravel()
-        if payload.ndim != 1 or payload.size != int(row.len) or payload.size % 2:
-            raise ValueError(f"Invalid CSI payload length in packet {row.id}")
+    columns = ("len", "sig_mode", "bandwidth", "stbc", "first_word", "csi_q", "csi_i")
+    # The packet identifier is optional; it only labels payload errors.
+    labels = ["id"] if "id" in csi.columns else []
+    rows = csi.select(*labels, *columns).iter_rows(named=True)
+    for position, row in enumerate(rows):
+        quadrature = np.asarray(row["csi_q"], dtype=np.int16)
+        in_phase = np.asarray(row["csi_i"], dtype=np.int16)
+        payload = np.column_stack((quadrature, in_phase)).ravel()
+        if payload.ndim != 1 or payload.size != int(row["len"]) or payload.size % 2:
+            raise ValueError(
+                f"Invalid CSI payload length in packet {row.get('id', position)}"
+            )
         complex_values = payload[1::2] + 1j * payload[0::2]
         blocks = decode_ltf_blocks(
             complex_values,
-            sig_mode=int(row.sig_mode),
-            bandwidth=int(row.bandwidth),
-            stbc=int(row.stbc),
-            first_word_invalid=bool(row.first_word),
+            sig_mode=int(row["sig_mode"]),
+            bandwidth=int(row["bandwidth"]),
+            stbc=int(row["stbc"]),
+            first_word_invalid=bool(row["first_word"]),
         )
         block = next((block for block in blocks if block.name == "HE-LTF"), None)
         if block is None:

@@ -3,6 +3,7 @@
 import hashlib
 import json
 import multiprocessing
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -11,14 +12,112 @@ from time import perf_counter
 from typing import Any
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 from .._radio_native import storage_read as read_session_file
 from ..collection.protocol import protocol_from_mapping
 from ..radio.preprocessing import phase as phase_module
 from . import _cache_keys, _receiver, _timeline, session_frames
 from ._io import atomic_bytes
+from ._timeline import as_polars
 from .session_frames import AnalysisSession, load_analysis_session
+
+_IDENTITY_SCHEMA = {
+    "attempt_id": pl.String,
+    "trial_ordinal": pl.Int64,
+    "attempt_number": pl.Int64,
+    "activity_label": pl.String,
+    "status": pl.String,
+    "receiver_id": pl.String,
+}
+_RECEIVER_ATTEMPT_SCHEMA = {**_IDENTITY_SCHEMA, **_receiver.METRIC_SCHEMA}
+_PHASE_PACKET_SCHEMA = {
+    **_IDENTITY_SCHEMA,
+    "phase": pl.String,
+    "sensing_link_csi_rows": pl.Int64,
+}
+_ATTEMPT_SCHEMA = {
+    "attempt_id": pl.String,
+    "trial_ordinal": pl.Int64,
+    "attempt_number": pl.Int64,
+    "activity_label": pl.String,
+    "planned_activity_label": pl.String,
+    "status": pl.String,
+}
+_OVERVIEW_SCHEMA = {
+    "session_id": pl.String,
+    "started_at_utc": pl.String,
+    "session_status": pl.String,
+    "planned_trials": pl.Int64,
+    "attempts_recorded": pl.Int64,
+    "nominal_rate_hz": pl.Float64,
+    "expected_receivers": pl.String,
+    "unexpected_receivers": pl.String,
+    "transmitter_mac": pl.String,
+    "cached_receiver_recordings": pl.Int64,
+    "scanned_receiver_recordings": pl.Int64,
+    "analysis_seconds": pl.Float64,
+}
+_COVERAGE_SCHEMA = {
+    "planned_trials": pl.Int64,
+    "trials_with_attempts": pl.Int64,
+    "planned_trials_never_started": pl.Int64,
+    "trial_ordinals_never_started": pl.List(pl.Int64),
+}
+_RECEIVER_SUMMARY_SCHEMA = {
+    "receiver_id": pl.String,
+    "attempts_without_frames": pl.Int64,
+    "raw_csi_rows": pl.Int64,
+    "sensing_link_csi_rows": pl.Int64,
+    "sequence_gap_missing_frames": pl.Int64,
+    "sequence_gap_loss_pct": pl.Float64,
+    "timestamp_gap_intervals": pl.Int64,
+    "estimated_timestamp_gap_missing_frames": pl.Int64,
+    "timestamp_resets": pl.Int64,
+    "effective_sampling_rate_hz": pl.Float64,
+    "median_attempt_rate_hz": pl.Float64,
+    "median_interval_ms": pl.Float64,
+    "median_attempt_p95_interval_ms": pl.Float64,
+    "max_interval_ms": pl.Float64,
+    "phase_mask_supported_rows": pl.Int64,
+    "phase_mask_unsupported_rows": pl.Int64,
+    "phase_mask_unreadable_rows": pl.Int64,
+    "mean_usable_subcarriers_per_packet": pl.Float64,
+    "usable_phase_subcarrier_fraction": pl.Float64,
+    "unassigned_phase_rows": pl.Int64,
+    "recordings_with_read_errors": pl.Int64,
+}
+
+
+def _numpy_reduce(
+    column: str, function: Callable[[np.ndarray], float], name: str | None = None
+) -> pl.Expr:
+    """Reduce the non-null values of a column per group with a NumPy function.
+
+    The summaries use NumPy's summation order and interpolation, which differ
+    from polars' own reductions in the last floating-point bit, so reports
+    stay identical to those computed before the migration to polars.
+
+    Args:
+        column: Float column to reduce.
+        function: Reduction of a one-dimensional array, such as ``np.median``.
+        name: Output name; defaults to ``column``.
+
+    Returns:
+        An aggregation expression that is null for a group without values.
+    """
+
+    def reduce(values: pl.Series) -> pl.Series:
+        array = values.drop_nulls().to_numpy()
+        return pl.Series(
+            [float(function(array)) if array.size else None], dtype=pl.Float64
+        )
+
+    return (
+        pl.col(column)
+        .map_batches(reduce, returns_scalar=True, return_dtype=pl.Float64)
+        .alias(name or column)
+    )
 
 
 @dataclass(frozen=True)
@@ -33,34 +132,55 @@ class SessionIntegrity:
     """
 
     session_dir: Path
-    overview: pd.DataFrame
-    attempts: pd.DataFrame
-    trial_coverage: pd.DataFrame
-    receivers: pd.DataFrame
-    receiver_attempts: pd.DataFrame
-    phase_intervals: pd.DataFrame
-    phase_attempts: pd.DataFrame
-    phase_packet_counts: pd.DataFrame
+    overview: pl.DataFrame
+    attempts: pl.DataFrame
+    trial_coverage: pl.DataFrame
+    receivers: pl.DataFrame
+    receiver_attempts: pl.DataFrame
+    phase_intervals: pl.DataFrame
+    phase_attempts: pl.DataFrame
+    phase_packet_counts: pl.DataFrame
 
     @property
-    def attempt_counts(self) -> pd.DataFrame:
-        """Return attempt counts by effective activity label and capture status."""
-        if self.attempts.empty:
-            return pd.DataFrame()
-        return pd.crosstab(
-            self.attempts["activity_label"], self.attempts["status"], margins=True
+    def attempt_counts(self) -> pl.DataFrame:
+        """Return attempt counts by effective activity label and capture status.
+
+        Rows are sorted by label and end with an ``All`` total row; columns are
+        the statuses sorted by name and an ``All`` total column.
+        """
+        if self.attempts.is_empty():
+            return pl.DataFrame()
+        counts = (
+            self.attempts.pivot(
+                on="status",
+                index="activity_label",
+                values="attempt_id",
+                aggregate_function="len",
+                sort_columns=True,
+            )
+            .fill_null(0)
+            .sort("activity_label")
         )
+        statuses = [name for name in counts.columns if name != "activity_label"]
+        counts = counts.with_columns(
+            pl.col(statuses).cast(pl.Int64),
+            pl.sum_horizontal(statuses).cast(pl.Int64).alias("All"),
+        )
+        totals = counts.select(
+            pl.lit("All").alias("activity_label"), pl.exclude("activity_label").sum()
+        )
+        return pl.concat([counts, totals])
 
     @property
-    def receiver_issues(self) -> pd.DataFrame:
+    def receiver_issues(self) -> pl.DataFrame:
         """Return empty, unreadable, unsupported, or reset recordings."""
         frame = self.receiver_attempts
-        if frame.empty:
+        if frame.is_empty():
             return frame
         bad = (
-            ~frame["has_frames"]
-            | frame["sensing_link_rows"].eq(0)
-            | frame["read_error"].ne("")
+            ~pl.col("has_frames")
+            | pl.col("sensing_link_rows").eq(0)
+            | pl.col("read_error").ne("")
         )
         for name in (
             "timestamp_resets",
@@ -69,64 +189,66 @@ class SessionIntegrity:
             "phase_mask_unreadable_rows",
             "phase_mask_unsupported_rows",
         ):
-            bad |= frame[name].ne(0)
-        return frame.loc[bad]
+            bad |= pl.col(name).ne(0)
+        return frame.filter(bad)
 
     @property
-    def phase_issues(self) -> pd.DataFrame:
+    def phase_issues(self) -> pl.DataFrame:
         """Return inconsistent phase events; aborted partial sequences are allowed."""
         frame = self.phase_attempts
-        if frame.empty:
+        if frame.is_empty():
             return frame
         bad = (
-            ~frame["phase_order_valid"]
-            | ~frame["phase_bounds_valid"]
-            | ~frame["action_confirmation_matches"]
-            | frame["completed_attempt_has_all_phases"].eq(False)
-            | frame["trial_resolution_matches_status"].eq(False)
-            | frame["confirmation_occurs_during_action"].eq(False)
+            ~pl.col("phase_order_valid")
+            | ~pl.col("phase_bounds_valid")
+            | ~pl.col("action_confirmation_matches")
+            | pl.col("completed_attempt_has_all_phases").eq(False).fill_null(False)
+            | pl.col("trial_resolution_matches_status").eq(False).fill_null(False)
+            | pl.col("confirmation_occurs_during_action").eq(False).fill_null(False)
         )
-        return frame.loc[bad]
+        return frame.filter(bad)
 
     @property
-    def phase_duration_summary(self) -> pd.DataFrame:
-        """Compare observed durations with configured durations (action is a limit)."""
-        if self.phase_intervals.empty:
-            return pd.DataFrame()
-        return (
-            self.phase_intervals.groupby("phase")
-            .agg(
-                intervals=("observed_seconds", "count"),
-                planned_seconds_median=("planned_seconds", "median"),
-                observed_seconds_median=("observed_seconds", "median"),
-                observed_seconds_p10=(
-                    "observed_seconds",
-                    lambda values: values.quantile(0.1),
-                ),
-                observed_seconds_p90=(
-                    "observed_seconds",
-                    lambda values: values.quantile(0.9),
-                ),
-                median_delta_seconds=("duration_delta_seconds", "median"),
-            )
-            .reindex(_timeline.PHASES)
+    def phase_duration_summary(self) -> pl.DataFrame:
+        """Compare observed durations with configured durations (action is a limit).
+
+        Rows follow the collection order; a phase without intervals has nulls.
+        """
+        if self.phase_intervals.is_empty():
+            return pl.DataFrame()
+        summary = self.phase_intervals.group_by("phase").agg(
+            pl.col("observed_seconds").count().cast(pl.Int64).alias("intervals"),
+            _numpy_reduce("planned_seconds", np.median, "planned_seconds_median"),
+            _numpy_reduce("observed_seconds", np.median, "observed_seconds_median"),
+            _numpy_reduce(
+                "observed_seconds",
+                lambda values: np.quantile(values, 0.1),
+                "observed_seconds_p10",
+            ),
+            _numpy_reduce(
+                "observed_seconds",
+                lambda values: np.quantile(values, 0.9),
+                "observed_seconds_p90",
+            ),
+            _numpy_reduce("duration_delta_seconds", np.median, "median_delta_seconds"),
+        )
+        return pl.DataFrame({"phase": list(_timeline.PHASES)}).join(
+            summary, on="phase", how="left"
         )
 
     @property
-    def phase_packet_summary(self) -> pd.DataFrame:
+    def phase_packet_summary(self) -> pl.DataFrame:
         """Return CSI counts by receiver and reconstructed phase."""
-        if self.phase_packet_counts.empty:
-            return pd.DataFrame()
-        return (
-            self.phase_packet_counts.groupby(["receiver_id", "phase"], sort=False)
-            .agg(
-                attempts_with_packets=(
-                    "sensing_link_csi_rows",
-                    lambda values: int((values > 0).sum()),
-                ),
-                sensing_link_csi_rows=("sensing_link_csi_rows", "sum"),
-            )
-            .reset_index()
+        if self.phase_packet_counts.is_empty():
+            return pl.DataFrame()
+        return self.phase_packet_counts.group_by(
+            ["receiver_id", "phase"], maintain_order=True
+        ).agg(
+            (pl.col("sensing_link_csi_rows") > 0)
+            .sum()
+            .cast(pl.Int64)
+            .alias("attempts_with_packets"),
+            pl.col("sensing_link_csi_rows").sum(),
         )
 
 
@@ -199,7 +321,8 @@ def analyze_session(
             are read in the caller without starting worker processes.
 
     Returns:
-        Session, attempt, receiver, and reconstructed-phase integrity tables.
+        Session, attempt, receiver, and reconstructed-phase integrity tables as
+        polars frames; unavailable ratios and durations are null, not NaN.
 
     Raises:
         ValueError: Radio metadata is invalid or the cache location is in raw data.
@@ -233,22 +356,22 @@ def analyze_session(
         if line.strip()
     ]
     records = []
-    for row in session.attempts.itertuples(index=False):
+    for row in as_polars(session.attempts).iter_rows(named=True):
         attempt = json.loads(
-            read_session_file(source, f"{row.attempt_key}/attempt.json")
+            read_session_file(source, f"{row['attempt_key']}/attempt.json")
         )
         records.append(
             {
-                "key": (int(row.trial_ordinal), int(row.attempt)),
-                "attempt_key": row.attempt_key,
-                "attempt_id": row.attempt_id,
-                "trial_ordinal": int(row.trial_ordinal),
-                "attempt_number": int(row.attempt),
+                "key": (int(row["trial_ordinal"]), int(row["attempt"])),
+                "attempt_key": row["attempt_key"],
+                "attempt_id": row["attempt_id"],
+                "trial_ordinal": int(row["trial_ordinal"]),
+                "attempt_number": int(row["attempt"]),
                 "activity_label": attempt.get("reference_truth_label")
-                or row.activity_label,
-                "planned_activity_label": row.original_activity_label,
-                "status": row.status,
-                "receiver_ids": list(row.receiver_ids),
+                or row["activity_label"],
+                "planned_activity_label": row["original_activity_label"],
+                "status": row["status"],
+                "receiver_ids": list(row["receiver_ids"]),
                 "manifest": attempt,
             }
         )
@@ -327,10 +450,10 @@ def analyze_session(
             {**identity, "phase": phase, "sensing_link_csi_rows": count}
             for phase, count in result["phase_counts"].items()
         )
-    receiver_attempts = pd.DataFrame(receiver_rows)
+    receiver_attempts = pl.DataFrame(receiver_rows, schema=_RECEIVER_ATTEMPT_SCHEMA)
     started_ordinals = {record["trial_ordinal"] for record in records}
     missing = sorted(set(trials) - started_ordinals)
-    overview = pd.DataFrame(
+    overview = pl.DataFrame(
         [
             {
                 "session_id": manifest.get("session_id", source.name),
@@ -346,33 +469,14 @@ def analyze_session(
                 "scanned_receiver_recordings": len(receiver_rows) - hits,
                 "analysis_seconds": perf_counter() - started,
             }
-        ]
-    )
-    attempts = pd.DataFrame(
-        [
-            {
-                key: record[key]
-                for key in (
-                    "attempt_id",
-                    "trial_ordinal",
-                    "attempt_number",
-                    "activity_label",
-                    "planned_activity_label",
-                    "status",
-                )
-            }
-            for record in records
         ],
-        columns=[
-            "attempt_id",
-            "trial_ordinal",
-            "attempt_number",
-            "activity_label",
-            "planned_activity_label",
-            "status",
-        ],
+        schema=_OVERVIEW_SCHEMA,
     )
-    coverage = pd.DataFrame(
+    attempts = pl.DataFrame(
+        [{key: record[key] for key in _ATTEMPT_SCHEMA} for record in records],
+        schema=_ATTEMPT_SCHEMA,
+    )
+    coverage = pl.DataFrame(
         [
             {
                 "planned_trials": len(trials),
@@ -380,7 +484,8 @@ def analyze_session(
                 "planned_trials_never_started": len(missing),
                 "trial_ordinals_never_started": missing,
             }
-        ]
+        ],
+        schema=_COVERAGE_SCHEMA,
     )
     return SessionIntegrity(
         source,
@@ -391,7 +496,7 @@ def analyze_session(
         receiver_attempts,
         phases,
         phase_attempts,
-        pd.DataFrame(packet_rows),
+        pl.DataFrame(packet_rows, schema=_PHASE_PACKET_SCHEMA),
     )
 
 
@@ -428,55 +533,74 @@ def _store_cached(path, fingerprint, result):
     atomic_bytes(path, json.dumps(payload, allow_nan=False).encode("utf-8"))
 
 
-def _receiver_summary(frame: pd.DataFrame) -> pd.DataFrame:
-    rows = []
-    if frame.empty:
-        return pd.DataFrame()
-    for receiver_id, group in frame.groupby("receiver_id", sort=True):
-        sensing = int(group["sensing_link_rows"].sum())
-        missing = int(group["sequence_missing_frames"].sum())
-        supported = int(group["phase_mask_supported_rows"].sum())
-        usable = int(group["phase_usable_subcarriers_sum"].sum())
-        maximum = int(group["phase_max_subcarriers_sum"].sum())
-        elapsed = float(group["timestamp_elapsed_seconds"].sum())
-        rows.append(
-            {
-                "receiver_id": receiver_id,
-                "attempts_without_frames": int((~group["has_frames"]).sum()),
-                "raw_csi_rows": int(group["raw_csi_rows"].sum()),
-                "sensing_link_csi_rows": sensing,
-                "sequence_gap_missing_frames": missing,
-                "sequence_gap_loss_pct": 100 * missing / (sensing + missing)
-                if sensing + missing
-                else np.nan,
-                "timestamp_gap_intervals": int(group["timestamp_gap_intervals"].sum()),
-                "estimated_timestamp_gap_missing_frames": int(
-                    group["estimated_missing_from_timestamp_gaps"].sum()
-                ),
-                "timestamp_resets": int(group["timestamp_resets"].sum()),
-                "effective_sampling_rate_hz": group["timestamp_interval_count"].sum()
-                / elapsed
-                if elapsed
-                else np.nan,
-                "median_attempt_rate_hz": group["effective_sampling_rate_hz"].median(),
-                "median_interval_ms": group["median_interval_ms"].median(),
-                "median_attempt_p95_interval_ms": group["p95_interval_ms"].median(),
-                "max_interval_ms": group["max_interval_ms"].max(),
-                "phase_mask_supported_rows": supported,
-                "phase_mask_unsupported_rows": int(
-                    group["phase_mask_unsupported_rows"].sum()
-                ),
-                "phase_mask_unreadable_rows": int(
-                    group["phase_mask_unreadable_rows"].sum()
-                ),
-                "mean_usable_subcarriers_per_packet": usable / supported
-                if supported
-                else np.nan,
-                "usable_phase_subcarrier_fraction": usable / maximum
-                if maximum
-                else np.nan,
-                "unassigned_phase_rows": int(group["unassigned_phase_rows"].sum()),
-                "recordings_with_read_errors": int(group["read_error"].ne("").sum()),
-            }
-        )
-    return pd.DataFrame(rows)
+def _receiver_summary(frame: pl.DataFrame) -> pl.DataFrame:
+    """Pool the per-attempt receiver metrics by receiver.
+
+    Unavailable ratios and medians are null rather than NaN.
+    """
+    if frame.is_empty():
+        return pl.DataFrame(schema=_RECEIVER_SUMMARY_SCHEMA)
+    pooled = frame.group_by("receiver_id").agg(
+        (~pl.col("has_frames")).sum().cast(pl.Int64).alias("attempts_without_frames"),
+        pl.col("raw_csi_rows").sum(),
+        pl.col("sensing_link_rows").sum().alias("sensing_link_csi_rows"),
+        pl.col("sequence_missing_frames").sum().alias("sequence_gap_missing_frames"),
+        pl.col("timestamp_gap_intervals").sum(),
+        pl.col("estimated_missing_from_timestamp_gaps")
+        .sum()
+        .alias("estimated_timestamp_gap_missing_frames"),
+        pl.col("timestamp_resets").sum(),
+        pl.col("timestamp_interval_count").sum().alias("_interval_count"),
+        _numpy_reduce("timestamp_elapsed_seconds", np.sum, "_elapsed"),
+        _numpy_reduce(
+            "effective_sampling_rate_hz", np.median, "median_attempt_rate_hz"
+        ),
+        _numpy_reduce("median_interval_ms", np.median),
+        _numpy_reduce("p95_interval_ms", np.median, "median_attempt_p95_interval_ms"),
+        pl.col("max_interval_ms").max(),
+        pl.col("phase_mask_supported_rows").sum(),
+        pl.col("phase_mask_unsupported_rows").sum(),
+        pl.col("phase_mask_unreadable_rows").sum(),
+        pl.col("phase_usable_subcarriers_sum").sum().alias("_usable"),
+        pl.col("phase_max_subcarriers_sum").sum().alias("_maximum"),
+        pl.col("unassigned_phase_rows").sum(),
+        (pl.col("read_error") != "")
+        .sum()
+        .cast(pl.Int64)
+        .alias("recordings_with_read_errors"),
+    )
+    sensing, missing = (
+        pl.col("sensing_link_csi_rows"),
+        pl.col("sequence_gap_missing_frames"),
+    )
+    return pooled.sort("receiver_id").select(
+        "receiver_id",
+        "attempts_without_frames",
+        "raw_csi_rows",
+        "sensing_link_csi_rows",
+        "sequence_gap_missing_frames",
+        pl.when(sensing + missing != 0)
+        .then(100 * missing / (sensing + missing))
+        .alias("sequence_gap_loss_pct"),
+        "timestamp_gap_intervals",
+        "estimated_timestamp_gap_missing_frames",
+        "timestamp_resets",
+        pl.when(pl.col("_elapsed") != 0)
+        .then(pl.col("_interval_count") / pl.col("_elapsed"))
+        .alias("effective_sampling_rate_hz"),
+        "median_attempt_rate_hz",
+        "median_interval_ms",
+        "median_attempt_p95_interval_ms",
+        "max_interval_ms",
+        "phase_mask_supported_rows",
+        "phase_mask_unsupported_rows",
+        "phase_mask_unreadable_rows",
+        pl.when(pl.col("phase_mask_supported_rows") != 0)
+        .then(pl.col("_usable") / pl.col("phase_mask_supported_rows"))
+        .alias("mean_usable_subcarriers_per_packet"),
+        pl.when(pl.col("_maximum") != 0)
+        .then(pl.col("_usable") / pl.col("_maximum"))
+        .alias("usable_phase_subcarrier_fraction"),
+        "unassigned_phase_rows",
+        "recordings_with_read_errors",
+    )

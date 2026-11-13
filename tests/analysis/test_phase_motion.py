@@ -4,8 +4,9 @@ import os
 from types import SimpleNamespace
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import pytest
+from polars.testing import assert_frame_equal
 
 pytest.importorskip("pyarrow")
 
@@ -127,7 +128,7 @@ def motion_source(tmp_path, monkeypatch):
         return signal
 
     monkeypatch.setattr(phase_motion.phase_signals, "load_phase_signal", load)
-    intervals = pd.DataFrame(
+    intervals = pl.DataFrame(
         {
             "attempt_id": ["001/01"] * 3,
             "phase": ["countdown", "action", "recovery"],
@@ -143,23 +144,24 @@ def test_load_phase_motion_samples_marks_cross_boundary_lags(motion_source):
     result = load_phase_motion_samples(session, ["001/01"], ["rx-1"], intervals)
     frame = result.samples
     assert calls[0][:3] == (session, "001/01", "rx-1")
-    assert frame.groupby("phase").size().to_dict() == {
+    assert dict(frame["phase"].value_counts().iter_rows()) == {
         "action": 100,
         "countdown": 100,
         "recovery": 100,
     }
-    assert not frame.loc[frame.seconds.eq(1.0), "within_phase_lag"].item()
-    assert frame.loc[frame.seconds.eq(1.2), "within_phase_lag"].item()
-    assert frame.loc[frame.seconds.lt(0.1), "calibrated_score"].isna().all()
-    assert result.recordings.iloc[0]["baseline_tones"] == 6
+    assert not frame.filter(pl.col("seconds") == 1.0)["within_phase_lag"].item()
+    assert frame.filter(pl.col("seconds") == 1.2)["within_phase_lag"].item()
+    early = frame.filter(pl.col("seconds") < 0.1)["calibrated_score"]
+    assert early.is_nan().all()
+    assert result.recordings[0, "baseline_tones"] == 6
 
 
 def test_load_phase_motion_samples_keeps_failed_recordings_visible(motion_source):
     session, signal, _, intervals = motion_source
     signal.calibrated_phase[:100, :4] = np.nan
     result = load_phase_motion_samples(session, ["001/01"], ["rx-1"], intervals)
-    assert result.samples.empty
-    assert "baseline tones" in result.recordings.iloc[0]["read_error"]
+    assert result.samples.is_empty()
+    assert "baseline tones" in result.recordings[0, "read_error"]
 
 
 def test_load_phase_motion_samples_invalidates_frame_tables_and_parameters(
@@ -174,8 +176,8 @@ def test_load_phase_motion_samples_invalidates_frame_tables_and_parameters(
         session, ["001/01"], ["rx-1"], intervals, cache_dir=cache
     )
     assert len(calls) == 1
-    assert cached.recordings.iloc[0]["cache_hit"]
-    pd.testing.assert_frame_equal(initial.samples, cached.samples)
+    assert cached.recordings[0, "cache_hit"]
+    assert_frame_equal(initial.samples, cached.samples)
     for count, name in enumerate(
         ("frames.parquet", "attempts.parquet", "phases.parquet", "conversion.json"),
         start=2,
@@ -187,9 +189,12 @@ def test_load_phase_motion_samples_invalidates_frame_tables_and_parameters(
             session, ["001/01"], ["rx-1"], intervals, cache_dir=cache
         )
         assert len(calls) == count
-    changed = intervals.copy()
-    changed.loc[0, "phase_end_monotonic_ns"] = 900_000_000
-    changed.loc[1, "phase_start_monotonic_ns"] = 900_000_000
+    changed = intervals.with_columns(
+        pl.Series(
+            "phase_end_monotonic_ns", [900_000_000, 2_000_000_000, 3_000_000_000]
+        ),
+        pl.Series("phase_start_monotonic_ns", [0, 900_000_000, 2_000_000_000]),
+    )
     load_phase_motion_samples(session, ["001/01"], ["rx-1"], changed, cache_dir=cache)
     assert len(calls) == 6
     load_phase_motion_samples(
@@ -216,7 +221,7 @@ def test_load_phase_motion_samples_recovers_corrupt_cache(motion_source, tmp_pat
         session, ["001/01"], ["rx-1"], intervals, cache_dir=cache
     )
     assert len(calls) == 2
-    assert not result.recordings.iloc[0]["cache_hit"]
+    assert not result.recordings[0, "cache_hit"]
 
 
 def test_load_phase_motion_samples_decodes_journaled_csi_in_worker_processes(
@@ -250,7 +255,7 @@ def test_load_phase_motion_samples_decodes_journaled_csi_in_worker_processes(
         ],
     )
     session = load_analysis_session(root, tmp_path / "derived")
-    intervals = pd.DataFrame(
+    intervals = pl.DataFrame(
         {
             "attempt_id": ["001/01"] * 3,
             "phase": ["countdown", "action", "recovery"],
@@ -262,18 +267,15 @@ def test_load_phase_motion_samples_decodes_journaled_csi_in_worker_processes(
     parallel = load_phase_motion_samples(
         session, ["001/01", "001/01"], ["rx-1", "rx-2"], intervals, workers=2
     )
-    assert serial.recordings.iloc[0]["read_error"] == ""
-    assert len(serial.samples) == 300
-    assert serial.samples["phase"].value_counts().to_dict() == dict.fromkeys(
+    assert serial.recordings[0, "read_error"] == ""
+    assert serial.samples.height == 300
+    assert dict(serial.samples["phase"].value_counts().iter_rows()) == dict.fromkeys(
         ("countdown", "action", "recovery"), 100
     )
     # A constant-phase channel has zero circular change wherever a lag exists.
-    assert serial.samples["calibrated_score"].dropna().abs().max() < 1e-9
-    assert parallel.recordings["read_error"].iloc[0] == ""
-    assert "rx-2" in parallel.recordings["read_error"].iloc[1]
-    pd.testing.assert_frame_equal(
-        serial.samples,
-        parallel.samples.loc[parallel.samples.receiver_id.eq("rx-1")].reset_index(
-            drop=True
-        ),
+    assert serial.samples["calibrated_score"].drop_nulls().abs().max() < 1e-9
+    assert parallel.recordings["read_error"][0] == ""
+    assert "rx-2" in parallel.recordings["read_error"][1]
+    assert_frame_equal(
+        serial.samples, parallel.samples.filter(pl.col("receiver_id") == "rx-1")
     )

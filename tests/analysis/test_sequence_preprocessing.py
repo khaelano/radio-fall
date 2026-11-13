@@ -128,7 +128,7 @@ def test_native_magnitude_only_matches_independent_physical_decoder():
     for receiver in RECEIVERS[:3]:
         frame = epoch_frame().filter(pl.col("receiver_id") == receiver)
         actual = prepare_recording(frame, magnitude_only=True)
-        reference = phase_signal_from_packets(frame.to_pandas())
+        reference = phase_signal_from_packets(frame)
         expected = np.abs(reference.complex_csi)
         expected[
             ~(

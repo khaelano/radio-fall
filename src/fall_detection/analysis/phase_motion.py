@@ -6,15 +6,20 @@ from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 from zipfile import BadZipFile
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 from ..radio.preprocessing import phase as phase_module
 from . import _cache_keys, phase_signals, session_frames
 from ._io import atomic_write
+from ._timeline import as_polars
 from .session_frames import AnalysisSession
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 _PHASES = ("countdown", "action", "recovery")
 _ARRAY_FIELDS = (
@@ -24,14 +29,35 @@ _ARRAY_FIELDS = (
     "phase_code",
     "within_phase_lag",
 )
+_SAMPLE_SCHEMA = {
+    "seconds": pl.Float64,
+    "raw_score": pl.Float64,
+    "calibrated_score": pl.Float64,
+    "within_phase_lag": pl.Boolean,
+    "phase": pl.String,
+    "attempt_id": pl.String,
+    "receiver_id": pl.String,
+}
+_RECORDING_SCHEMA = {
+    "packet_count": pl.Int64,
+    "baseline_tones": pl.Int64,
+    "baseline_start_s": pl.Float64,
+    "baseline_end_s": pl.Float64,
+    "unassigned_packets": pl.Int64,
+    "time_source": pl.String,
+    "read_error": pl.String,
+    "attempt_id": pl.String,
+    "receiver_id": pl.String,
+    "cache_hit": pl.Boolean,
+}
 
 
 @dataclass(frozen=True)
 class PhaseMotionSamples:
     """Packet measurements plus recording coverage/cache diagnostics, without pooling."""
 
-    samples: pd.DataFrame
-    recordings: pd.DataFrame
+    samples: pl.DataFrame
+    recordings: pl.DataFrame
 
 
 def phase_change_matrix(
@@ -124,7 +150,7 @@ def load_phase_motion_samples(
     session: AnalysisSession,
     attempt_ids: Sequence[str],
     receiver_ids: Sequence[str],
-    phase_intervals: pd.DataFrame,
+    phase_intervals: "pl.DataFrame | pd.DataFrame",
     *,
     baseline_seconds: float = 1.0,
     lag_seconds: float = 0.1,
@@ -145,7 +171,8 @@ def load_phase_motion_samples(
         session: Analysis session built from the converted frame tables.
         attempt_ids: Trial/attempt identifiers such as ``"001/01"``.
         receiver_ids: Receiver identifiers to retain separately.
-        phase_intervals: Integrity table with attempt_id, phase, and host
+        phase_intervals: Integrity table (polars, or pandas converted on entry)
+            with attempt_id, phase, and host
             phase_start_monotonic_ns/phase_end_monotonic_ns columns.
         baseline_seconds: Positive duration at the start of countdown.
         lag_seconds: Positive phase-motion lag in seconds.
@@ -156,8 +183,9 @@ def load_phase_motion_samples(
         refresh: Ignore valid cache entries and recompute.
 
     Returns:
-        Packet measurements and per-recording diagnostics. Failed recordings
-        appear in ``recordings.read_error`` and contribute no sample rows.
+        Packet measurements and per-recording diagnostics (polars frames;
+        unassigned packets have a null ``phase``). Failed recordings appear in
+        ``recordings.read_error`` and contribute no sample rows.
 
     Raises:
         ValueError: Parameters or the cache directory are invalid.
@@ -175,16 +203,17 @@ def load_phase_motion_samples(
         (phase_signals, phase_module, session_frames), __file__
     )
     source = _cache_keys.frame_signature(session)
+    phase_intervals = as_polars(phase_intervals)
     jobs = []
     for attempt_id in dict.fromkeys(attempt_ids):
-        rows = phase_intervals.loc[phase_intervals["attempt_id"].eq(attempt_id)]
+        rows = phase_intervals.filter(pl.col("attempt_id") == attempt_id)
         intervals = [
             (
-                row.phase,
-                int(row.phase_start_monotonic_ns),
-                int(row.phase_end_monotonic_ns),
+                row["phase"],
+                int(row["phase_start_monotonic_ns"]),
+                int(row["phase_end_monotonic_ns"]),
             )
-            for row in rows.itertuples()
+            for row in rows.iter_rows(named=True)
         ]
         for receiver_id in dict.fromkeys(receiver_ids):
             jobs.append(
@@ -243,25 +272,23 @@ def load_phase_motion_samples(
         diagnostics.append(info)
         if result["read_error"]:
             continue
-        frame = pd.DataFrame({key: result[key] for key in _ARRAY_FIELDS})
-        frame["phase"] = frame.pop("phase_code").map(dict(enumerate(_PHASES)))
-        frame["attempt_id"], frame["receiver_id"] = attempt_id, receiver_id
-        samples.append(frame)
-    columns = [
-        "seconds",
-        "raw_score",
-        "calibrated_score",
-        "within_phase_lag",
-        "phase",
-        "attempt_id",
-        "receiver_id",
-    ]
-    table = (
-        pd.concat(samples, ignore_index=True)
-        if samples
-        else pd.DataFrame(columns=columns)
+        samples.append(
+            pl.DataFrame({key: result[key] for key in _ARRAY_FIELDS})
+            .with_columns(
+                pl.col("phase_code")
+                .replace_strict(
+                    dict(enumerate(_PHASES)), default=None, return_dtype=pl.String
+                )
+                .alias("phase"),
+                pl.lit(attempt_id).alias("attempt_id"),
+                pl.lit(receiver_id).alias("receiver_id"),
+            )
+            .select(list(_SAMPLE_SCHEMA))
+        )
+    table = pl.concat(samples) if samples else pl.DataFrame(schema=_SAMPLE_SCHEMA)
+    return PhaseMotionSamples(
+        table, pl.DataFrame(diagnostics, schema=_RECORDING_SCHEMA)
     )
-    return PhaseMotionSamples(table, pd.DataFrame(diagnostics))
 
 
 def _score_recording(job):

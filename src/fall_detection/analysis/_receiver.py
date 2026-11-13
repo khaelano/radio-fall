@@ -3,8 +3,7 @@
 from typing import Any
 
 import numpy as np
-import pyarrow as pa
-import pyarrow.compute as pc
+import polars as pl
 
 from ..radio.preprocessing.phase import DEFAULT_PHASE_AMPLITUDE_FLOOR, phase_slot_mask
 from ._timeline import PHASES
@@ -31,11 +30,39 @@ _READ_ERRORS = (
     KeyError,
     IndexError,
     RuntimeError,
-    pa.ArrowException,
+    pl.exceptions.PolarsError,
 )
+METRIC_SCHEMA = {
+    "has_frames": pl.Boolean,
+    "raw_csi_rows": pl.Int64,
+    "sensing_link_rows": pl.Int64,
+    "phase_mask_supported_rows": pl.Int64,
+    "phase_mask_unreadable_rows": pl.Int64,
+    "phase_mask_unsupported_rows": pl.Int64,
+    "phase_usable_subcarriers_sum": pl.Int64,
+    "phase_max_subcarriers_sum": pl.Int64,
+    "unassigned_phase_rows": pl.Int64,
+    "read_error": pl.String,
+    "sequence_missing_frames": pl.Int64,
+    "sequence_duplicates": pl.Int64,
+    "sequence_out_of_order": pl.Int64,
+    "timestamp_interval_count": pl.Int64,
+    "timestamp_elapsed_seconds": pl.Float64,
+    "effective_sampling_rate_hz": pl.Float64,
+    "median_interval_ms": pl.Float64,
+    "p95_interval_ms": pl.Float64,
+    "max_interval_ms": pl.Float64,
+    "timestamp_gap_intervals": pl.Int64,
+    "estimated_missing_from_timestamp_gaps": pl.Int64,
+    "timestamp_wraps": pl.Int64,
+    "timestamp_resets": pl.Int64,
+    "timestamp_duplicates": pl.Int64,
+    "phase_usable_subcarriers_mean": pl.Float64,
+    "phase_usable_fraction": pl.Float64,
+}
 
 
-def _phase_counts(sensing: pa.Table) -> dict[str, int]:
+def _phase_counts(sensing: pl.DataFrame) -> dict[str, int]:
     """Count rows by phase-mask support and usable subcarriers.
 
     Args:
@@ -53,27 +80,25 @@ def _phase_counts(sensing: pa.Table) -> dict[str, int]:
         "phase_usable_subcarriers_sum": 0,
         "phase_max_subcarriers_sum": 0,
     }
-    for offset in range(0, sensing.num_rows, _CHUNK_ROWS):
-        chunk = sensing.slice(offset, _CHUNK_ROWS)
-        csi = chunk.column("csi").combine_chunks()
-        keys = np.column_stack(
-            (
-                pc.binary_length(csi).to_numpy(zero_copy_only=False),
-                chunk.column("stbc").to_numpy(zero_copy_only=False),
-                chunk.column("first_word_invalid").to_numpy(zero_copy_only=False),
-            )
-        ).astype(np.int64)
-        groups, inverse = np.unique(keys, axis=0, return_inverse=True)
-        inverse = inverse.reshape(-1)
+    for chunk in sensing.iter_slices(_CHUNK_ROWS):
+        keyed = chunk.select(
+            pl.col("csi"),
+            pl.col("csi").bin.size().cast(pl.Int64).alias("declared"),
+            pl.col("stbc").cast(pl.Int64),
+            pl.col("first_word_invalid").cast(pl.Int64),
+        )
         # Each group shares one immutable physical-slot mask. Only the
         # amplitudes differ across packets, so evaluate a group with NumPy.
-        for group, (declared, stbc, first_word) in enumerate(groups):
-            rows = np.flatnonzero(inverse == group)
+        for (declared, stbc, first_word), group in keyed.partition_by(
+            ["declared", "stbc", "first_word_invalid"], as_dict=True
+        ).items():
             if declared <= 0 or declared % 2:
-                totals["phase_mask_unreadable_rows"] += len(rows)
+                totals["phase_mask_unreadable_rows"] += group.height
                 continue
-            payload = b"".join(csi.take(pa.array(rows)).to_pylist())
-            matrix = np.frombuffer(payload, dtype=np.int8).reshape(len(rows), declared)
+            payload = b"".join(group["csi"].to_list())
+            matrix = np.frombuffer(payload, dtype=np.int8).reshape(
+                group.height, declared
+            )
             mask = phase_slot_mask(
                 sig_mode=4,
                 bandwidth=0,
@@ -133,7 +158,7 @@ def _interval_metrics(
 
 def _recording_frames(
     session: AnalysisSession, attempt_key: str, receiver_id: str
-) -> pa.Table | None:
+) -> pl.DataFrame | None:
     """Read the frames of one recording in journal (delivery) order.
 
     Returns ``None`` when the frame tables hold no window for the attempt.
@@ -141,7 +166,9 @@ def _recording_frames(
     index = session.attempt_indices.get(attempt_key)
     if index is None:
         return None
-    return pa.table(session.frames.attempt_frames(index, receiver_id, list(_COLUMNS)))
+    return pl.DataFrame(
+        session.frames.attempt_frames(index, receiver_id, list(_COLUMNS))
+    )
 
 
 def scan_receiver(
@@ -184,30 +211,21 @@ def scan_receiver(
     sequences = timestamps = np.array([], dtype=np.int64)
     try:
         table = _recording_frames(session, attempt_key, receiver_id)
-        rows = 0 if table is None else table.num_rows
+        rows = 0 if table is None else table.height
         metrics["raw_csi_rows"] = rows
         metrics["has_frames"] = rows > 0
         if table is not None and rows:
-            selected = pc.and_(
-                pc.and_(
-                    pc.equal(table.column("transmitter_mac"), session.transmitter_mac),
-                    pc.equal(table.column("sig_mode"), 4),
-                ),
-                pc.and_(
-                    pc.equal(table.column("mcs"), 0),
-                    pc.equal(table.column("bandwidth"), 0),
-                ),
+            sensing = table.filter(
+                (pl.col("transmitter_mac") == session.transmitter_mac)
+                & (pl.col("sig_mode") == 4)
+                & (pl.col("mcs") == 0)
+                & (pl.col("bandwidth") == 0)
             )
-            sensing = table.filter(selected)
-            metrics["sensing_link_rows"] = sensing.num_rows
-            sequences = (
-                sensing.column("sequence").to_numpy().astype(np.int64) % _MODULUS
-            )
-            timestamps = (
-                sensing.column("rx_radio_us").to_numpy().astype(np.int64) % _MODULUS
-            )
+            metrics["sensing_link_rows"] = sensing.height
+            sequences = sensing["sequence"].to_numpy().astype(np.int64) % _MODULUS
+            timestamps = sensing["rx_radio_us"].to_numpy().astype(np.int64) % _MODULUS
             metrics.update(_phase_counts(sensing))
-            capture = sensing.column("capture_time_ns").to_numpy()
+            capture = sensing["capture_time_ns"].to_numpy()
             for phase, (start, stop) in intervals.items():
                 if phase in phase_counts and stop is not None and stop >= start:
                     phase_counts[phase] += int(

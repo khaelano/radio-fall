@@ -1,6 +1,7 @@
 """Check phase decoding, detrending, and event-clock alignment on synthetic CSI."""
 
 import numpy as np
+import polars as pl
 import pytest
 
 pytest.importorskip("pyarrow")
@@ -112,7 +113,12 @@ def test_load_phase_signal_rejects_mixed_transmitter_epochs(tmp_path):
 
 def test_load_capture_packets_rejects_bad_payload_length(phase_capture):
     packets = load_capture_packets(phase_capture, "001/01", "rx-1")
-    packets.loc[0, "len"] = 12
+    packets = packets.with_columns(
+        pl.when(pl.int_range(pl.len()) == 0)
+        .then(12)
+        .otherwise(pl.col("len"))
+        .alias("len")
+    )
     with pytest.raises(ValueError, match="payload length"):
         phase_signal_from_packets(packets)
 
@@ -120,9 +126,16 @@ def test_load_capture_packets_rejects_bad_payload_length(phase_capture):
 def test_load_phase_signal_retains_only_supported_packets(phase_capture):
     packets = load_capture_packets(phase_capture, "001/01", "rx-1")
     # Six int16 values cannot hold an HE-LTF block, so the row is skipped.
-    packets.at[0, "csi_i"] = np.array([20, 20, 20], dtype=np.int16)
-    packets.at[0, "csi_q"] = np.array([0, 0, 0], dtype=np.int16)
-    packets.loc[0, "len"] = 6
+    short = {"csi_i": [20, 20, 20], "csi_q": [0, 0, 0], "len": 6}
+    packets = pl.concat(
+        [
+            packets.head(1).with_columns(
+                pl.lit(value, dtype=packets.schema[name]).alias(name)
+                for name, value in short.items()
+            ),
+            packets.tail(-1),
+        ]
+    )
     signal = phase_signal_from_packets(packets)
     assert signal.skipped_layout_rows == 1
     np.testing.assert_allclose(signal.time_seconds, [0.2, 0.3])
@@ -141,7 +154,7 @@ def test_load_capture_packets_keeps_non_sensing_rows_and_identity(phase_capture)
     packets = load_capture_packets(phase_capture, "001/01", "rx-1")
     assert set(packets["attempt_id"]) == {"001/01"}
     assert set(packets["receiver_id"]) == {"rx-1"}
-    assert packets["is_sensing"].tolist() == [True, True, True, False]
+    assert packets["is_sensing"].to_list() == [True, True, True, False]
 
 
 def test_gateway_phase_uses_capture_clock_and_sorts_derived_view(tmp_path):
@@ -152,5 +165,23 @@ def test_gateway_phase_uses_capture_clock_and_sorts_derived_view(tmp_path):
     assert "gateway" in signal.time_source and signal.sync_uncertainty_us == 100
     # The view is sorted by capture time; source_row keeps journal (delivery) order.
     packets = load_capture_packets(session, "001/01", "rx-1")
-    assert packets["source_row"].tolist() == [1, 0, 2, 3]
-    assert packets["id"].tolist() == [1, 0, 2, 3]
+    assert packets["source_row"].to_list() == [1, 0, 2, 3]
+    assert packets["id"].to_list() == [1, 0, 2, 3]
+
+
+def test_phase_signal_from_packets_accepts_pandas_frames_like_notebooks(phase_capture):
+    pytest.importorskip("pandas")
+    packets = load_capture_packets(phase_capture, "001/01", "rx-1")
+    expected = phase_signal_from_packets(packets)
+    actual = phase_signal_from_packets(packets.to_pandas())
+    for name in (
+        "time_seconds",
+        "subcarriers",
+        "complex_csi",
+        "raw_phase",
+        "calibrated_phase",
+        "removed_slope",
+        "removed_offset",
+    ):
+        np.testing.assert_array_equal(getattr(actual, name), getattr(expected, name))
+    assert actual.sync_uncertainty_us == expected.sync_uncertainty_us == 100

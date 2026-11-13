@@ -13,9 +13,9 @@ import numpy as np
 import polars as pl
 
 from ..radio.preprocessing import phase as phase_module
-from . import _cache_keys, phase_signals, session_frames
+from . import _cache_keys, _frames, phase_signals, session_frames
+from ._frames import as_polars
 from ._io import atomic_write
-from ._timeline import as_polars
 from .session_frames import AnalysisSession
 
 if TYPE_CHECKING:
@@ -165,7 +165,7 @@ def load_phase_motion_samples(
     same circular-resultant and three-sample criteria as the sanity notebook.
     Scores are not pooled. ``within_phase_lag`` marks packets whose two lag
     endpoints belong to the same phase; filter it before phase comparisons.
-    Unavailable scores remain NaN rather than becoming stationary zeros.
+    Unavailable scores are null in the samples table, never stationary zeros.
 
     Args:
         session: Analysis session built from the converted frame tables.
@@ -184,7 +184,7 @@ def load_phase_motion_samples(
 
     Returns:
         Packet measurements and per-recording diagnostics (polars frames;
-        unassigned packets have a null ``phase``). Failed recordings appear in
+        unassigned packets have a null ``phase``; unavailable scores are null). Failed recordings appear in
         ``recordings.read_error`` and contribute no sample rows.
 
     Raises:
@@ -200,7 +200,7 @@ def load_phase_motion_samples(
     if cache is not None and cache.is_relative_to(_cache_keys.raw_root_of(session)):
         raise ValueError("Place phase-motion caches outside raw session data")
     code_hash = _cache_keys.code_hash(
-        (phase_signals, phase_module, session_frames), __file__
+        (phase_signals, phase_module, session_frames, _frames), __file__
     )
     source = _cache_keys.frame_signature(session)
     phase_intervals = as_polars(phase_intervals)
@@ -275,6 +275,7 @@ def load_phase_motion_samples(
         samples.append(
             pl.DataFrame({key: result[key] for key in _ARRAY_FIELDS})
             .with_columns(
+                pl.col(["raw_score", "calibrated_score"]).fill_nan(None),
                 pl.col("phase_code")
                 .replace_strict(
                     dict(enumerate(_PHASES)), default=None, return_dtype=pl.String

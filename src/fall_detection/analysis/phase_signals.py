@@ -8,13 +8,33 @@ import numpy as np
 import polars as pl
 
 from ..radio.preprocessing.phase import decode_ltf_blocks
-from ._timeline import as_polars
+from ._frames import as_polars
 from .session_frames import AnalysisSession
 
 if TYPE_CHECKING:
     import pandas as pd
 
 _ATTEMPT_ID = re.compile(r"\d+/\d+")
+# Columns read by phase decoding; others are dropped before any conversion.
+_DECODE_COLUMNS = (
+    "id",
+    "attempt_id",
+    "receiver_id",
+    "attempt_started_monotonic_ns",
+    "attempt_ended_monotonic_ns",
+    "nominal_rate_hz",
+    "time_source",
+    "is_sensing",
+    "time_seconds",
+    "clock_uncertainty_us",
+    "len",
+    "sig_mode",
+    "bandwidth",
+    "stbc",
+    "first_word",
+    "csi_q",
+    "csi_i",
+)
 
 
 @dataclass(frozen=True)
@@ -114,7 +134,7 @@ def phase_signal_from_packets(packets: "pl.DataFrame | pd.DataFrame") -> PhaseSi
     Raises:
         ValueError: Multiple recordings, invalid payloads, or no sensing rows.
     """
-    packets = as_polars(packets)
+    packets = as_polars(_select_decode_columns(packets))
     if packets.is_empty() or any(
         packets[name].n_unique() != 1
         for name in ("attempt_id", "receiver_id", "attempt_started_monotonic_ns")
@@ -132,6 +152,20 @@ def phase_signal_from_packets(packets: "pl.DataFrame | pd.DataFrame") -> PhaseSi
     known = bounds.is_not_null() & bounds.is_not_nan()
     uncertainty = float(bounds.max()) if known.all() else None
     return _decode_phase_rows(csi, times, origin, first, uncertainty, time_source)
+
+
+def _select_decode_columns(
+    packets: "pl.DataFrame | pd.DataFrame",
+) -> "pl.DataFrame | pd.DataFrame":
+    """Keep the columns that phase decoding reads, skipping the rest.
+
+    Args:
+        packets: Packet rows in polars or pandas form.
+
+    Returns:
+        The same rows restricted to the decoding columns that are present.
+    """
+    return packets[[name for name in _DECODE_COLUMNS if name in packets.columns]]
 
 
 def _decode_phase_rows(csi, times, origin, first, uncertainty, time_source):
@@ -191,6 +225,8 @@ def _decode_phase_rows(csi, times, origin, first, uncertainty, time_source):
         raise ValueError(
             "Mapped packet times run backwards; inspect clock/timing integrity"
         )
+    # Missing nominal rates stay NaN, as the pandas-era decoder returned them.
+    nominal = first["nominal_rate_hz"]
     return PhaseSignal(
         attempt_id,
         receiver_id,
@@ -203,7 +239,7 @@ def _decode_phase_rows(csi, times, origin, first, uncertainty, time_source):
         np.asarray(offsets),
         origin,
         int(first["attempt_ended_monotonic_ns"]),
-        float(first["nominal_rate_hz"]),
+        float("nan") if nominal is None else float(nominal),
         time_source,
         uncertainty,
         skipped,

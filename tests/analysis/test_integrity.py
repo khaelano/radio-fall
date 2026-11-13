@@ -16,6 +16,7 @@ pytest.importorskip("pyarrow")
 from journal_builder import FOREIGN, RX1, TX, write_session
 
 from fall_detection.analysis import _receiver, analyze_latest_session, analyze_session
+from fall_detection.analysis._frames import as_polars
 from fall_detection.analysis.session_frames import load_analysis_session
 from fall_detection.radio.preprocessing.phase import (
     HE20_COMPACT_SLOT_INDICES,
@@ -275,6 +276,20 @@ def test_phase_counts_treat_odd_or_empty_payloads_as_unreadable():
     assert counts["phase_mask_unreadable_rows"] == 2
     assert counts["phase_mask_unsupported_rows"] == 1
     assert counts["phase_mask_supported_rows"] == 0
+
+
+@pytest.mark.parametrize("receiver_id", ["rx-1", "rx-2"])
+def test_scan_receiver_reports_exactly_the_metric_schema(session, receiver_id):
+    # Polars silently drops dict keys outside the schema, so the keys must match.
+    attempt_key = as_polars(session.attempts)["attempt_key"].item()
+    result = _receiver.scan_receiver(
+        session,
+        attempt_key,
+        receiver_id,
+        100.0,
+        {"countdown": (1_000_000_000, 2_000_000_000)},
+    )
+    assert set(result["metrics"]) == set(_receiver.METRIC_SCHEMA)
 
 
 def test_analyze_session_counts_sequence_disorder_in_delivery_order(tmp_path):

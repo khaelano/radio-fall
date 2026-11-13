@@ -152,7 +152,9 @@ def test_load_phase_motion_samples_marks_cross_boundary_lags(motion_source):
     assert not frame.filter(pl.col("seconds") == 1.0)["within_phase_lag"].item()
     assert frame.filter(pl.col("seconds") == 1.2)["within_phase_lag"].item()
     early = frame.filter(pl.col("seconds") < 0.1)["calibrated_score"]
-    assert early.is_nan().all()
+    assert early.is_null().all()
+    assert not frame["raw_score"].is_nan().any()
+    assert not frame["calibrated_score"].is_nan().any()
     assert result.recordings[0, "baseline_tones"] == 6
 
 
@@ -273,7 +275,12 @@ def test_load_phase_motion_samples_decodes_journaled_csi_in_worker_processes(
         ("countdown", "action", "recovery"), 100
     )
     # A constant-phase channel has zero circular change wherever a lag exists.
-    assert serial.samples["calibrated_score"].drop_nulls().abs().max() < 1e-9
+    calibrated = serial.samples["calibrated_score"]
+    assert not calibrated.is_nan().any()
+    assert calibrated.null_count() > 0
+    known = calibrated.filter(calibrated.is_not_null())
+    assert known.len() > 0
+    assert known.abs().max() < 1e-9
     assert parallel.recordings["read_error"][0] == ""
     assert "rx-2" in parallel.recordings["read_error"][1]
     assert_frame_equal(

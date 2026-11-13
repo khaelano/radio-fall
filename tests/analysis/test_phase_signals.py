@@ -185,3 +185,15 @@ def test_phase_signal_from_packets_accepts_pandas_frames_like_notebooks(phase_ca
     ):
         np.testing.assert_array_equal(getattr(actual, name), getattr(expected, name))
     assert actual.sync_uncertainty_us == expected.sync_uncertainty_us == 100
+
+
+def test_phase_signal_from_packets_keeps_missing_nominal_rate_as_nan(phase_capture):
+    pytest.importorskip("pandas")
+    packets = load_capture_packets(phase_capture, "001/01", "rx-1")
+    missing = packets.with_columns(
+        pl.lit(None, dtype=packets.schema["nominal_rate_hz"]).alias("nominal_rate_hz")
+    )
+    assert np.isnan(phase_signal_from_packets(missing).nominal_rate_hz)
+    pandas_missing = packets.to_pandas()
+    pandas_missing["nominal_rate_hz"] = np.nan
+    assert np.isnan(phase_signal_from_packets(pandas_missing).nominal_rate_hz)

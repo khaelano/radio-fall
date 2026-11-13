@@ -17,9 +17,9 @@ import polars as pl
 from .._radio_native import storage_read as read_session_file
 from ..collection.protocol import protocol_from_mapping
 from ..radio.preprocessing import phase as phase_module
-from . import _cache_keys, _receiver, _timeline, session_frames
+from . import _cache_keys, _frames, _receiver, _timeline, session_frames
+from ._frames import as_polars
 from ._io import atomic_bytes
-from ._timeline import as_polars
 from .session_frames import AnalysisSession, load_analysis_session
 
 _IDENTITY_SCHEMA = {
@@ -384,7 +384,7 @@ def analyze_session(
         records, events, trials
     )
     code_hash = _cache_keys.code_hash(
-        (phase_module, _receiver, _timeline, session_frames), __file__
+        (phase_module, _receiver, _timeline, session_frames, _frames), __file__
     )
     signature = _cache_keys.frame_signature(session)
     jobs = [(record, receiver_id) for record in records for receiver_id in receiver_ids]

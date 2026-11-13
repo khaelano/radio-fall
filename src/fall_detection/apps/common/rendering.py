@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from fall_detection.radio.buffer import BufferSnapshot, RollingCsiBuffer
-from fall_detection.radio.preprocessing.phase import (
+from fall_detection.radio.phase import (
     HE20_VALID_SUBCARRIERS,
     HT20_VALID_SUBCARRIERS,
     phase_change_from_baseline,

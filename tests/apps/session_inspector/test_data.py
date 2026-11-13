@@ -18,7 +18,7 @@ from fall_detection.apps.session_inspector.data import (
     prepare_attempt_signals,
 )
 from fall_detection.radio.buffer import RollingCsiBuffer
-from fall_detection.radio.preprocessing.phase import (
+from fall_detection.radio.phase import (
     HE20_COMPACT_SLOT_INDICES,
     HE20_SLOT_INDICES,
     HT20_SLOT_INDICES,

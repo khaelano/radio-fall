@@ -10,8 +10,8 @@ import numpy as np
 import polars as pl
 import pytest
 
-from fall_detection.analysis import sequence_reporting as reporting
-from fall_detection.analysis.sequence_cache import save_segment
+from fall_detection.analysis.preprocessing import sequence_reporting as reporting
+from fall_detection.analysis.preprocessing.sequence_cache import save_segment
 
 
 @pytest.fixture

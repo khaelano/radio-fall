@@ -6,9 +6,9 @@ import numpy as np
 import polars as pl
 import pytest
 
-from fall_detection.analysis.amplitude import hampel_subcarriers
-from fall_detection.analysis.amplitude_pipeline import prepare_recording
-from fall_detection.analysis.sequence_preprocessing import (
+from fall_detection.analysis.preprocessing.amplitude import hampel_subcarriers
+from fall_detection.analysis.preprocessing.amplitude_pipeline import prepare_recording
+from fall_detection.analysis.preprocessing.sequence_preprocessing import (
     RECEIVERS,
     SequenceArtifacts,
     align_epoch,
@@ -123,7 +123,9 @@ def epoch_frame():
 
 
 def test_native_magnitude_only_matches_independent_physical_decoder():
-    from fall_detection.analysis.phase_signals import phase_signal_from_packets
+    from fall_detection.analysis.diagnostics.phase_signals import (
+        phase_signal_from_packets,
+    )
 
     for receiver in RECEIVERS[:3]:
         frame = epoch_frame().filter(pl.col("receiver_id") == receiver)
@@ -282,7 +284,7 @@ def test_completed_export_rejects_changed_preprocessing(tmp_path, changes):
 
 
 def test_segment_reader_rejects_obsolete_npz_files(tmp_path):
-    from fall_detection.analysis.sequence_cache import read_segment
+    from fall_detection.analysis.preprocessing.sequence_cache import read_segment
 
     path = tmp_path / "old.npz"
     np.savez(path, amplitude=np.ones((1, 1)))
@@ -294,7 +296,10 @@ def test_segment_reader_rejects_obsolete_npz_files(tmp_path):
 
 
 def test_new_segment_stages_preserve_existing_array_files(tmp_path):
-    from fall_detection.analysis.sequence_cache import read_segment, save_segment
+    from fall_detection.analysis.preprocessing.sequence_cache import (
+        read_segment,
+        save_segment,
+    )
 
     path = tmp_path / "segment"
     save_segment(path, {"amplitude": np.array([[1.0, np.nan], [2.0, 3.0]])})
@@ -310,7 +315,7 @@ def test_new_segment_stages_preserve_existing_array_files(tmp_path):
 def test_source_is_converted_once_and_reconverted_when_the_archive_changes(
     tmp_path, monkeypatch
 ):
-    from fall_detection.analysis import sequence_preprocessing as module
+    from fall_detection.analysis.preprocessing import sequence_preprocessing as module
 
     calls = []
 

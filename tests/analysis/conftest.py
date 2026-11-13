@@ -47,7 +47,7 @@ def training_notebook():
     }
     import polars as pl
 
-    from fall_detection.analysis.sequence_training_data import SegmentStore
+    from fall_detection.analysis.training.sequence_training_data import SegmentStore
 
     namespace.update(pl=pl, SegmentStore=SegmentStore)
     cells = code_cells("03_training.ipynb")

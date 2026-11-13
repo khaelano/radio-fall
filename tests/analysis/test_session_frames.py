@@ -12,10 +12,12 @@ pytest.importorskip("pyarrow")
 
 from journal_builder import RX1, RX2, TX, envelope, mac_text, record
 
-from fall_detection.analysis.amplitude_pipeline import load_amplitude_session
-from fall_detection.analysis.phase_signals import phase_signal_from_packets
+from fall_detection.analysis.diagnostics.phase_signals import phase_signal_from_packets
+from fall_detection.analysis.preprocessing.amplitude_pipeline import (
+    load_amplitude_session,
+)
 from fall_detection.analysis.session_frames import load_analysis_session
-from fall_detection.radio.preprocessing.phase import HE20_COMPACT_SLOT_INDICES
+from fall_detection.radio.phase import HE20_COMPACT_SLOT_INDICES
 
 FOREIGN = bytes.fromhex("020000000001")
 RUN = 0xFFFFFFFFFFFFFFFF
@@ -403,7 +405,9 @@ def test_empty_and_populated_recordings_share_a_schema(capture):
 
 
 def test_notebook_sequence_columns_are_all_available(capture):
-    from fall_detection.analysis.sequence_preprocessing import SEQUENCE_COLUMNS
+    from fall_detection.analysis.preprocessing.sequence_preprocessing import (
+        SEQUENCE_COLUMNS,
+    )
 
     root, destination = capture
     session = load_analysis_session(root, destination)

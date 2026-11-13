@@ -6,8 +6,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ._cache_keys import file_hash, fingerprint, stamp
-from ._io import atomic_json, temporary_sibling
+from .._cache_keys import file_hash, fingerprint, stamp
+from .._io import atomic_json, temporary_sibling
 
 __all__ = [
     "checkpoint_stage",

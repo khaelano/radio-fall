@@ -6,14 +6,17 @@ import numpy as np
 import polars as pl
 import pytest
 
-from fall_detection.analysis.amplitude import hampel_subcarriers, normalize_subcarriers
-from fall_detection.analysis.amplitude_pipeline import (
+from fall_detection.analysis.diagnostics.phase_signals import phase_signal_from_packets
+from fall_detection.analysis.preprocessing.amplitude import (
+    hampel_subcarriers,
+    normalize_subcarriers,
+)
+from fall_detection.analysis.preprocessing.amplitude_pipeline import (
     AmplitudePacketReader,
     prepare_recording,
     preprocess_dataset,
     save_recording,
 )
-from fall_detection.analysis.phase_signals import phase_signal_from_packets
 
 
 def packets(counts=(245, 256, 245, 256, 245, 256)):

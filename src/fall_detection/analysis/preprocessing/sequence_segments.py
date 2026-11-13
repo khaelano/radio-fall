@@ -3,15 +3,35 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
 import polars as pl
 
-from ._cache_keys import file_hash
-from ._io import atomic_json, atomic_table, temporary_sibling
+from .. import _cache_keys, _io
+from .._cache_keys import file_hash
+from .._io import atomic_json, atomic_table, temporary_sibling
+from . import sequence_preprocessing
 
 FEATURES = 4 * 245
+
+
+def export_code_hashes() -> dict[str, str]:
+    """Hash the source files that define the exported sequence format.
+
+    The files are located through their imported modules, so the digests stay
+    correct wherever the modules live in the package tree.
+
+    Returns:
+        File name to SHA-256 digest for the segment writer, the preprocessing
+        module, and the shared I/O and cache-key helpers.
+    """
+    modules = (sys.modules[__name__], sequence_preprocessing, _io, _cache_keys)
+    return {
+        Path(str(module.__file__)).name: file_hash(Path(str(module.__file__)))
+        for module in modules
+    }
 
 
 def _no_btrfs_compression(path: Path) -> bool:
@@ -83,15 +103,7 @@ def publish_export(
             "parameters": format_parameters,
             "provenance": {
                 "method": "direct-preprocessing",
-                "export_code_sha256": {
-                    name: file_hash(Path(__file__).with_name(name))
-                    for name in (
-                        "sequence_segments.py",
-                        "sequence_preprocessing.py",
-                        "_io.py",
-                        "_cache_keys.py",
-                    )
-                },
+                "export_code_sha256": export_code_hashes(),
             },
             "coordinates": {
                 "receivers": ["rx-1", "rx-2", "rx-3", "rx-4"],

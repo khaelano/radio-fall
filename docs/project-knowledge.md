@@ -67,7 +67,7 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   fitting have one Rust implementation; independent NumPy/Python references
   remain in tests only. ACKs now certify the native envelope journal rather
   than the CSV write. Offline sequence alignment for training
-  (`analysis/sequence_preprocessing.py`) remains Python and is mirrored by the
+  (`analysis/preprocessing/sequence_preprocessing.py`) remains Python and is mirrored by the
   live Rust window builder, guarded by the replay parity test; moving it would
   change published preprocessing. Tested offline against a fake gateway on a
   pseudo-terminal; not yet exercised on radio hardware, and the 300 s
@@ -179,19 +179,22 @@ the recording writer, record views and offline kernels to Python.
 `tests/test_architecture.py` rejects Python serial I/O or retired acquisition
 modules in live application code.
 
-`src/fall_detection/apps/` contains the collector, CSI viewer, session
-inspector, and detector application entry points and presentation code.
-`radio/` (settings, profile, live delivery, record types and display buffers,
-provisioning), `analysis/`, `collection/`, `protocol/`, and `session/`
-contain the reusable radio, data, and domain
-components used by these applications and research tools. `session/` is the
-neutral session model (manifest models, directory/archive reader, schema
-version) that analysis, collection and the inspector all import; its only
-domain dependency is `protocol` (the top-level package holding the collection protocol model and loader, which imports nothing else in `fall_detection`). `apps/session_inspector/` keeps the inspector-specific frame loading,
-review, export and video modules beside its `ui/` package; there is no
-standalone `session_inspector` package. The viewer and
-collector share the dashboard, pacing, display preparation (`rendering.py`)
-and Qt bootstrap in `apps/common/`.
+`src/fall_detection/` is layered; imports run from the top down, and
+`tests/test_architecture.py` enforces the order:
+
+| Package | Role | May import |
+| --- | --- | --- |
+| `protocol/` | planned trials and scenarios (model, loader) | none |
+| `radio/` | settings, profiles, live delivery, records, buffers, provisioning, Rust-backed `phase.py` | none |
+| `session/` | session manifests, directory/archive reader, schema version | `protocol` |
+| `collection/` | collection controller, capture, resume, video | `protocol`, `radio`, `session` |
+| `analysis/` | `session_frames.py` plus `preprocessing/`, `diagnostics/`, `training/` | `protocol`, `radio`, `session` |
+| `apps/` | collector, CSI viewer, session inspector, detector, and `common/` shared Qt code | all of the above |
+
+The inspector backend (frame loading, review, export, video) lives in
+`apps/session_inspector/` beside its `ui/` package. `analysis/` keeps its
+private helpers (`_io`, `_cache_keys`, `_frames`) at the top level, and no
+package `__init__.py` re-exports names; import from the defining module.
 
 ## Sources of truth
 

@@ -12,8 +12,8 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from ._cache_keys import file_hash
-from ._io import atomic_json, atomic_table  # noqa: F401  (notebook-facing names)
+from .._cache_keys import file_hash
+from .._io import atomic_json, atomic_table  # noqa: F401  (notebook-facing names)
 from .amplitude_pipeline import (
     COLUMNS,
     AmplitudeSession,
@@ -287,7 +287,7 @@ class SequenceArtifacts:
         fingerprint still matches the raw archive, which is read from the
         archive's central directory and never hashes member data.
         """
-        from .._radio_native import storage_resolve_source
+        from ..._radio_native import storage_resolve_source
 
         source = Path(storage_resolve_source(str(self.root), self.session_id)[0])
         directory = self.root / "data/interim/frames" / self.session_id

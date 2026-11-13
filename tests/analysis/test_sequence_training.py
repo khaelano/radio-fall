@@ -4,7 +4,7 @@ import numpy as np
 import polars as pl
 import pytest
 
-from fall_detection.analysis.sequence_training_data import (
+from fall_detection.analysis.training.sequence_training_data import (
     Normalizer,
     SegmentStore,
     SequenceDataset,

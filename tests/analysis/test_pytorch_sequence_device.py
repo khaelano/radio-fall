@@ -8,7 +8,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from fall_detection.analysis.sequence_training_data import Normalizer
+from fall_detection.analysis.training.sequence_training_data import Normalizer
 
 
 @pytest.mark.parametrize("device_name", ["cpu", "cuda"])

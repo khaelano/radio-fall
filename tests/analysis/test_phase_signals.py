@@ -8,13 +8,13 @@ pytest.importorskip("pyarrow")
 
 from journal_builder import FOREIGN, RX1, RX2, TX, write_session
 
-from fall_detection.analysis.phase_signals import (
+from fall_detection.analysis.diagnostics.phase_signals import (
     load_capture_packets,
     load_phase_signal,
     phase_signal_from_packets,
 )
 from fall_detection.analysis.session_frames import load_analysis_session
-from fall_detection.radio.preprocessing.phase import HE20_COMPACT_SLOT_INDICES
+from fall_detection.radio.phase import HE20_COMPACT_SLOT_INDICES
 
 ORIGIN = 1_000_000_000
 

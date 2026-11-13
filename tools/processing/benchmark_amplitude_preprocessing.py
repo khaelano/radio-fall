@@ -11,8 +11,11 @@ from time import perf_counter
 
 import numpy as np
 
-from fall_detection.analysis.amplitude import hampel_subcarriers, normalize_subcarriers
-from fall_detection.analysis.phase_signals import phase_signal_from_packets
+from fall_detection.analysis.diagnostics.phase_signals import phase_signal_from_packets
+from fall_detection.analysis.preprocessing.amplitude import (
+    hampel_subcarriers,
+    normalize_subcarriers,
+)
 from fall_detection.analysis.session_frames import load_analysis_session
 
 HAMPEL_WINDOW_SECONDS = 0.1

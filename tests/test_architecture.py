@@ -33,6 +33,62 @@ def test_domain_modules_do_not_import_apps():
     assert not violations, f"Domain code imports apps: {violations}"
 
 
+ALLOWED_DEPENDENCIES = {
+    "protocol": set(),
+    "radio": set(),
+    "session": {"protocol"},
+    "collection": {"protocol", "radio", "session"},
+    "analysis": {"protocol", "radio", "session"},
+    "apps": {"analysis", "collection", "protocol", "radio", "session"},
+}
+"""Project packages each top-level package may import, besides itself."""
+
+
+def _project_packages_imported(path: Path, package: str) -> dict[str, int]:
+    """Return the top-level project packages ``path`` imports, with a line number."""
+    found: dict[str, int] = {}
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        names = []
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            name = "." * node.level + (node.module or "")
+            base = resolve_name(name, package) if node.level else name
+            names = [base, *(f"{base}.{alias.name}" for alias in node.names)]
+        for name in names:
+            parts = name.split(".")
+            if len(parts) > 1 and parts[0] == "fall_detection":
+                found.setdefault(parts[1], node.lineno)
+    return found
+
+
+def test_top_level_packages_follow_the_layering():
+    """Imports flow one way: protocol and radio are leaves, apps sit on top."""
+    packages = {
+        path.name
+        for path in PACKAGE.iterdir()
+        if path.is_dir() and (path / "__init__.py").exists()
+    }
+    assert packages == set(ALLOWED_DEPENDENCIES), (
+        "Add new top-level packages to ALLOWED_DEPENDENCIES"
+    )
+    violations = []
+    for path in PACKAGE.rglob("*.py"):
+        relative = path.relative_to(PACKAGE)
+        owner = relative.parts[0]
+        if owner not in ALLOWED_DEPENDENCIES:
+            continue
+        package = ".".join(("fall_detection", *relative.with_suffix("").parts[:-1]))
+        for imported, line in _project_packages_imported(path, package).items():
+            if (
+                imported in ALLOWED_DEPENDENCIES
+                and imported != owner
+                and imported not in ALLOWED_DEPENDENCIES[owner]
+            ):
+                violations.append(f"{relative}:{line} imports {imported}")
+    assert not violations, f"Layering violations: {violations}"
+
+
 def test_live_acquisition_is_owned_by_rust():
     """Live apps reach radios only through the native session, never Python serial I/O."""
     live_paths = [

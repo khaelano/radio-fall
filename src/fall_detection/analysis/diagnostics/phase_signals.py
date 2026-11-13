@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 
-from ..radio.preprocessing.phase import decode_ltf_blocks
-from ._frames import as_polars
-from .session_frames import AnalysisSession
+from ...radio.phase import decode_ltf_blocks
+from .._frames import as_polars
+from ..session_frames import AnalysisSession
 
 if TYPE_CHECKING:
     import pandas as pd

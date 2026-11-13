@@ -10,13 +10,26 @@
 - `common/`: dashboard widgets, display preparation (`rendering.py`), pacing,
   shared `--fps` option and Qt bootstrap used by several applications.
 
-The other packages contain reusable functionality: `radio/` provides acquisition
-and configuration; `collection/`
-provides collection protocols and session orchestration; `session/` provides the
-neutral session model and directory/archive reader;
-`detection/` provides scoring and replay; `analysis/` provides shared data
-access, validation, and signal primitives. Experimental preprocessing, labels, plots, model definitions,
-and training procedures live in `notebooks/latest/`.
+The other packages contain reusable functionality, listed from the bottom of
+the dependency order up:
+
+- `protocol/`: planned trials and scenarios (`model.py`, `loader.py`). Imports
+  no other project package.
+- `radio/`: radio settings, profiles, live delivery, record types, display
+  buffers, provisioning and the Rust-backed `phase.py`. Imports no other
+  project package.
+- `session/`: the neutral session model (manifests, directory/archive reader,
+  schema version). Imports `protocol`.
+- `collection/`: collection workflow (controller, capture, resume, video).
+  Imports `protocol`, `radio` and `session`.
+- `analysis/`: shared data access (`session_frames.py`) with `preprocessing/`,
+  `diagnostics/` and `training/` groups. Imports `protocol`, `radio` and
+  `session`.
+
+`tests/test_architecture.py` enforces this order (`ALLOWED_DEPENDENCIES`);
+adding a top-level package requires adding it there. Experimental
+preprocessing, labels, plots, model definitions, and training procedures live
+in `notebooks/latest/`.
 
 The installed commands are defined in `pyproject.toml`. Each application can
 also be run as a module, for example `python -m fall_detection.apps.collector`.

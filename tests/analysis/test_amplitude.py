@@ -3,7 +3,10 @@
 import numpy as np
 import pytest
 
-from fall_detection.analysis.amplitude import hampel_subcarriers, normalize_subcarriers
+from fall_detection.analysis.preprocessing.amplitude import (
+    hampel_subcarriers,
+    normalize_subcarriers,
+)
 
 
 def reference(values, times, window=0.1, minimum=5, threshold=5.0):

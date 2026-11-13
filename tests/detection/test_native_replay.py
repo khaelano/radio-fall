@@ -18,8 +18,8 @@ def _offline_inputs(capture: Path) -> tuple[int, int, np.ndarray, np.ndarray]:
     """Recompute aligned log1p squared differences with the offline functions."""
     from fall_detection._radio_native import prepare_magnitude, read_envelopes
 
-    from fall_detection.analysis.amplitude import hampel_subcarriers
-    from fall_detection.analysis.sequence_preprocessing import (
+    from fall_detection.analysis.preprocessing.amplitude import hampel_subcarriers
+    from fall_detection.analysis.preprocessing.sequence_preprocessing import (
         align_samples,
         sequence_offsets,
         squared_difference,
@@ -90,7 +90,7 @@ def _offline_inputs(capture: Path) -> tuple[int, int, np.ndarray, np.ndarray]:
 def test_native_replay_matches_offline_preprocessing(tmp_path):
     from fall_detection._radio_native import NativeDetector
 
-    from fall_detection.analysis.sequence_training_data import Normalizer
+    from fall_detection.analysis.training.sequence_training_data import Normalizer
 
     output = tmp_path / "run"
     config = {

@@ -5,7 +5,7 @@
 [`02_preprocess.ipynb`](../notebooks/latest/02_preprocess.ipynb) defines the
 experiment directly: source sessions, attempt selection, sampling rate, filtering,
 squared differences, cue labels, windows, export transformation, and figures.
-`analysis/sequence_preprocessing.py` provides alignment primitives and verified
+`analysis/preprocessing/sequence_preprocessing.py` provides alignment primitives and verified
 source/export access. The notebook calls the shared Rust-backed magnitude and
 Hampel operations; moving orchestration does not move these kernels to Python.
 
@@ -78,7 +78,7 @@ performance measurements of the notebook refactor.
 
 The earlier notebook, `02_preprocess_old.ipynb` (removed on 13 November 2026;
 recoverable from Git history), used
-`analysis/amplitude_pipeline.py`. Polars selects accepted recordings and handles
+`analysis/preprocessing/amplitude_pipeline.py`. Polars selects accepted recordings and handles
 packet metadata. PyArrow's native Parquet reader reuses file metadata, projects
 17 required columns, and reads only candidate row groups. Rust decodes the
 batched signed-int16 I/Q arrays, aligns compact 245-slot or full 256-slot HE20

@@ -1,4 +1,4 @@
-//! Sequence input assembly matching `analysis/sequence_training_data.py`.
+//! Sequence input assembly matching `analysis/training/sequence_training_data.py`.
 
 pub const SIGNALS: usize = 980;
 pub const FEATURES: usize = 1964;

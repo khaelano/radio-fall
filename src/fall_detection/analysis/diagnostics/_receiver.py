@@ -5,9 +5,9 @@ from typing import Any
 import numpy as np
 import polars as pl
 
-from ..radio.preprocessing.phase import DEFAULT_PHASE_AMPLITUDE_FLOOR, phase_slot_mask
+from ...radio.phase import DEFAULT_PHASE_AMPLITUDE_FLOOR, phase_slot_mask
+from ..session_frames import AnalysisSession
 from ._timeline import PHASES
-from .session_frames import AnalysisSession
 
 _COLUMNS = (
     "sequence",

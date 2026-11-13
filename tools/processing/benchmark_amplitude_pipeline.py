@@ -8,7 +8,7 @@ from time import perf_counter
 import numpy as np
 import polars as pl
 
-from fall_detection.analysis.amplitude_pipeline import (
+from fall_detection.analysis.preprocessing.amplitude_pipeline import (
     load_amplitude_session,
     preprocess_dataset,
 )

@@ -15,10 +15,14 @@ pytest.importorskip("pyarrow")
 
 from journal_builder import FOREIGN, RX1, TX, write_session
 
-from fall_detection.analysis import _receiver, analyze_latest_session, analyze_session
 from fall_detection.analysis._frames import as_polars
+from fall_detection.analysis.diagnostics import _receiver
+from fall_detection.analysis.diagnostics.integrity import (
+    analyze_latest_session,
+    analyze_session,
+)
 from fall_detection.analysis.session_frames import load_analysis_session
-from fall_detection.radio.preprocessing.phase import (
+from fall_detection.radio.phase import (
     HE20_COMPACT_SLOT_INDICES,
     HE20_SLOT_INDICES,
     HT20_SLOT_INDICES,
@@ -378,7 +382,7 @@ def _metric_rows():
 
 
 def test_receiver_summary_pools_attempts_with_numpy_reductions():
-    from fall_detection.analysis import integrity
+    from fall_detection.analysis.diagnostics import integrity
 
     schema = integrity._RECEIVER_ATTEMPT_SCHEMA
     rows = [{**dict.fromkeys(schema), **row} for row in _metric_rows()]
@@ -401,8 +405,11 @@ def test_receiver_summary_pools_attempts_with_numpy_reductions():
 
 
 def test_session_integrity_summaries_cover_statuses_phases_and_issues():
-    from fall_detection.analysis import integrity
-    from fall_detection.analysis._timeline import CHECK_SCHEMA, INTERVAL_SCHEMA
+    from fall_detection.analysis.diagnostics import integrity
+    from fall_detection.analysis.diagnostics._timeline import (
+        CHECK_SCHEMA,
+        INTERVAL_SCHEMA,
+    )
 
     durations = [(0.9, 1.0), (1.2, 1.0), (None, 1.0), (1.1, 1.0)]
     intervals = pl.DataFrame(

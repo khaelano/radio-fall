@@ -16,8 +16,10 @@ import pandas as pd
 import polars as pl
 import pytest
 
-from fall_detection.analysis.sequence_preprocessing import SequenceArtifacts
-from fall_detection.analysis.sequence_training_data import load_sequence_index
+from fall_detection.analysis.preprocessing.sequence_preprocessing import (
+    SequenceArtifacts,
+)
+from fall_detection.analysis.training.sequence_training_data import load_sequence_index
 
 NOTEBOOK = Path(__file__).resolve().parents[2] / "notebooks/latest/02_preprocess.ipynb"
 

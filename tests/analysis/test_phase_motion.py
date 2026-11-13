@@ -12,14 +12,14 @@ pytest.importorskip("pyarrow")
 
 from journal_builder import RX1, TX, write_session
 
-from fall_detection.analysis import phase_motion
-from fall_detection.analysis.phase_motion import (
+from fall_detection.analysis.diagnostics import phase_motion
+from fall_detection.analysis.diagnostics.phase_motion import (
     load_phase_motion_samples,
     phase_change_matrix,
     phase_motion_score,
 )
 from fall_detection.analysis.session_frames import load_analysis_session
-from fall_detection.radio.preprocessing.phase import HE20_COMPACT_SLOT_INDICES
+from fall_detection.radio.phase import HE20_COMPACT_SLOT_INDICES
 
 
 def test_phase_change_matrix_keeps_localized_signed_motion_separate():

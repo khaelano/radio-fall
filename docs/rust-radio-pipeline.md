@@ -76,7 +76,7 @@ Delimiter scanning uses `memchr` runtime acceleration; CRC uses `crc32fast`.
 `radio_signal::layouts` selects the HE20 (compact 245-slot and full 256-slot)
 and HT20 LLTF/HT-LTF/STBC layouts; `calibrate` applies a centered,
 amplitude-weighted two-parameter fit after unwrapping. Live records use exact
-integer amplitudes; offline Python callers of `radio/preprocessing/phase.py`
+integer amplitudes; offline Python callers of `radio/phase.py`
 use the same kernels through `phase_block` and `ltf_layouts`. No fast-math
 flags relax floating-point semantics.
 

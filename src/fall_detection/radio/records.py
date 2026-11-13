@@ -22,7 +22,7 @@ from typing import Any
 
 import numpy as np
 
-from .preprocessing.phase import LtfBlock, decode_ltf_blocks
+from .phase import LtfBlock, decode_ltf_blocks
 
 CSI_HEADER = (
     "type,id,mac,rssi,rate,sig_mode,mcs,bandwidth,smoothing,not_sounding,"

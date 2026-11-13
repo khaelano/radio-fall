@@ -9,8 +9,6 @@ from pathlib import Path
 
 from fall_detection.apps.common.qt import QtUnavailableError, qt_application
 
-from .formatting import REVIEW_FILE  # noqa: F401 - re-exported for callers
-
 DEFAULT_SESSIONS_DIR = Path("data/raw/sessions")
 DEFAULT_ANNOTATIONS_DIR = Path("data/annotations")
 

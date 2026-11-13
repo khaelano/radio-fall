@@ -21,7 +21,7 @@ import pyarrow as pa
 from fall_detection._radio_native import FrameStore, StorageError
 from fall_detection.apps.common.rendering import PreparedCsiFrame, prepare_frame
 from fall_detection.radio.buffer import BufferSnapshot
-from fall_detection.radio.preprocessing.phase import (
+from fall_detection.radio.phase import (
     DEFAULT_PHASE_AMPLITUDE_FLOOR,
     HE20_COMPACT_SLOT_INDICES,
     HE20_SLOT_INDICES,

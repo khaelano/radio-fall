@@ -6,11 +6,11 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from fall_detection.analysis.sequence_device_cache import (
+from fall_detection.analysis.training.sequence_device_cache import (
     prepare_device_dataset,
     training_batches,
 )
-from fall_detection.analysis.sequence_training_data import (
+from fall_detection.analysis.training.sequence_training_data import (
     SegmentStore,
     SequenceDataset,
     fit_normalizer,

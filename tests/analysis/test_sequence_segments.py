@@ -6,8 +6,14 @@ import numpy as np
 import polars as pl
 import pytest
 
-from fall_detection.analysis.sequence_segments import publish_export, write_signal
-from fall_detection.analysis.sequence_training_data import SegmentStore, _selected
+from fall_detection.analysis.preprocessing.sequence_segments import (
+    publish_export,
+    write_signal,
+)
+from fall_detection.analysis.training.sequence_training_data import (
+    SegmentStore,
+    _selected,
+)
 
 
 def test_publish_preserves_values_and_invalidity(tmp_path):
@@ -81,3 +87,19 @@ def test_failed_signal_write_preserves_existing_file(tmp_path, monkeypatch):
         write_signal(path, signal * 2)
     assert path.read_bytes() == original
     assert list(path.parent.iterdir()) == [path]
+
+
+def test_export_code_hashes_cover_every_format_module():
+    from fall_detection.analysis.preprocessing.sequence_segments import (
+        export_code_hashes,
+    )
+
+    hashes = export_code_hashes()
+
+    assert set(hashes) == {
+        "sequence_segments.py",
+        "sequence_preprocessing.py",
+        "_io.py",
+        "_cache_keys.py",
+    }
+    assert all(len(digest) == 64 for digest in hashes.values())

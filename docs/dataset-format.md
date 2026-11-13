@@ -591,7 +591,7 @@ Parsing `data`:
 - `len` counts integers, not subcarriers. For the current HE20 compact layout,
   `len` is typically `490` (245 complex slots). Do not hard-code the width; use
   `len`, or derive the layout from `sig_mode`, `bandwidth`, and `stbc` with the
-  helpers in `fall_detection.radio.preprocessing.phase`.
+  helpers in `fall_detection.radio.phase`.
 - When `first_word` is `1`, `CsiRecord` preserves the raw values but sets
   the first two complex values to `NaN` for plotting. `raw_csi` keeps the
   original values; `csi` is the masked view.

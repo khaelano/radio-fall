@@ -4,7 +4,7 @@ from math import isclose, isnan
 import numpy as np
 import pytest
 
-from fall_detection.radio.preprocessing.phase import (
+from fall_detection.radio.phase import (
     HE20_COMPACT_SLOT_INDICES,
     HE20_SLOT_INDICES,
     HE20_VALID_SUBCARRIERS,
@@ -166,7 +166,7 @@ def test_phase_change_all_nan_baseline_window_stays_nan_without_warning():
 
 
 def test_ltf_phase_preparation_avoids_per_tone_numpy_scalar_calls(monkeypatch):
-    from fall_detection.radio.preprocessing.phase import LtfBlock
+    from fall_detection.radio.phase import LtfBlock
 
     original = np.angle
     scalar_calls = []
@@ -192,7 +192,7 @@ def test_ltf_vector_views_match_scalar_reference_for_masked_and_nonfinite_sample
     from cmath import phase
     from math import isfinite
 
-    from fall_detection.radio.preprocessing.phase import LtfBlock
+    from fall_detection.radio.phase import LtfBlock
 
     csi = (
         complex(4, 0),
@@ -229,7 +229,7 @@ def test_ltf_vector_views_match_scalar_reference_for_masked_and_nonfinite_sample
 
 
 def test_empty_ltf_views_remain_empty():
-    from fall_detection.radio.preprocessing.phase import LtfBlock
+    from fall_detection.radio.phase import LtfBlock
 
     block = LtfBlock("empty", (), (), frozenset())
     assert block.amplitudes == block.raw_phases == block.calibrated_phases == ()
@@ -246,7 +246,7 @@ def test_rust_ltf_blocks_match_independent_numpy_reference(
     import numpy as np
     import phase_reference
 
-    from fall_detection.radio.preprocessing import phase as rust
+    from fall_detection.radio import phase as rust
 
     rng = np.random.default_rng(pairs + 7 * sig_mode + stbc)
     values = rng.integers(-60, 61, pairs) + 1j * rng.integers(-60, 61, pairs)

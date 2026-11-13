@@ -322,7 +322,8 @@ Live acquisition now runs in the Rust transport session. The Python
 `csi-gateway-benchmark` command and its `qualification.json` evaluator were
 retired with the Python acquisition path on 12 November 2026; the evaluator
 read Python-format journals and has not been ported to the native journals. The
-`capture_probe` binary in `radio_detection` records bounded native journals
+`capture_probe` example in `radio_detection` (`cargo run --example
+capture_probe`) records bounded native journals
 without scores. The criteria below remain the reference for any re-implemented
 qualification; the historical procedure was:
 

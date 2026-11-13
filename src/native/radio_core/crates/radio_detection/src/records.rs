@@ -140,7 +140,7 @@ pub fn prepare(
         q.extend_from_slice(&(pair[0] as i8 as i16).to_ne_bytes());
         i.extend_from_slice(&(pair[1] as i8 as i16).to_ne_bytes());
     }
-    let values = radio_preprocessing::amplitude::decode_magnitudes(
+    let values = radio_signal::amplitude::decode_magnitudes(
         &i,
         &q,
         &[0, record.raw.len() / 2],

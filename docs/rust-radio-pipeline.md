@@ -11,8 +11,7 @@ viewer writes none. Firmware and radio settings are unchanged.
 
 | Crate | Responsibility |
 | --- | --- |
-| `radio_signal` | Signed I/Q kernels (AVX2/scalar), Espressif LTF layouts, phase calibration |
-| `radio_preprocessing` | Batch amplitude preparation and Hampel filtering for offline analysis |
+| `radio_signal` | Signed I/Q kernels (AVX2/scalar), Espressif LTF layouts, phase calibration, batch amplitude preparation and Hampel filtering for offline analysis |
 | `radio_transport` | Framing, CSI decoding, serial I/O, startup, clock and reference, acceptance, journals, availability, quality counters, `session` |
 | `radio_detection` | Live sequence windows, ONNX Runtime sessions, scheduling, live and replay feeds |
 | `radio-core` (extension) | PyO3 bindings: `NativeAcquisition`, `NativeDetector`, recording writer, record views, offline kernels |

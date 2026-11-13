@@ -16,7 +16,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
     let path = args
         .next()
-        .ok_or("usage: radio-detection PROFILE.json [REVIEWED_CPU_OP ...]")?;
+        .ok_or("usage: audit PROFILE.json [REVIEWED_CPU_OP ...]")?;
     if path == "--inspect-exports" {
         let directory = args
             .next()

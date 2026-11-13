@@ -171,9 +171,9 @@ The Python-free crates are `radio_transport` (framing, CSI decoding, serial
 I/O, gateway preparation and startup, clock and reference maintenance,
 acceptance, journals, availability, quality counters, replay and the live
 `session`), `radio_detection` (feeds, aligned history, window building, ONNX
-Runtime sessions, scheduler, worker and the live coordinator), `radio_signal`
-(I/Q kernels, LTF layouts, phase calibration) and `radio_preprocessing`
-(offline amplitude and Hampel kernels). The extension crate in
+Runtime sessions, scheduler, worker and the live coordinator) and `radio_signal`
+(I/Q kernels, LTF layouts, phase calibration, and the offline amplitude and
+Hampel kernels). The extension crate in
 `src/native/radio_core/src/` exposes `NativeAcquisition`, `NativeDetector`,
 the recording writer, record views and offline kernels to Python.
 `tests/test_architecture.py` rejects Python serial I/O or retired acquisition

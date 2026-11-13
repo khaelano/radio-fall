@@ -1,18 +1,5 @@
 //! Batch HE20 amplitude decoding and scaling, without unused phase calibration.
-use pyo3::{exceptions::PyValueError, prelude::*, types::PyBytes};
 use rayon::prelude::*;
-
-fn bytes(values: &[f64]) -> &[u8] {
-    // SAFETY: initialized contiguous f64s have no padding; view cannot outlive values.
-    unsafe { std::slice::from_raw_parts(values.as_ptr().cast(), std::mem::size_of_val(values)) }
-}
-
-type Buffers<'py> = (
-    Bound<'py, PyBytes>,
-    Bound<'py, PyBytes>,
-    Bound<'py, PyBytes>,
-    Bound<'py, PyBytes>,
-);
 
 fn magnitude(real: f64, imag: f64) -> f64 {
     let larger = real.abs().max(imag.abs());
@@ -140,79 +127,56 @@ pub fn decode_magnitudes(
     Ok(masked)
 }
 
-/// Decode masked physical HE20 magnitudes without fitting normalization.
-#[pyfunction]
-pub fn prepare_magnitude<'py>(
-    py: Python<'py>,
+/// Masked magnitudes, normalized values, and per-tone lower and upper bounds.
+///
+/// Each tone is scaled to `[-1, 1]` across the rows where it is finite. A tone
+/// whose finite values are all equal scales to zero, and a tone with no finite
+/// value keeps NaN bounds. Per-row flags: pair count is inferred from offsets;
+/// flags encode first-word invalidity and driver validity.
+pub fn prepare_amplitude(
     i: &[u8],
     q: &[u8],
-    offsets: Vec<usize>,
-    first_word: Vec<bool>,
-    driver_valid: Vec<bool>,
-) -> PyResult<Bound<'py, PyBytes>> {
-    let masked = py
-        .detach(|| decode_magnitudes(i, q, &offsets, &first_word, &driver_valid))
-        .map_err(PyValueError::new_err)?;
-    Ok(PyBytes::new(py, bytes(&masked)))
-}
-
-/// Per-row flags: pair count is inferred from offsets; flags encode first-word
-/// invalidity and driver validity. Python validates HE20 format before entry.
-#[pyfunction]
-pub fn prepare_amplitude<'py>(
-    py: Python<'py>,
-    i: &[u8],
-    q: &[u8],
-    offsets: Vec<usize>,
-    first_word: Vec<bool>,
-    driver_valid: Vec<bool>,
-) -> PyResult<Buffers<'py>> {
+    offsets: &[usize],
+    first_word: &[bool],
+    driver_valid: &[bool],
+) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>), String> {
     let rows = first_word.len();
-    let (masked, normalized, lower, upper) = py.detach(|| -> PyResult<_> {
-        let masked = decode_magnitudes(i, q, &offsets, &first_word, &driver_valid)
-            .map_err(PyValueError::new_err)?;
-        let mut normalized = vec![f64::NAN; masked.len()];
-        let mut lower = vec![f64::NAN; 245];
-        let mut upper = vec![f64::NAN; 245];
-        normalized
-            .par_chunks_mut(rows)
-            .zip(lower.par_iter_mut())
-            .zip(upper.par_iter_mut())
-            .enumerate()
-            .for_each(|(col, ((out, low), high))| {
-                let mut min = f64::INFINITY;
-                let mut max = f64::NEG_INFINITY;
-                for row in 0..rows {
-                    let value = masked[row * 245 + col];
-                    if value.is_finite() {
-                        min = min.min(value);
-                        max = max.max(value);
-                    }
+    let masked = decode_magnitudes(i, q, offsets, first_word, driver_valid)?;
+    let mut normalized = vec![f64::NAN; masked.len()];
+    let mut lower = vec![f64::NAN; 245];
+    let mut upper = vec![f64::NAN; 245];
+    normalized
+        .par_chunks_mut(rows)
+        .zip(lower.par_iter_mut())
+        .zip(upper.par_iter_mut())
+        .enumerate()
+        .for_each(|(col, ((out, low), high))| {
+            let mut min = f64::INFINITY;
+            let mut max = f64::NEG_INFINITY;
+            for row in 0..rows {
+                let value = masked[row * 245 + col];
+                if value.is_finite() {
+                    min = min.min(value);
+                    max = max.max(value);
                 }
-                if !min.is_finite() {
-                    return;
+            }
+            if !min.is_finite() {
+                return;
+            }
+            *low = min;
+            *high = max;
+            for row in 0..rows {
+                let value = masked[row * 245 + col];
+                if value.is_finite() {
+                    out[row] = if max > min {
+                        (2.0 * (value - min) / (max - min) - 1.0).clamp(-1.0, 1.0)
+                    } else {
+                        0.0
+                    };
                 }
-                *low = min;
-                *high = max;
-                for row in 0..rows {
-                    let value = masked[row * 245 + col];
-                    if value.is_finite() {
-                        out[row] = if max > min {
-                            (2.0 * (value - min) / (max - min) - 1.0).clamp(-1.0, 1.0)
-                        } else {
-                            0.0
-                        };
-                    }
-                }
-            });
-        Ok((masked, normalized, lower, upper))
-    })?;
-    Ok((
-        PyBytes::new(py, bytes(&masked)),
-        PyBytes::new(py, bytes(&normalized)),
-        PyBytes::new(py, bytes(&lower)),
-        PyBytes::new(py, bytes(&upper)),
-    ))
+            }
+        });
+    Ok((masked, normalized, lower, upper))
 }
 
 #[cfg(test)]

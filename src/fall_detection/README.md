@@ -22,8 +22,8 @@ also be run as a module, for example `python -m fall_detection.apps.collector`.
 The processing architecture has three layers:
 
 1. `src/native/radio_core/` handles USB ingestion, framing, packet decoding,
-   and recording. Its `radio_signal` and `radio_preprocessing` workspace
-   crates provide numeric kernels and signal preprocessing.
+   and recording. Its `radio_signal` workspace crate provides numeric kernels
+   and signal preprocessing.
 2. The Python domain packages validate settings, manage collection and session
    state, query recordings, and coordinate analysis and inference.
 3. `presentation/` provides shared widgets, and `apps/` presents those

@@ -944,7 +944,6 @@ dependencies = [
  "num-complex",
  "pyo3",
  "radio-detection",
- "radio-preprocessing",
  "radio-signal",
  "radio-storage",
  "radio-transport",
@@ -961,7 +960,7 @@ dependencies = [
  "ndarray",
  "ndarray-npy",
  "ort",
- "radio-preprocessing",
+ "radio-signal",
  "radio-transport",
  "serde",
  "serde_json",
@@ -969,16 +968,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "radio-preprocessing"
-version = "0.1.0"
-dependencies = [
- "pyo3",
- "rayon",
-]
-
-[[package]]
 name = "radio-signal"
 version = "0.1.0"
+dependencies = [
+ "rayon",
+]
 
 [[package]]
 name = "radio-storage"

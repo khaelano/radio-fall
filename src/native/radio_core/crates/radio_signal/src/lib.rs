@@ -1,4 +1,8 @@
-//! Exact signed-I/Q reductions, runtime AVX2 dispatch and phase detrending.
+//! Exact signed-I/Q reductions, runtime AVX2 dispatch, phase detrending, and
+//! offline HE20 amplitude and Hampel kernels.
+pub mod amplitude;
+pub mod hampel;
+
 use std::f64::consts::{PI, TAU};
 
 pub fn kernel() -> &'static str {

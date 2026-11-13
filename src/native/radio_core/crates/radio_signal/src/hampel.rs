@@ -1,5 +1,4 @@
 //! Offline centered Hampel filtering with column-local storage and scratch space.
-use pyo3::{exceptions::PyValueError, prelude::*, types::PyBytes};
 use rayon::prelude::*;
 
 fn median(values: &mut [f64]) -> f64 {
@@ -45,12 +44,6 @@ unsafe fn deviations_avx2(values: &mut [f64], center: f64) {
     for value in &mut values[count..] {
         *value = (*value - center).abs();
     }
-}
-
-fn doubles(data: &[u8]) -> Vec<f64> {
-    data.chunks_exact(8)
-        .map(|chunk| f64::from_ne_bytes(chunk.try_into().unwrap()))
-        .collect()
 }
 
 /// Filter column-major float64 signals using the shared centered offline arithmetic.
@@ -134,70 +127,6 @@ pub fn filter_native(
         }
     }
     Ok((output, replaced))
-}
-
-/// Inputs and outputs are native-endian float64 matrices in column-major order.
-/// Immutable bytes own the input while the GIL is released (no NumPy alias race).
-#[pyfunction]
-#[pyo3(signature = (amplitude, times, columns, window_seconds=0.1, min_periods=5, threshold=5.0, parallel=true, simd=true))]
-#[allow(clippy::too_many_arguments)]
-pub fn hampel_filter<'py>(
-    py: Python<'py>,
-    amplitude: &[u8],
-    times: &[u8],
-    columns: usize,
-    window_seconds: f64,
-    min_periods: usize,
-    threshold: f64,
-    parallel: bool,
-    simd: bool,
-) -> PyResult<(Bound<'py, PyBytes>, Bound<'py, PyBytes>)> {
-    let rows = times.len() / 8;
-    if times.len() % 8 != 0
-        || rows.checked_mul(columns).and_then(|n| n.checked_mul(8)) != Some(amplitude.len())
-        || !window_seconds.is_finite()
-        || window_seconds <= 0.0
-        || min_periods == 0
-        || !threshold.is_finite()
-        || threshold < 0.0
-    {
-        return Err(PyValueError::new_err("Invalid Hampel shape or parameters"));
-    }
-    let times = doubles(times);
-    if times.iter().any(|v| !v.is_finite()) || times.windows(2).any(|v| v[1] < v[0]) {
-        return Err(PyValueError::new_err(
-            "Capture times must be finite and sorted",
-        ));
-    }
-    let input = doubles(amplitude);
-    if input.iter().any(|v| v.is_infinite()) {
-        return Err(PyValueError::new_err(
-            "Amplitude must contain finite values or NaN",
-        ));
-    }
-    let (output, replaced) = py
-        .detach(|| {
-            filter_native(
-                &input,
-                &times,
-                columns,
-                window_seconds,
-                min_periods,
-                threshold,
-                parallel,
-                simd,
-            )
-        })
-        .map_err(PyValueError::new_err)?;
-    // SAFETY: initialized f64 values have no padding; the read-only byte view
-    // cannot outlive output and PyBytes::new copies it before returning.
-    let bytes = unsafe {
-        std::slice::from_raw_parts(
-            output.as_ptr().cast(),
-            std::mem::size_of_val(output.as_slice()),
-        )
-    };
-    Ok((PyBytes::new(py, bytes), PyBytes::new(py, &replaced)))
 }
 
 #[cfg(test)]

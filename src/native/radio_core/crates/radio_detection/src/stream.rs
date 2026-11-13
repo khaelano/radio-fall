@@ -81,7 +81,7 @@ impl Snapshot {
                 columns[col * rows + row] = self.magnitude[row * 980 + col];
             }
         }
-        let (filtered, replaced) = radio_preprocessing::hampel::filter_native(
+        let (filtered, replaced) = radio_signal::hampel::filter_native(
             &columns,
             times_seconds,
             980,

@@ -5,13 +5,13 @@ mod bindings;
 mod detection_bindings;
 #[path = "low_level/framing.rs"]
 mod framing;
+mod preprocessing_bindings;
 #[path = "low_level/recording.rs"]
 mod recording;
 mod storage_bindings;
 #[path = "low_level/wire.rs"]
 mod wire;
 use pyo3::prelude::*;
-use radio_preprocessing::{amplitude, hampel};
 
 #[pymodule]
 fn _radio_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -33,8 +33,14 @@ fn _radio_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bindings::ltf_layouts, m)?)?;
     m.add_function(wrap_pyfunction!(bindings::phase_block, m)?)?;
     storage_bindings::register(m)?;
-    m.add_function(wrap_pyfunction!(hampel::hampel_filter, m)?)?;
-    m.add_function(wrap_pyfunction!(amplitude::prepare_amplitude, m)?)?;
-    m.add_function(wrap_pyfunction!(amplitude::prepare_magnitude, m)?)?;
+    m.add_function(wrap_pyfunction!(preprocessing_bindings::hampel_filter, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        preprocessing_bindings::prepare_amplitude,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        preprocessing_bindings::prepare_magnitude,
+        m
+    )?)?;
     Ok(())
 }

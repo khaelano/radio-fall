@@ -74,9 +74,11 @@ recreates the execution order without reading the external manifests. Use
 `protocol.trials` for execution order; block order alone does not describe the
 equipment-grouped queue.
 
-[`fall_v1.json`](fall_v1.json) retains the earlier eight-direction protocol:
-288 conditions and 576 trials across six families. It remains selectable with
-`--protocol configs/collection/fall_v1.json`. The old four-direction protocol
-had 80 conditions and 160 trials; its recordings keep their pinned snapshots.
+The earlier eight-direction protocol (`fall-collection-v1`: 288 conditions and
+576 trials across six families) and its manifests have been removed from the
+repository. Recordings made with it keep their pinned `protocol.json` snapshot,
+which recreates the execution order without the external manifests. The old
+four-direction protocol had 80 conditions and 160 trials; its recordings keep
+their pinned snapshots.
 The revised four-direction protocol has a new protocol id. Existing condition
 ids are reused where the activity and direction pair are unchanged.

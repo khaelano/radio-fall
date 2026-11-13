@@ -78,7 +78,7 @@ the current exports in `artifacts/model/` and native ONNX Runtime libraries
 installed, launch its GUI with:
 
 ```sh
-uv sync --extra radio --extra native-detection
+uv sync --extra radio --extra detect
 uv run fall-detect
 ```
 
@@ -88,7 +88,7 @@ covers model selection, replay, timing and quality gating. Live accuracy remains
 unqualified; see the [historical model pilot summary](docs/reports/fall-model-pilots.md).
 
 Optional synchronized phone video is available through a DroidCam USB virtual
-webcam. Install with `uv sync --extra radio --extra video` and add
+webcam. Install with `uv sync --extra radio` and add
 `--video-device /dev/video2` using the actual DroidCam device. Each attempt saves
 an MP4 and frame timing sidecars, with no inference model. See
 [video recording](docs/video-recording.md) for setup and synchronization limits.
@@ -122,16 +122,15 @@ labels, inclusion, quality, and notes. Review edits are saved to
 acquisition manifests and raw CSV files remain unchanged. The inspector can also create a portable curated copy that retains
 and flags excluded attempts.
 On the **Signals** tab, recorded video plays beside the plots with a shared
-attempt-time cursor, scrubbing and frame stepping. Install the `video` extra for
-playback. Alignment uses saved host-clock timing; see
+attempt-time cursor, scrubbing and frame stepping. Playback is part of the `radio`
+extra. Alignment uses saved host-clock timing; see
 [recorded video playback](docs/video-recording.md#recorded-session-playback).
 
 The default `fall_simple.json` uses front, right, back, and left, excluding
 backward seated falls. Trials run with a clear floor, chair only, chair and
 mattress, then mattress only; chair orientations are grouped across activities.
-The earlier eight-direction `fall_v1.json` remains available with 576 trials.
-Pass either one with
-`--protocol`; see [`configs/collection/README.md`](configs/collection/README.md).
+Pass another protocol file with `--protocol`; see
+[`configs/collection/README.md`](configs/collection/README.md).
 
 ## Band and channel
 

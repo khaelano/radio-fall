@@ -7,7 +7,7 @@ a fall detector. The user's priority is live detection, with delayed processing
 acceptable if necessary. Consequently, the report includes total delivery and
 alternative bounded-lag inputs, not only the original 100 ms grace metric.
 
-The implementation contract is [BLE delivery policy](../ble-delivery-policy.md).
+The implementation contract is [BLE delivery policy](../archive/ble-delivery-policy.md).
 Normal collection settings remain unchanged. The 100 ms grace is an experimental
 input-finalization setting, not a proven detector requirement; neither 50 delivered
 records/s nor 50 available bins/s is an established detector acceptance threshold.

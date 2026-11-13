@@ -147,11 +147,22 @@ def test_protocol_loads_direction_manifest_and_expands_cartesian_product(tmp_pat
 
 
 def test_directional_protocol_has_expected_matrix_size():
-    parsed = load_protocol(Path("configs/collection/fall_v1.json"))
+    parsed = load_protocol(Path("configs/collection/fall_simple.json"))
 
-    assert [len(block[2]) for block in parsed.blocks] == [64, 24, 64, 64, 64, 8]
-    assert len(parsed.trials) == 576
-    assert parsed.blocks[-1][2][0].attributes["end_direction"] is None
+    assert [len(block[2]) for block in parsed.blocks] == [
+        4,
+        4,
+        16,
+        16,
+        16,
+        16,
+        12,
+        16,
+        16,
+    ]
+    assert len(parsed.trials) == 232
+    assert parsed.blocks[0][0] == "walk-to-stand"
+    assert parsed.blocks[0][2][0].attributes["end_direction"] is None
 
 
 def test_simplified_protocol_has_requested_transition_matrix():
@@ -258,10 +269,8 @@ def test_protocol_rejects_unknown_trial_order():
         protocol_from_mapping(protocol(trial_order="random"))
 
 
-def test_simplified_protocol_preserves_ids_for_unchanged_conditions():
-    full = load_protocol(Path("configs/collection/fall_v1.json"))
+def test_simplified_protocol_uses_stable_condition_ids():
     simple = load_protocol(Path("configs/collection/fall_simple.json"))
-    full_ids = {s.id for _, _, scenarios in full.blocks for s in scenarios}
     shared_families = {
         "walk-to-fall",
         "sit-to-fall",
@@ -270,8 +279,13 @@ def test_simplified_protocol_preserves_ids_for_unchanged_conditions():
         "sit-to-walk",
     }
 
+    checked = 0
     for block_id, _title, scenarios in simple.blocks:
         if block_id in shared_families:
-            assert {s.id for s in scenarios} <= full_ids
-    assert simple.protocol_id != full.protocol_id
-    assert simple.source_hash != full.source_hash
+            for scenario in scenarios:
+                start = scenario.attributes["start_direction"]
+                end = scenario.attributes["end_direction"]
+                assert scenario.id == f"{block_id}__start_{start}__end_{end}"
+                checked += 1
+    assert checked == 76
+    assert simple.protocol_id != "fall-collection-v1"

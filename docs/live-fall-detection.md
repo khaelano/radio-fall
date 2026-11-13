@@ -6,7 +6,7 @@ acquisition, preprocessing, resident ONNX sessions, inference scheduling and
 logs; Python supplies controls and displays results.
 
 ```sh
-uv sync --extra radio --extra native-detection
+uv sync --extra radio --extra detect
 uv run fall-detect
 ```
 
@@ -95,9 +95,8 @@ detection usefulness still require validation.
 
 The earlier Python detector (`--mode legacy`, the CPU PyTorch fall scorer,
 notebook-trained phase models, `--export-model` and `--replay-session`) was
-removed on 12 November 2026 together with its native `CnnPreprocessor` and the
-`check_live_detector_runtime.py`, `check_multi_phase_runtime.py` and
-`benchmark_live_detector.py` tools. Its historical measurements and artifacts
+removed on 12 November 2026 together with its native `CnnPreprocessor` and its
+runtime check and benchmark scripts. Its historical measurements and artifacts
 remain under `data/experiments/detector/` and in the
 [model pilot summary](reports/fall-model-pilots.md); retrieve the code from Git
 history to reproduce them.

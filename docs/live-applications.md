@@ -111,18 +111,10 @@ warming the data. Median refresh work decreased from 20.50 ms to 5.59 ms; p95
 was 21.15 ms before and 7.45 ms after. This excludes painting, radio acquisition
 and recording, and does not establish higher live throughput or frame rates.
 The cache avoids repeated snapshot construction in this specific workload.
-Reproduce the current implementation's check with:
+The benchmark script that produced these numbers has been removed, so the figures
+are historical and cannot be reproduced from the current tree. Run the test suite
+with `uv run pytest -q`.
 
-```sh
-QT_QPA_PLATFORM=offscreen uv run python \
-  -m fall_detection.presentation.radio.benchmark \
-  --view controls --frames 80 --points 1200
-
-uv run pytest -q
-```
-
-The benchmark emits median/p95 refresh time and snapshot calls, including warmup.
-It uses synthetic data without opening hardware or writing recordings. Fresh-data
-and receiver-switching tests are separate from this warmed-cache benchmark; their
-hardware evidence is in the backlog investigation. Camera load and longer hardware
-soaks remain separate qualification tasks.
+Fresh-data and receiver-switching tests are separate from this warmed-cache
+comparison; their hardware evidence is in the backlog investigation. Camera load
+and longer hardware soaks remain separate qualification tasks.

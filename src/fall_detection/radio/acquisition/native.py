@@ -16,9 +16,7 @@ except ImportError:
 def require_native() -> Any:
     """Require the compiled backend before accessing live hardware."""
     if core is None:
-        raise RuntimeError(
-            "Rust radio backend is not built; run uv sync --extra radio --extra video"
-        )
+        raise RuntimeError("Rust radio backend is not built; run uv sync --extra radio")
     return core
 
 

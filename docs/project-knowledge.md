@@ -189,7 +189,7 @@ collector share the dashboard in `presentation/radio/`.
 | Repository and notebook layout | [`notebooks/README.md`](../notebooks/README.md) |
 | Collection protocols | [`configs/collection/`](../configs/collection/README.md) |
 | Operational radio settings | [`configs/radio.json`](../configs/radio.json), `src/fall_detection/radio/settings.py` |
-| Session/archive format | [`dataset-format.md`](dataset-format.md), [`session-archive-pilot.md`](session-archive-pilot.md) |
+| Session/archive format | [`dataset-format.md`](dataset-format.md), [`session-archive-pilot.md`](archive/session-archive-pilot.md) |
 | Acquisition and radio processing | `src/fall_detection/radio/` and `src/native/radio_core/` |
 | Experiment procedures | `notebooks/latest/` |
 | Shared analysis and data primitives | `src/fall_detection/analysis/` |

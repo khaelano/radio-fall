@@ -33,7 +33,7 @@ from fall_detection.presentation.radio.dashboard import CsiDashboardPanel
 from fall_detection.radio.state import LiveState
 
 PROTOCOL_PATH = (
-    Path(__file__).resolve().parents[2] / "configs" / "collection" / "fall_v1.json"
+    Path(__file__).resolve().parents[2] / "configs" / "collection" / "fall_simple.json"
 )
 RECEIVER_ENV = {"receiver_ids": {"00:11:22:33:44:55": "rx-1"}}
 
@@ -125,10 +125,10 @@ def test_operator_window_shows_state_scenario_and_queue(qt_app, tmp_path):
     _apply(window, snapshot)
 
     assert window.state_label.text() == "READY"
-    assert window.progress_label.text() == "1/128"
-    assert window.scenario_title.text() == "Walk to fall (front → front)"
+    assert window.progress_label.text() == "1/32"
+    assert window.scenario_title.text() == "wf · Walk to fall (front → front)"
     assert "walk_to_fall" in window.scenario_meta.text()
-    assert window.trial_list.count() == 128
+    assert window.trial_list.count() == 32
     assert window.trial_list.item(0).text().startswith("▶")
     assert window.buttons[OperatorCommand.START_TRIAL].isEnabled()
     assert not window.buttons[OperatorCommand.ACCEPT].isEnabled()
@@ -163,12 +163,12 @@ def test_operator_window_queue_filter_narrows_to_one_block(qt_app, tmp_path):
     )
     window = _window(qt_app, protocol)
     _apply(window, snapshot)
-    assert window.trial_list.count() == 144
+    assert window.trial_list.count() == 64
 
     window.queue_filter.setCurrentIndex(2)
     _apply(window, snapshot)
 
-    assert window.trial_list.count() == 16
+    assert window.trial_list.count() == 32
 
 
 def test_operator_window_marks_resolved_and_current_trials(qt_app, tmp_path):
@@ -243,7 +243,7 @@ def test_metadata_dialog_defaults_to_every_block(qt_app):
     dialog = MetadataDialog(QtWidgets, protocol)
 
     assert dialog.block_ids() == tuple(block[0] for block in protocol.blocks)
-    assert "576 trials" in dialog.total_label.text()
+    assert "232 trials" in dialog.total_label.text()
 
     for _block_id, checkbox, _trials in dialog._blocks:
         checkbox.setChecked(False)
@@ -280,9 +280,11 @@ def test_scenario_detail_card_shows_every_field(qt_app, tmp_path):
     assert len(window._detail_windows) == 1
     detail = window._detail_windows[0]
     assert "current trial" in detail.status_label.text()
-    assert detail.title_label.text() == "Walk to fall (front → front)"
+    assert detail.title_label.text() == "wf · Walk to fall (front → front)"
     assert "walk_to_fall" in detail.meta_label.text()
-    assert detail.instruction_label.text().startswith("Walk toward front")
+    assert detail.instruction_label.text().startswith(
+        "Mattress only. Walk toward front"
+    )
     assert "countdown 5 s" in detail.timing_label.text()
     assert "action 8 s" in detail.timing_label.text()
     assert "recovery 5 s" in detail.timing_label.text()

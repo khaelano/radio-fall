@@ -18,7 +18,7 @@ slot ownership, and return confirmation are unchanged.
 
 The current setup selects this reference in `configs/radio.json`; it is the
 only reference link the native acquisition supports. The older direct-C5 BLE
-experiment remains deferred; see [the BLE reference notes](wireless-transmitter.md).
+experiment remains deferred; see [the BLE reference notes](archive/wireless-transmitter.md).
 
 ## Wiring and firmware
 

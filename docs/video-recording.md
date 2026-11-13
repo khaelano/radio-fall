@@ -23,16 +23,16 @@ A V4L2 device alone does not prove whether the upstream client uses USB or Wi-Fi
 Install the optional recording dependency:
 
 ```sh
-uv sync --extra radio --extra video
+uv sync --extra radio
 ```
 
 Add video options to the existing collection command. For the currently
 provisioned four-C5 120 Hz setup:
 
 ```sh
-uv run --extra radio --extra video fall-collection \
+uv run --extra radio fall-collection \
   --config configs/radio.json \
-  --protocol configs/collection/fall_v1.json \
+  --protocol configs/collection/fall_simple.json \
   --video-device /dev/video2 \
   --video-width 1280 --video-height 720 --video-fps 30
 ```
@@ -127,8 +127,8 @@ the video. Changing receivers retains the video position. Changing attempts
 stops playback and clears the previous clip.
 
 ```sh
-uv sync --extra radio --extra video
-uv run --extra radio --extra video fall-session-inspector --sessions-dir data/raw/sessions
+uv sync --extra radio
+uv run --extra radio fall-session-inspector --sessions-dir data/raw/sessions
 ```
 
 Playback reads `video.json`, `camera_frames.csv` and `camera.mp4` without editing

@@ -122,7 +122,7 @@ class VideoReader:
             import av
         except ImportError as exc:
             raise ValueError(
-                "Install video playback support: uv sync --extra radio --extra video"
+                "Install video playback support: uv sync --extra radio"
             ) from exc
         self.timeline = timeline
         self.container = av.open(str(timeline.path))

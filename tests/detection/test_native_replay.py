@@ -85,7 +85,7 @@ def _offline_inputs(capture: Path) -> tuple[int, int, np.ndarray, np.ndarray]:
 
 @pytest.mark.skipif(
     not CAPTURE.is_dir() or native_app.runtime_library() is None,
-    reason="needs the DVC capture and the native-detection extra",
+    reason="needs the DVC capture and the detect extra",
 )
 def test_native_replay_matches_offline_preprocessing(tmp_path):
     from fall_detection._radio_native import NativeDetector

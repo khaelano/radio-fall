@@ -20,31 +20,28 @@ analysis = [
     "matplotlib>=3.8",
     "pyarrow>=18",
     "scikit-learn>=1.5",
+    "ipykernel>=6,<8",
+    "nbconvert>=7,<8",
 ]
 radio = [
     "pyarrow>=18",
     "pyserial>=3.5",
     "PySide6>=6.6",
     "pyqtgraph>=0.13",
-]
-video = [
     "av>=14",
 ]
-detection = [
+train = [
     "torch==2.14.1",
+    "onnx>=1.17",
+    "onnxruntime>=1.20",
+    "onnxscript>=0.5",
 ]
-native-detection = [
+detect = [
     "onnxruntime==1.31.1",
     "onnxruntime-ep-webgpu==0.5.0; sys_platform == 'linux'",
 ]
 cuda = [
     "torch==2.14.1; sys_platform == 'linux' or sys_platform == 'win32'",
-]
-notebook = [
-    "ipykernel>=6,<8",
-    "nbconvert>=7,<8",
-]
-onnx = [
     "onnx>=1.17",
     "onnxruntime>=1.20",
     "onnxscript>=0.5",
@@ -69,7 +66,7 @@ dev = [
 testpaths = ["tests"]
 
 [tool.uv]
-conflicts = [[{ extra = "detection" }, { extra = "cuda" }]]
+conflicts = [[{ extra = "train" }, { extra = "cuda" }]]
 cache-keys = [
     { file = "pyproject.toml" },
     { file = "setup.py" },
@@ -97,7 +94,7 @@ explicit = true
 [tool.uv.sources]
 torch = [
     { index = "pytorch-cu130", extra = "cuda" },
-    { index = "pytorch-cpu", extra = "detection" },
+    { index = "pytorch-cpu", extra = "train" },
 ]
 
 [tool.setuptools.packages.find]

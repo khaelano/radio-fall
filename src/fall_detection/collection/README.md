@@ -21,7 +21,7 @@ the four-direction, nine-transition protocol with 116 conditions and 232 trials.
 Its queue groups clear-floor, chair, chair-and-mattress, and mattress setups,
 with chair orientations grouped across activities. See the
 [collection configuration](../../../configs/collection/README.md) for the matrix
-and setup order. The earlier eight-direction `fall_v1.json` remains selectable. Canceling the picker
+and setup order. Canceling the picker
 exits before radio or camera initialization. Use `--protocol <file>` to select
 a protocol directly and skip the picker.
 
@@ -44,7 +44,7 @@ file names through the shared reader. The archive includes every original file a
 receiver tables. Finalization may take several minutes for large sessions;
 wait for `Saved raw recording` before treating it as complete. The working
 directory is retained for recovery and resume. A resumed session saves a new
-numbered archive revision. See the [raw archive contract](../../../docs/session-archive-pilot.md)
+numbered archive revision. See the [raw archive contract](../../../docs/archive/session-archive-pilot.md)
 and `fall_detection._radio_native.storage_extract_archive` for verified extraction.
 
 An interrupted radio link reconnects automatically while the collector remains
@@ -77,8 +77,8 @@ drains pending data. A crash can lose unflushed data. See the
 [recovery guide](../../../docs/automatic-radio-recovery.md) for precise acceptance
 and resume behavior.
 
-To record a phone camera through DroidCam USB, install the `video` extra and
-append `--video-device /dev/video2` (using the actual DroidCam V4L2 device).
+To record a phone camera through DroidCam USB, append
+`--video-device /dev/video2` (using the actual DroidCam V4L2 device).
 Optional `--video-width`, `--video-height` and `--video-fps` default to
 1280×720 at 30 requested fps. A live camera viewfinder appears below the CSI
 plots during warm-up, recording and between attempts; drag its divider to resize

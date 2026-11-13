@@ -66,7 +66,7 @@ the training loop; the separate standalone trainer has been removed.
 Reproduce with:
 
 ```bash
-uv sync --inexact --extra analysis --extra notebook --reinstall-package radio-fall-detection
+uv sync --inexact --extra analysis --reinstall-package radio-fall-detection
 uv run --no-sync jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=1800 notebooks/latest/02_preprocess.ipynb
 ```
 
@@ -76,7 +76,8 @@ performance measurements of the notebook refactor.
 
 ## Earlier per-recording workflow
 
-The earlier notebook, now `notebooks/latest/02_preprocess_old.ipynb`, used
+The earlier notebook, `02_preprocess_old.ipynb` (removed on 13 November 2026;
+recoverable from Git history), used
 `analysis/amplitude_pipeline.py`. Polars selects accepted recordings and handles
 packet metadata. PyArrow's native Parquet reader reuses file metadata, projects
 17 required columns, and reads only candidate row groups. Rust decodes the

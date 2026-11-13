@@ -9,7 +9,7 @@ It is the reference for anyone building datasets, annotations, or models from
 [Version-3 session archives](#version-3-session-archives)). The sections below
 describe the schema-2 per-attempt CSV layout, which older archives and working
 directories still use. The reader also accepts version-2 ZIP64
-[session archives](session-archive-pilot.md). New collector streams use
+[session archives](archive/session-archive-pilot.md). New collector streams use
 independent Zstandard frames; archives made from plain session directories also
 use version 2. The original version-1/2 archives remain immutable under
 `data/old_raw/sessions/`. Their verified version-2 copies are stored under
@@ -718,8 +718,9 @@ review fields, and the curated-export action. It requires the `radio` extra
 uv sync --extra radio
 ```
 
-For attempts with recorded camera artifacts, add the `video` extra and use the
-**Signals** tab to play video alongside CSI. Playback, scrubbing, frame stepping
+For attempts with recorded camera artifacts, use the
+**Signals** tab to play video alongside CSI. Video playback is part of the `radio`
+extra. Playback, scrubbing, frame stepping
 and plot cursors share seconds from attempt start, using saved host-clock frame
 observations and capture timing. Missing or invalid video timing is shown
 explicitly; raw files remain unchanged. See
@@ -1071,7 +1072,7 @@ BLE sessions retain schema-2 attempt CSVs and add independently versioned
 `transport/ble/<run-id>/` journals plus per-receiver `ble_timing.jsonl`.
 Capture, notification arrival, and processing availability are separate times.
 Packets are assigned to attempts by capture time; late delivery cannot backfill
-finalized availability bins. See [BLE transport files and wire contract](ble-transport.md).
+finalized availability bins. See [BLE transport files and wire contract](archive/ble-transport.md).
 USB-only sessions do not require these sidecars.
 
 ## Scheduled ESP-NOW gateway sidecars

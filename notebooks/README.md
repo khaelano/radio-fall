@@ -16,24 +16,22 @@ excluded from Git. Recordings and reusable derived datasets remain in `data/`.
   and phase inputs.
 - `02_preprocess.ipynb` directly defines dataset selection, filtering, squared
   differences, cue labels, windows, exports, and stage figures.
-- `02_preprocess_old.ipynb` preserves the earlier workflow as a historical
-  reference; it is not maintained against the current archive format.
 - `03_training.ipynb` runs PyTorch sequence models on CPU or NVIDIA
   CUDA, with independent pilot and full-data training sections. Its final cell
   exports available checkpoints to ONNX and verifies logits with ONNX Runtime.
 
-For CPU PyTorch, run `uv sync --inexact --extra analysis --extra detection
---extra notebook`. For the CUDA 13.0 wheel on Linux or Windows, use
-`uv sync --inexact --extra analysis --extra cuda --extra notebook` instead.
-The `detection` and `cuda` extras select different PyTorch wheels and cannot be
-enabled together. Restart the project notebook kernel after switching wheels.
+For CPU PyTorch, run `uv sync --inexact --extra analysis --extra train`. For the
+CUDA 13.0 wheel on Linux or Windows, use
+`uv sync --inexact --extra analysis --extra cuda` instead. The `train` and `cuda`
+extras select different PyTorch wheels and cannot be enabled together. Restart the project notebook kernel after switching wheels.
 Set `DEVICE = "cuda"` to require an available NVIDIA GPU, or use `"auto"` to
 select CUDA when available and CPU otherwise. A compatible NVIDIA GPU and driver
 are required for CUDA. The notebook prints and records the device actually used.
 Reduce `BATCH_SIZE` for the pilot or the `batch_size` in each model's settings
 for a full run if GPU memory is insufficient.
 
-Add `--extra onnx` to the environment command for ONNX export. The final notebook
+Both the `train` and `cuda` extras include the ONNX export packages (`onnx`,
+`onnxruntime`, `onnxscript`). The final notebook
 cell writes models, matching training normalizers, and an input/output manifest
 under the run’s `onnx/<mode>/<model-name>/` directory and copies the latest
 verified bundle to `artifacts/model/<model-name>/`. Inputs are prepared
@@ -44,7 +42,7 @@ each model. Set `ONNX_RUN` to an earlier `artifacts/notebooks/03_training/<run-i
 to export its matching model bundle. Refresh model versions with
 `uv run dvc add artifacts/notebooks artifacts/model` after training/exporting.
 Export uses `dynamo=True` (the `torch.export`-based exporter), opset 18, and
-embedded weights. The `onnx` extra includes ONNX Script for this exporter.
+embedded weights. The `train` extra includes ONNX Script for this exporter.
 
 Experiment procedures and scientific settings live in the notebooks. Shared
 readers, native signal operations, alignment primitives, storage, and training

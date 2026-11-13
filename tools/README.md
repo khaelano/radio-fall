@@ -7,7 +7,7 @@ experiment outputs belong in ignored local data directories.
 tools/
 ├── papers/       literature conversion, catalog, and retrieval
 ├── processing/  dataset processing, migration, benchmarks, and inspection
-├── thesis/       local DOCX and ODT draft exporters
+├── thesis/       local ODT draft exporter
 └── radio/        host access point setup and diagnostics
 ```
 
@@ -34,8 +34,8 @@ tools/
 
 ## Other utilities
 
-- `tools/thesis/build_draft_docx.py` and `build_draft_odt.py` create local
-  exports from the ignored `draft/` directory.
+- `tools/thesis/build_draft_odt.py` creates a local ODT export from Pandoc
+  Markdown in the ignored `draft/` directory.
 - `tools/radio/csi_ap.sh` and `test-hostapd-coexist.conf` support local radio
   diagnostics.
 

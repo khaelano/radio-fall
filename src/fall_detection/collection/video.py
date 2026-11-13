@@ -356,9 +356,7 @@ class VideoRecorder:
 
     def __init__(self, config: VideoConfig) -> None:
         if importlib.util.find_spec("av") is None:
-            raise RuntimeError(
-                "Install video support with: uv sync --extra radio --extra video"
-            )
+            raise RuntimeError("Install video support with: uv sync --extra radio")
         self.config = config
         context = multiprocessing.get_context("spawn")
         self._commands = context.Queue(maxsize=8)

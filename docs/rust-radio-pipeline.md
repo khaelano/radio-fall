@@ -22,7 +22,7 @@ Install a stable Rust toolchain (Rust 1.85 or newer; 1.92 for `radio_detection`)
 and run:
 
 ```bash
-uv sync --extra radio --extra video
+uv sync --extra radio
 uv run csi-viewer
 # Or resume an existing collection with its saved protocol:
 uv run fall-collection --resume-session data/raw/sessions/<session>
@@ -36,7 +36,7 @@ missing; it has no Python fallback. The serial transport targets Linux. The
 configured [uv build cache keys](https://docs.astral.sh/uv/concepts/cache/)
 include Rust sources, manifests and lockfile, so later native edits trigger a
 rebuild. For an explicit rebuild, use
-`uv sync --extra radio --extra video --reinstall-package radio-fall-detection`.
+`uv sync --extra radio --reinstall-package radio-fall-detection`.
 
 ## Live session, threads and bounds
 
@@ -115,8 +115,8 @@ exercises radio timing, USB hardware or firmware.
 
 These measurements describe the superseded design, in which Python owned
 session acceptance and Rust prepared frames for a Python handoff. They have not
-been repeated for the native session. The `benchmark_radio_pipeline.py` tool
-used below was removed with the Python decoder.
+been repeated for the native session. The Python preparation benchmark used
+below was removed with the Python decoder.
 
 On this laptop (AMD Ryzen 7 PRO 4750U, Linux x86-64, Rust 1.97.1), the warmed,
 alternating Python/Rust preparation benchmark used 256 preserved envelopes from

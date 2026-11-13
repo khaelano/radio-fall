@@ -674,9 +674,15 @@ def _compare(values: pd.Series, operator: str, target: Any) -> pd.Series:
 
 
 def _constant(value: Any, count: int, name: str) -> pa.Array:
+    # pandas string columns mark a missing value as NaN (or pd.NA), not None.
+    missing = (
+        value is None
+        or value is pd.NA
+        or (isinstance(value, float) and np.isnan(value))
+    )
     if name in _STRING_ATTEMPT_COLUMNS:
-        return pa.array([value] * count, type=pa.string())
-    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return pa.array([None if missing else value] * count, type=pa.string())
+    if missing:
         return pa.array([None] * count, type=pa.int64())
     return pa.array([value] * count)
 

@@ -6,6 +6,7 @@ import struct
 import zipfile
 
 import numpy as np
+import pandas as pd
 import pytest
 
 pytest.importorskip("pyarrow")
@@ -198,6 +199,24 @@ def test_packets_keep_capture_phase_boundaries_and_do_not_touch_raw_data(capture
         hashlib.sha256(p.read_bytes()).digest() == digest
         for p, digest in before.items()
     )
+
+
+def test_missing_string_attempt_value_reads_as_null(capture):
+    root, destination = capture
+    session = load_analysis_session(root, destination)
+    # Sessions that mix present and missing directions (for example a walk-to-
+    # stand scenario without an end direction) give a pandas string column whose
+    # missing value is NaN rather than None.
+    session.attempts["end_direction"] = pd.Series(
+        ["front", None], index=session.attempts.index, dtype="str"
+    )
+    assert isinstance(session.attempts["end_direction"].iloc[1], float)
+
+    packets = session.read_packets(attempt_key=session.attempts.iloc[1].attempt_key)
+
+    assert len(packets) > 0
+    assert packets["end_direction"].isna().all()
+    assert packets["start_direction"].eq("front").all()
 
 
 def test_packets_are_sorted_by_capture_time_and_decode_as_phase_signals(capture):

@@ -85,7 +85,12 @@ def publish_export(
                 "method": "direct-preprocessing",
                 "export_code_sha256": {
                     name: file_hash(Path(__file__).with_name(name))
-                    for name in ("sequence_segments.py", "sequence_preprocessing.py")
+                    for name in (
+                        "sequence_segments.py",
+                        "sequence_preprocessing.py",
+                        "_io.py",
+                        "_cache_keys.py",
+                    )
                 },
             },
             "coordinates": {

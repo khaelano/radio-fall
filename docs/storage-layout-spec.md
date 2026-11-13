@@ -649,7 +649,7 @@ There is no Python storage package: Python calls the crate through
 | --- | --- |
 | `analysis/session_parquet.py` | removed; replaced by `session_frames.py` |
 | `amplitude_pipeline`, `sequence_preprocessing`, benchmark tools | migrated and tested |
-| Notebooks `01_exploration`, `01_01`, `01_02`, `02_preprocess`, `02_preprocess_old` | edited in the editor buffers through the notebook bridge; they must be saved |
+| Notebooks `01_exploration`, `01_01`, `01_02`, `02_preprocess` (`02_preprocess_old` later removed) | edited in the editor buffers through the notebook bridge; they must be saved |
 | `phase_signals`, `phase_motion`, `integrity` | see the change log for the current state |
 | `session_inspector` | see the change log for the current state |
 | Collector (`collection/capture.py`) | still writes the CSV sidecars next to the journal |

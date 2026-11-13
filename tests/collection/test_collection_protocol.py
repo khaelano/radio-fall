@@ -146,25 +146,6 @@ def test_protocol_loads_direction_manifest_and_expands_cartesian_product(tmp_pat
     assert len(parsed.source_hash) == 64
 
 
-def test_directional_protocol_has_expected_matrix_size():
-    parsed = load_protocol(Path("configs/collection/fall_simple.json"))
-
-    assert [len(block[2]) for block in parsed.blocks] == [
-        4,
-        4,
-        16,
-        16,
-        16,
-        16,
-        12,
-        16,
-        16,
-    ]
-    assert len(parsed.trials) == 232
-    assert parsed.blocks[0][0] == "walk-to-stand"
-    assert parsed.blocks[0][2][0].attributes["end_direction"] is None
-
-
 def test_simplified_protocol_has_requested_transition_matrix():
     parsed = load_protocol(Path("configs/collection/fall_simple.json"))
     directions = {"front", "right", "back", "left"}

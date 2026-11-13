@@ -45,7 +45,7 @@ def save_segment(path: Path, arrays: dict) -> None:
         ):
             continue
         with (
-            temporary_sibling(target, ".npy") as temporary,
+            temporary_sibling(target, ".tmp") as temporary,
             temporary.open("wb") as stream,
         ):
             np.lib.format.write_array(stream, np.asarray(value), allow_pickle=False)

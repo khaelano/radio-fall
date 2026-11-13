@@ -1,21 +1,19 @@
 """Packet-level phase-motion measurements for within-session exploratory plots."""
 
-import hashlib
 import json
 import multiprocessing
-import os
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from zipfile import BadZipFile
 
 import numpy as np
 import pandas as pd
 
 from ..radio.preprocessing import phase as phase_module
-from . import _frame_cache, phase_signals, session_frames
+from . import _cache_keys, phase_signals, session_frames
+from ._io import atomic_write
 from .session_frames import AnalysisSession
 
 _PHASES = ("countdown", "action", "recovery")
@@ -171,12 +169,12 @@ def load_phase_motion_samples(
     if not np.isfinite(lag_seconds) or lag_seconds <= 0:
         raise ValueError("lag_seconds must be finite and positive")
     cache = Path(cache_dir).resolve() if cache_dir is not None else None
-    if cache is not None and cache.is_relative_to(_frame_cache.raw_root_of(session)):
+    if cache is not None and cache.is_relative_to(_cache_keys.raw_root_of(session)):
         raise ValueError("Place phase-motion caches outside raw session data")
-    code_hash = _frame_cache.code_hash(
+    code_hash = _cache_keys.code_hash(
         (phase_signals, phase_module, session_frames), __file__
     )
-    source = _frame_cache.frame_signature(session)
+    source = _cache_keys.frame_signature(session)
     jobs = []
     for attempt_id in dict.fromkeys(attempt_ids):
         rows = phase_intervals.loc[phase_intervals["attempt_id"].eq(attempt_id)]
@@ -199,7 +197,15 @@ def load_phase_motion_samples(
                     lag_seconds,
                 )
             )
-    entries = [_cache_entry(job, cache, code_hash, source) for job in jobs]
+    entries = [
+        _cache_keys.cache_entry(
+            [code_hash, source, intervals, baseline_seconds, lag_seconds],
+            f"{session.path}/{attempt_id}/{receiver_id}",
+            cache,
+            ".npz",
+        )
+        for session, attempt_id, receiver_id, intervals, baseline_seconds, lag_seconds in jobs
+    ]
     results = [
         _read_cache(path, fingerprint) if not refresh else None
         for fingerprint, path in entries
@@ -222,7 +228,7 @@ def load_phase_motion_samples(
         if (
             path is not None
             and not results[index]["read_error"]
-            and source == _frame_cache.frame_signature(session)
+            and source == _cache_keys.frame_signature(session)
         ):
             _write_cache(path, fingerprint, results[index])
     samples, diagnostics = [], []
@@ -322,20 +328,6 @@ def _score_recording(job):
         return {"read_error": str(exc)}
 
 
-def _cache_entry(job, cache, code_hash, source):
-    session, attempt_id, receiver_id, intervals, baseline_seconds, lag_seconds = job
-    fingerprint = hashlib.sha256(
-        json.dumps(
-            [code_hash, source, intervals, baseline_seconds, lag_seconds],
-            sort_keys=True,
-        ).encode()
-    ).hexdigest()
-    name = hashlib.sha256(
-        f"{session.path}/{attempt_id}/{receiver_id}".encode()
-    ).hexdigest()
-    return fingerprint, cache / f"{name}.npz" if cache is not None else None
-
-
 def _read_cache(path, fingerprint):
     if path is None or not path.is_file():
         return None
@@ -350,21 +342,14 @@ def _read_cache(path, fingerprint):
 
 
 def _write_cache(path, fingerprint, result):
-    path.parent.mkdir(parents=True, exist_ok=True)
     metadata = {key: value for key, value in result.items() if key not in _ARRAY_FIELDS}
-    temporary = None
-    try:
-        with NamedTemporaryFile(
-            "wb", dir=path.parent, suffix=".tmp", delete=False
-        ) as stream:
-            temporary = Path(stream.name)
-            np.savez_compressed(
-                stream,
-                fingerprint=fingerprint,
-                metadata=json.dumps(metadata),
-                **{key: result[key] for key in _ARRAY_FIELDS},
-            )
-        os.replace(temporary, path)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+
+    def write(stream) -> None:
+        np.savez_compressed(
+            stream,
+            fingerprint=fingerprint,
+            metadata=json.dumps(metadata),
+            **{key: result[key] for key in _ARRAY_FIELDS},
+        )
+
+    atomic_write(path, write)

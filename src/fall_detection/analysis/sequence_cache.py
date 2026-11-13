@@ -1,35 +1,23 @@
 """Cheap checkpoints and uncompressed, memory-mapped preprocessing storage."""
 
-import hashlib
 import json
-import os
 from contextlib import contextmanager
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 import numpy as np
 
+from ._cache_keys import file_hash, fingerprint, stamp
+from ._io import atomic_json, temporary_sibling
 
-def fingerprint(value: object) -> str:
-    """Hash small provenance metadata, never signal arrays."""
-    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
-
-
-def stamp(path: Path) -> dict:
-    """Identify an unchanged local file without reading its contents."""
-    stat = path.stat()
-    return {
-        "size": stat.st_size,
-        "mtime_ns": stat.st_mtime_ns,
-        "inode": stat.st_ino,
-        "device": stat.st_dev,
-    }
-
-
-def file_hash(path: Path) -> str:
-    """Stream an encoded-file checksum without decompressing it."""
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+__all__ = [
+    "checkpoint_stage",
+    "file_hash",
+    "fingerprint",
+    "read_segment",
+    "restore_stage",
+    "save_segment",
+    "stamp",
+]
 
 
 @contextmanager
@@ -56,14 +44,11 @@ def save_segment(path: Path, arrays: dict) -> None:
             and Path(value.filename).resolve() == target.resolve()
         ):
             continue
-        with NamedTemporaryFile(dir=directory, suffix=".npy", delete=False) as stream:
-            temporary = Path(stream.name)
-        try:
-            with temporary.open("wb") as stream:
-                np.lib.format.write_array(stream, np.asarray(value), allow_pickle=False)
-            os.replace(temporary, target)
-        finally:
-            temporary.unlink(missing_ok=True)
+        with (
+            temporary_sibling(target, ".npy") as temporary,
+            temporary.open("wb") as stream,
+        ):
+            np.lib.format.write_array(stream, np.asarray(value), allow_pickle=False)
 
 
 def restore_stage(output: Path, name: str, key: str) -> dict | None:
@@ -88,8 +73,6 @@ def checkpoint_stage(
     output: Path, name: str, key: str, tables: dict, files: list[Path]
 ) -> None:
     """Publish a receipt after all stage arrays and tables have been written."""
-    from .sequence_preprocessing import atomic_json
-
     atomic_json(
         {"key": key, "tables": tables, "files": {str(p): stamp(p) for p in files}},
         output / ".cache" / f"{name}.json",

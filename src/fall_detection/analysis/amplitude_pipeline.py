@@ -1,17 +1,16 @@
 """Bounded, columnar amplitude preprocessing from Parquet to atomic NPZ files."""
 
 import json
-import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from time import perf_counter
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import numpy as np
 import polars as pl
 
+from ._io import atomic_write
 from .amplitude import hampel_subcarriers
 from .session_frames import AnalysisSession, load_analysis_session
 
@@ -222,23 +221,18 @@ def prepare_recording(
 
 def save_recording(path: Path, arrays: dict, *, compression_level: int = 1) -> None:
     """Atomically save NumPy-compatible compressed arrays without pickled objects."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = None
-    try:
-        with NamedTemporaryFile(dir=path.parent, suffix=".npz", delete=False) as stream:
-            temporary = Path(stream.name)
-            with ZipFile(
-                stream, "w", compression=ZIP_DEFLATED, compresslevel=compression_level
-            ) as archive:
-                for name, array in arrays.items():
-                    with archive.open(name + ".npy", "w", force_zip64=True) as member:
-                        np.lib.format.write_array(
-                            member, np.asanyarray(array), allow_pickle=False
-                        )
-        os.replace(temporary, path)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+
+    def write(stream) -> None:
+        with ZipFile(
+            stream, "w", compression=ZIP_DEFLATED, compresslevel=compression_level
+        ) as archive:
+            for name, array in arrays.items():
+                with archive.open(name + ".npy", "w", force_zip64=True) as member:
+                    np.lib.format.write_array(
+                        member, np.asanyarray(array), allow_pickle=False
+                    )
+
+    atomic_write(path, write, suffix=".npz")
 
 
 def preprocess_dataset(

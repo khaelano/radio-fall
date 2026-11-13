@@ -3,12 +3,10 @@
 import hashlib
 import json
 import multiprocessing
-import os
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from time import perf_counter
 from typing import Any
 
@@ -18,7 +16,8 @@ import pandas as pd
 from .._radio_native import storage_read as read_session_file
 from ..collection.protocol import protocol_from_mapping
 from ..radio.preprocessing import phase as phase_module
-from . import _frame_cache, _receiver, _timeline, session_frames
+from . import _cache_keys, _receiver, _timeline, session_frames
+from ._io import atomic_bytes
 from .session_frames import AnalysisSession, load_analysis_session
 
 
@@ -213,7 +212,7 @@ def analyze_session(
     source = Path(str(session.manifest["source_directory"]))
     manifest = session.manifest["source_manifest"]
     cache = Path(cache_dir).resolve() if cache_dir is not None else None
-    if cache is not None and cache.is_relative_to(_frame_cache.raw_root_of(session)):
+    if cache is not None and cache.is_relative_to(_cache_keys.raw_root_of(session)):
         raise ValueError("Place integrity caches outside raw data")
     protocol = protocol_from_mapping(
         json.loads(read_session_file(source, "protocol.json"))
@@ -261,10 +260,10 @@ def analyze_session(
     phases, phase_attempts, intervals = _timeline.reconstruct_phases(
         records, events, trials
     )
-    code_hash = _frame_cache.code_hash(
+    code_hash = _cache_keys.code_hash(
         (phase_module, _receiver, _timeline, session_frames), __file__
     )
-    signature = _frame_cache.frame_signature(session)
+    signature = _cache_keys.frame_signature(session)
     jobs = [(record, receiver_id) for record in records for receiver_id in receiver_ids]
     requests = [
         (
@@ -277,8 +276,13 @@ def analyze_session(
         for record, receiver_id in jobs
     ]
     entries = [
-        _cache_entry(request, transmitter, cache, code_hash, signature)
-        for request in requests
+        _cache_keys.cache_entry(
+            [code_hash, signature, transmitter, rate, intervals],
+            f"{session.path}/{attempt_key}/{receiver_id}",
+            cache,
+            ".json",
+        )
+        for session, attempt_key, receiver_id, rate, intervals in requests
     ]
     results = [
         _load_cached(path, fingerprint) if not refresh else None
@@ -303,7 +307,7 @@ def analyze_session(
     for index in pending:
         fingerprint, path = entries[index]
         # Only store results if the tables did not change while scanning.
-        if path is not None and signature == _frame_cache.frame_signature(session):
+        if path is not None and signature == _cache_keys.frame_signature(session):
             _store_cached(path, fingerprint, results[index])
     receiver_rows, packet_rows = [], []
     for (record, receiver_id), result in zip(jobs, results):
@@ -398,19 +402,6 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _cache_entry(request, transmitter, cache, code_hash, signature):
-    session, attempt_key, receiver_id, rate, intervals = request
-    fingerprint = hashlib.sha256(
-        json.dumps(
-            [code_hash, signature, transmitter, rate, intervals], sort_keys=True
-        ).encode()
-    ).hexdigest()
-    name = hashlib.sha256(
-        f"{session.path}/{attempt_key}/{receiver_id}".encode()
-    ).hexdigest()
-    return fingerprint, cache / f"{name}.json" if cache is not None else None
-
-
 def _load_cached(path, fingerprint):
     if path is not None and path.is_file():
         try:
@@ -428,24 +419,13 @@ def _load_cached(path, fingerprint):
 
 
 def _store_cached(path, fingerprint, result):
-    path.parent.mkdir(parents=True, exist_ok=True)
     encoded = json.dumps(result, sort_keys=True, allow_nan=False)
     payload = {
         "fingerprint": fingerprint,
         "checksum": hashlib.sha256(encoded.encode()).hexdigest(),
         "result": result,
     }
-    temporary = None
-    try:
-        with NamedTemporaryFile(
-            "w", dir=path.parent, suffix=".tmp", encoding="utf-8", delete=False
-        ) as stream:
-            temporary = Path(stream.name)
-            json.dump(payload, stream, allow_nan=False)
-        os.replace(temporary, path)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    atomic_bytes(path, json.dumps(payload, allow_nan=False).encode("utf-8"))
 
 
 def _receiver_summary(frame: pd.DataFrame) -> pd.DataFrame:

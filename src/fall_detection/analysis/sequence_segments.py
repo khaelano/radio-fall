@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import json
-import os
 import subprocess
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 import numpy as np
 import polars as pl
 
-from .sequence_cache import file_hash
+from ._cache_keys import file_hash
+from ._io import atomic_json, atomic_table, temporary_sibling
 
 FEATURES = 4 * 245
 
@@ -43,16 +41,11 @@ def write_signal(path: Path, signal: np.ndarray) -> dict:
     """Publish a complete NPY atomically, with a hash and logical dimensions."""
     if signal.dtype != np.float32 or signal.ndim != 3 or signal.shape[1:] != (4, 245):
         raise ValueError("Expected float32 [time,4,245] signal")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile(dir=path.parent, suffix=".npy", delete=False) as stream:
-        temporary = Path(stream.name)
-    try:
+    with temporary_sibling(path, ".npy") as temporary:
+        # Compression must be disabled before any bytes are written to the file.
         uncompressed = _no_btrfs_compression(temporary)
         with temporary.open("wb") as stream:
             np.save(stream, signal, allow_pickle=False)
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
     return {
         "signal": str(path.relative_to(path.parent.parent)),
         "samples": len(signal),
@@ -60,31 +53,6 @@ def write_signal(path: Path, signal: np.ndarray) -> dict:
         "sha256": file_hash(path),
         "btrfs_compression_disabled": uncompressed,
     }
-
-
-def _atomic_table(frame: pl.DataFrame, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.is_file() and pl.read_parquet(path).equals(frame):
-        return
-    with NamedTemporaryFile(dir=path.parent, suffix=".parquet", delete=False) as stream:
-        temporary = Path(stream.name)
-    try:
-        frame.write_parquet(temporary)
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def _atomic_json(value: dict, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as stream:
-        temporary = Path(stream.name)
-        json.dump(value, stream, indent=2)
-        stream.write("\n")
-    try:
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def publish_export(
@@ -103,10 +71,10 @@ def publish_export(
     ledger = pl.DataFrame(
         [{k: v for k, v in row.items() if k != "subcarriers"} for row in signal_rows]
     ).sort("segment_id")
-    _atomic_table(index, destination / "window_index.parquet")
-    _atomic_table(segments, destination / "segments.parquet")
-    _atomic_table(ledger, destination / "signals.parquet")
-    _atomic_json(
+    atomic_table(index, destination / "window_index.parquet", skip_if_equal=True)
+    atomic_table(segments, destination / "segments.parquet", skip_if_equal=True)
+    atomic_table(ledger, destination / "signals.parquet", skip_if_equal=True)
+    atomic_json(
         {
             "schema": "amplitude_sequence",
             "dataset": destination.name,

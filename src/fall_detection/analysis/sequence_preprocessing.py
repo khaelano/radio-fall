@@ -6,22 +6,19 @@ live in notebooks/latest/02_preprocess.ipynb.
 
 import itertools
 import json
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 import numpy as np
 import polars as pl
 
+from ._cache_keys import file_hash
+from ._io import atomic_json, atomic_table  # noqa: F401  (notebook-facing names)
 from .amplitude_pipeline import (
     COLUMNS,
     AmplitudeSession,
     load_amplitude_session,
     prepare_recording,
-)
-from .sequence_cache import (
-    file_hash,
 )
 
 _MODULUS = 1 << 32
@@ -150,31 +147,6 @@ WINDOW_SCHEMA = {
     "coverage": pl.Float64,
     "receiver_coverage": pl.List(pl.Float64),
 }
-
-
-def atomic_table(frame: pl.DataFrame, path: Path) -> None:
-    """Publish a complete Parquet table atomically."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile(dir=path.parent, suffix=".parquet", delete=False) as f:
-        temporary = Path(f.name)
-    try:
-        frame.write_parquet(temporary)
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def atomic_json(value: dict, path: Path) -> None:
-    """Publish JSON without leaving a partial manifest."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as f:
-        temporary = Path(f.name)
-        json.dump(value, f, indent=2)
-        f.write("\n")
-    try:
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def squared_difference(values: np.ndarray) -> np.ndarray:

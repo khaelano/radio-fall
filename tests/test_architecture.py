@@ -43,9 +43,19 @@ ALLOWED_DEPENDENCIES = {
 }
 """Project packages each top-level package may import, besides itself."""
 
+SHARED_MODULES = {"_radio_native"}
+"""Top-level project modules every package may import (the Rust extension)."""
+
+_DYNAMIC_IMPORTS = {"import_module", "__import__"}
+
 
 def _project_packages_imported(path: Path, package: str) -> dict[str, int]:
-    """Return the top-level project packages ``path`` imports, with a line number."""
+    """Return the top-level project names ``path`` imports, with a line number.
+
+    Covers ``import`` statements anywhere in the module (including function
+    bodies and ``TYPE_CHECKING`` blocks) and ``importlib.import_module`` or
+    ``__import__`` calls whose first argument is a string literal.
+    """
     found: dict[str, int] = {}
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         names = []
@@ -55,6 +65,16 @@ def _project_packages_imported(path: Path, package: str) -> dict[str, int]:
             name = "." * node.level + (node.module or "")
             base = resolve_name(name, package) if node.level else name
             names = [base, *(f"{base}.{alias.name}" for alias in node.names)]
+        elif isinstance(node, ast.Call) and node.args:
+            function = node.func
+            called = getattr(function, "attr", getattr(function, "id", None))
+            argument = node.args[0]
+            if (
+                called in _DYNAMIC_IMPORTS
+                and isinstance(argument, ast.Constant)
+                and isinstance(argument.value, str)
+            ):
+                names = [argument.value]
         for name in names:
             parts = name.split(".")
             if len(parts) > 1 and parts[0] == "fall_detection":
@@ -64,13 +84,14 @@ def _project_packages_imported(path: Path, package: str) -> dict[str, int]:
 
 def test_top_level_packages_follow_the_layering():
     """Imports flow one way: protocol and radio are leaves, apps sit on top."""
-    packages = {
-        path.name
+    top_level = {
+        path.name if path.is_dir() else path.stem
         for path in PACKAGE.iterdir()
-        if path.is_dir() and (path / "__init__.py").exists()
+        if (path.is_dir() and path.name != "__pycache__")
+        or (path.suffix == ".py" and path.name != "__init__.py")
     }
-    assert packages == set(ALLOWED_DEPENDENCIES), (
-        "Add new top-level packages to ALLOWED_DEPENDENCIES"
+    assert top_level == set(ALLOWED_DEPENDENCIES), (
+        "Every top-level package or module needs an entry in ALLOWED_DEPENDENCIES"
     )
     violations = []
     for path in PACKAGE.rglob("*.py"):
@@ -80,11 +101,9 @@ def test_top_level_packages_follow_the_layering():
             continue
         package = ".".join(("fall_detection", *relative.with_suffix("").parts[:-1]))
         for imported, line in _project_packages_imported(path, package).items():
-            if (
-                imported in ALLOWED_DEPENDENCIES
-                and imported != owner
-                and imported not in ALLOWED_DEPENDENCIES[owner]
-            ):
+            if imported in SHARED_MODULES or imported == owner:
+                continue
+            if imported not in ALLOWED_DEPENDENCIES[owner]:
                 violations.append(f"{relative}:{line} imports {imported}")
     assert not violations, f"Layering violations: {violations}"
 

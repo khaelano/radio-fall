@@ -8,3 +8,4 @@ operating instructions.
 - **Native detector:** `native-capture-*` (gateway acquisition and journals), `native-webgpu-smoke-*` (GPU runtime), and `native-replay-*` (real-time replay and preprocessing parity).
 - **Sequence analysis:** `gpu-sequence-tuning-*`, `pytorch-cpu-vs-tinygrad-*`, `sequence-optimization-*`, `sequence-segment-store-*`, `tinygrad-training-optimization-*`, and `amplitude-sequence-*`.
 - **Storage:** [typed frame storage and version-3 archives](storage-layout-migration-2026-11-13.md) (equivalence with the CSV sidecars, archive sizes, and limits).
+- **Architecture:** [rehaul status on 13 November 2026](architecture-rehaul-status-2026-11-13.md) (unfinished work after the host-side simplification).

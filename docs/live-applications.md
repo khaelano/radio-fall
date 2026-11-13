@@ -11,10 +11,11 @@ writing and trial timing remain in the collection controller and capture modules
 | `radio_transport::session` (`src/native/radio_core/`) | Gateway preparation and relay recovery, startup, journal-before-ACK acceptance, capture mapping, availability bins, restarts |
 | `radio_transport::quality`, `radio/records.py`, `radio/native.py` | Duplicate-capture removal and delivery counters; Python record types (`NativeRecord` with lazy array views, `CsiRecord` for the inspector) and backend access |
 | `radio/recording_io.py` | Native bounded recording worker; periodic batched disk writes |
-| `presentation/radio/live.py` | Compose the dashboard and transport panel; limit diagnostics to four updates per second |
-| `presentation/radio/pacing.py` | Shared display rates and timer intervals |
+| `apps/common/live.py` | Compose the dashboard and transport panel; limit diagnostics to four updates per second |
+| `apps/common/pacing.py` | Shared display rates, timer intervals and the `--fps` option |
+| `apps/common/qt.py` | Create the `QApplication` and report a missing PySide6 install uniformly |
 | `radio/preprocessing/rendering.py` | Numerical preparation and a bounded one-snapshot/one-frame cache |
-| `presentation/radio/gaps.py` | Receiver-by-time heatmap of CSI availability at delivery deadlines |
+| `apps/common/gaps.py` | Receiver-by-time heatmap of CSI availability at delivery deadlines |
 | `apps/collector/app.py` | Parse options, gather metadata, compose the controller and windows, enter the Qt event loop |
 | `apps/collector/runtime.py` | Evaluate health, advance trial timing, update both windows and drain a run on exit |
 | `apps/collector/views/` | Setup/detail dialogs, operator controls, performer cues and presentation styles |

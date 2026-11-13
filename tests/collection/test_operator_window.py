@@ -17,6 +17,7 @@ from PySide6 import QtCore, QtWidgets
 
 from fall_detection.apps.collector.views.dialogs import MetadataDialog
 from fall_detection.apps.collector.views.operator import OperatorWindow
+from fall_detection.apps.common.dashboard import CsiDashboardPanel
 from fall_detection.collection.capture import SessionMetadata
 from fall_detection.collection.controller import (
     HealthSnapshot,
@@ -29,7 +30,6 @@ from fall_detection.collection.protocol import (
     protocol_from_mapping,
     select_blocks,
 )
-from fall_detection.presentation.radio.dashboard import CsiDashboardPanel
 from fall_detection.radio.state import LiveState
 
 PROTOCOL_PATH = (

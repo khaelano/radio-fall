@@ -7,13 +7,13 @@ from typing import Any
 from fall_detection.apps.collector.views.camera import CameraPreview
 from fall_detection.apps.collector.views.dialogs import ScenarioDetailDialog
 from fall_detection.apps.collector.views.theme import STYLESHEET, state_badge_style
+from fall_detection.apps.common.dashboard import CsiDashboardPanel
 from fall_detection.collection.controller import (
     OperatorCommand,
     SessionSnapshot,
     SessionState,
 )
 from fall_detection.collection.protocol import CollectionProtocol
-from fall_detection.presentation.radio.dashboard import CsiDashboardPanel
 
 
 class OperatorWindow:

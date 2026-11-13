@@ -25,7 +25,7 @@ def test_dashboard_defers_plot_work_until_acquisition_catches_up(monkeypatch):
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
-    from fall_detection.presentation.radio.dashboard import CsiDashboardPanel
+    from fall_detection.apps.common.dashboard import CsiDashboardPanel
     from fall_detection.radio.state import LiveState
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
@@ -263,7 +263,7 @@ def test_dashboard_renders_duplicate_sequence_appends_and_reuses_control_frames(
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
-    from fall_detection.presentation.radio.dashboard import CsiDashboardPanel
+    from fall_detection.apps.common.dashboard import CsiDashboardPanel
     from fall_detection.radio.state import LiveState
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
@@ -347,7 +347,7 @@ def test_receiver_switch_clears_old_traces_and_waits_for_bounded_preparation(
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
-    from fall_detection.presentation.radio.dashboard import CsiDashboardPanel
+    from fall_detection.apps.common.dashboard import CsiDashboardPanel
     from fall_detection.radio.state import LiveState
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
@@ -403,7 +403,7 @@ def test_preview_defers_records_arriving_after_budgeted_preparation(monkeypatch)
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
-    from fall_detection.presentation.radio.dashboard import CsiDashboardPanel
+    from fall_detection.apps.common.dashboard import CsiDashboardPanel
     from fall_detection.radio.state import LiveState
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])

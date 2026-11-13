@@ -9,6 +9,7 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any
 
+from fall_detection.apps.common.live import LiveDashboard
 from fall_detection.collection.capture import SessionMetadata
 from fall_detection.collection.controller import (
     HealthSnapshot,
@@ -17,7 +18,6 @@ from fall_detection.collection.controller import (
     SessionSnapshot,
     SessionState,
 )
-from fall_detection.presentation.radio.live import LiveDashboard
 from fall_detection.radio.live import LiveRadio
 
 

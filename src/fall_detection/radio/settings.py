@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import secrets
 from dataclasses import MISSING, dataclass, fields
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,16 @@ class RadioSettings:
     def profile_fingerprint(self) -> str:
         """Return the provisioned fingerprint independently of host port names."""
         return profile_fingerprint(self.profile, self.inventory)
+
+    def native_radio_config(self) -> list[int]:
+        """Encode the CGCF configuration with a fresh nonzero run ID.
+
+        Returns:
+            Wire bytes as integers, the form ``NativeAcquisition`` and
+            ``NativeDetector`` accept as ``radio_config``.
+        """
+        run = secrets.randbits(64) or 1
+        return list(self.transport.encode(run, self.inventory, self.profile))
 
     @classmethod
     def load(cls, path: Path = DEFAULT_CONFIG) -> RadioSettings:

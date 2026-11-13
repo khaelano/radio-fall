@@ -15,6 +15,14 @@ from fall_detection.apps.collector.runtime import (
 from fall_detection.apps.collector.views.dialogs import MetadataDialog, choose_protocol
 from fall_detection.apps.collector.views.operator import OperatorWindow
 from fall_detection.apps.collector.views.performer import PerformerWindow
+from fall_detection.apps.common.dashboard import DEFAULT_VIEW_SECONDS
+from fall_detection.apps.common.live import LiveDashboard
+from fall_detection.apps.common.pacing import (
+    FPS_DEFAULT,
+    add_fps_argument,
+    frame_interval_ms,
+)
+from fall_detection.apps.common.qt import QtUnavailableError, qt_application
 from fall_detection.collection.continuous import (
     ContinuousController,
     continuous_protocol,
@@ -26,24 +34,13 @@ from fall_detection.collection.protocol import (
     select_blocks,
 )
 from fall_detection.collection.resume import load_session_resume
-from fall_detection.presentation.radio.dashboard import DEFAULT_VIEW_SECONDS
-from fall_detection.presentation.radio.live import LiveDashboard
-from fall_detection.presentation.radio.pacing import (
-    FPS_CHOICES as COLLECTOR_FPS_CHOICES,
-)
-from fall_detection.presentation.radio.pacing import (
-    FPS_DEFAULT as COLLECTOR_FPS_DEFAULT,
-)
-from fall_detection.presentation.radio.pacing import (
-    frame_interval_ms,
-)
-from fall_detection.radio.live import LiveRadio, add_live_arguments
+from fall_detection.radio.live import LiveRadio
 from fall_detection.radio.recording_io import RecordingIO
-from fall_detection.radio.settings import DEFAULT_CONFIG
+from fall_detection.radio.settings import DEFAULT_CONFIG, add_live_arguments
 
 DEFAULT_PROTOCOL = DEFAULT_CONFIG.parent / "collection/fall_simple.json"
 COLLECTOR_VIEW_SECONDS = DEFAULT_VIEW_SECONDS
-COLLECTOR_UI_INTERVAL_MS = frame_interval_ms(COLLECTOR_FPS_DEFAULT)
+COLLECTOR_UI_INTERVAL_MS = frame_interval_ms(FPS_DEFAULT)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -112,14 +109,7 @@ def _parser() -> argparse.ArgumentParser:
         default=30,
         help="requested camera/encoder frame rate, independent of UI refresh",
     )
-    parser.add_argument(
-        "--fps",
-        type=int,
-        choices=COLLECTOR_FPS_CHOICES,
-        default=COLLECTOR_FPS_DEFAULT,
-        help="constant UI refresh rate in frames per second",
-    )
-
+    add_fps_argument(parser)
     return parser
 
 
@@ -188,16 +178,12 @@ def _run(
             parser.error(str(exc))
 
     try:
-        from PySide6 import QtCore, QtWidgets
-    except ImportError as exc:
-        print(
-            "Install collection dependencies with: uv sync --extra radio",
-            file=sys.stderr,
-        )
-        print(f"Missing GUI dependency: {exc}", file=sys.stderr)
+        app = qt_application("collection")
+    except QtUnavailableError as exc:
+        print(exc, file=sys.stderr)
         return 2
+    from PySide6 import QtCore, QtWidgets
 
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(list(sys.argv))
     if protocol is None:
         protocol = choose_protocol(QtWidgets, DEFAULT_PROTOCOL)
         if protocol is None:

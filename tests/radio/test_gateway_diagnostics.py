@@ -26,7 +26,7 @@ def test_shared_gateway_panel_switches_selected_row_without_mixing_counters(tmp_
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
-    from fall_detection.presentation.radio.transport_status import GatewayStatusPanel
+    from fall_detection.apps.common.transport_status import GatewayStatusPanel
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     radio = LiveRadio(

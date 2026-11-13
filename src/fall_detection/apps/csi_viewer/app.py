@@ -7,26 +7,24 @@ import sys
 from contextlib import ExitStack
 from pathlib import Path
 
-from fall_detection.presentation.radio.dashboard import (
+from fall_detection.apps.common.dashboard import (
     DASHBOARD_TRACE_COUNTS,
     DEFAULT_DASHBOARD_SUBCARRIERS,
     DEFAULT_INSPECT_SUBCARRIER,
     DEFAULT_VIEW_SECONDS,
     VALID_SUBCARRIERS,
 )
-from fall_detection.presentation.radio.live import LiveDashboard
-from fall_detection.presentation.radio.pacing import (
-    FPS_CHOICES as GUI_FPS_CHOICES,
-)
-from fall_detection.presentation.radio.pacing import (
-    FPS_DEFAULT as GUI_FPS_DEFAULT,
-)
-from fall_detection.presentation.radio.pacing import (
+from fall_detection.apps.common.live import LiveDashboard
+from fall_detection.apps.common.pacing import (
+    FPS_DEFAULT,
+    add_fps_argument,
     frame_interval_ms,
 )
-from fall_detection.radio.live import LiveRadio, add_live_arguments
+from fall_detection.apps.common.qt import QtUnavailableError, qt_application
+from fall_detection.radio.live import LiveRadio
+from fall_detection.radio.settings import add_live_arguments
 
-GUI_INTERVAL_MS = frame_interval_ms(GUI_FPS_DEFAULT)
+GUI_INTERVAL_MS = frame_interval_ms(FPS_DEFAULT)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -45,14 +43,7 @@ def _parser() -> argparse.ArgumentParser:
             "(transport/gateway/<run>); the viewer writes no other recording"
         ),
     )
-    parser.add_argument(
-        "--fps",
-        type=int,
-        choices=GUI_FPS_CHOICES,
-        default=GUI_FPS_DEFAULT,
-        help="constant UI refresh rate in frames per second",
-    )
-
+    add_fps_argument(parser)
     parser.add_argument(
         "--dashboard-subcarriers",
         type=int,
@@ -80,15 +71,12 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, RuntimeError, ValueError) as exc:
         parser.error(str(exc))
     try:
-        from PySide6 import QtCore, QtWidgets
-    except ImportError as exc:
-        print(
-            "Install viewer dependencies with: uv sync --extra radio", file=sys.stderr
-        )
-        print(f"Missing GUI dependency: {exc}", file=sys.stderr)
+        app = qt_application("viewer")
+    except QtUnavailableError as exc:
+        print(exc, file=sys.stderr)
         return 2
+    from PySide6 import QtCore, QtWidgets
 
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     profile = radio.settings.profile
     window = QtWidgets.QMainWindow()
     window.setWindowTitle(

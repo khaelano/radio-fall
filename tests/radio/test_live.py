@@ -6,11 +6,11 @@ import time
 import pytest
 from fake_acquisition import FakeAcquisition, item, running_health
 
-from fall_detection.apps.csi_viewer.app import _parser
-from fall_detection.presentation.radio.transport_status import (
+from fall_detection.apps.common.transport_status import (
     format_transport_status,
     receiver_cells,
 )
+from fall_detection.apps.csi_viewer.app import _parser
 from fall_detection.radio.live import LiveRadio
 
 
@@ -287,7 +287,7 @@ def test_live_dashboard_limits_diagnostics_and_updates_selection_immediately(
     pytest.importorskip("PySide6")
     from PySide6 import QtWidgets
 
-    from fall_detection.presentation.radio.live import LiveDashboard
+    from fall_detection.apps.common.live import LiveDashboard
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     radio = make_radio(tmp_path)

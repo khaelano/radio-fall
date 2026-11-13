@@ -10,9 +10,9 @@ from fall_detection.apps.collector.runtime import (
     CollectionPresenter,
     running_collection,
 )
+from fall_detection.apps.common.transport_status import TransportStatusText
 from fall_detection.collection.capture import SessionMetadata
 from fall_detection.collection.controller import OperatorCommand, SessionState
-from fall_detection.presentation.radio.transport_status import TransportStatusText
 
 
 @pytest.mark.parametrize(

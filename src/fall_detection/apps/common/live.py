@@ -5,12 +5,12 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from fall_detection.presentation.radio.dashboard import (
+from fall_detection.apps.common.dashboard import (
     DEFAULT_VIEW_SECONDS,
     CsiDashboardPanel,
 )
-from fall_detection.presentation.radio.pacing import STATUS_INTERVAL_SECONDS
-from fall_detection.presentation.radio.transport_status import (
+from fall_detection.apps.common.pacing import STATUS_INTERVAL_SECONDS
+from fall_detection.apps.common.transport_status import (
     GatewayStatusPanel,
     TransportStatusText,
 )

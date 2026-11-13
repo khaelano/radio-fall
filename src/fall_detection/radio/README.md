@@ -23,7 +23,7 @@ Rust owns the live session; this package holds the Python side of it.
 
 | Module | Role |
 | --- | --- |
-| `settings.py`, `profile.py`, `espnow_config.py` | Load and validate `configs/radio.json` (inventory and profile schema 2, gateway policy version 7); the transport values exist only in that file |
+| `settings.py`, `profile.py`, `espnow_config.py` | Load and validate `configs/radio.json` (inventory and profile schema 2, gateway policy version 7); the transport values exist only in that file; `RadioSettings.native_radio_config` encodes the wire configuration for both `NativeAcquisition` and `NativeDetector`, and `add_live_arguments` defines the shared CLI options |
 | `live.py`, `state.py` | Start `NativeAcquisition`, deliver accepted records to sinks and display buffers, map native health to diagnostics |
 | `records.py`, `native.py` | `NativeRecord` (Rust-backed, live) and `CsiRecord` (pure Python, inspector and tests); access to the compiled backend |
 | `buffer.py`, `availability.py`, `gateway_diagnostics.py`, `telemetry.py` | Display buffer, availability snapshots, diagnostics and collection telemetry counters |

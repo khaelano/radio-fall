@@ -1,12 +1,15 @@
 import pytest
 
-from fall_detection.apps.csi_viewer.app import (
-    GUI_FPS_CHOICES,
-    GUI_FPS_DEFAULT,
-    GUI_INTERVAL_MS,
-    _parser,
+from fall_detection.apps.common.pacing import (
+    FPS_CHOICES as GUI_FPS_CHOICES,
+)
+from fall_detection.apps.common.pacing import (
+    FPS_DEFAULT as GUI_FPS_DEFAULT,
+)
+from fall_detection.apps.common.pacing import (
     frame_interval_ms,
 )
+from fall_detection.apps.csi_viewer.app import GUI_INTERVAL_MS, _parser
 from fall_detection.radio.buffer import RollingCsiBuffer
 from fall_detection.radio.state import LiveState
 

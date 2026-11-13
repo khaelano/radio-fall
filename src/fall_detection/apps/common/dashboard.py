@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from fall_detection.presentation.radio.gaps import CsiGapPanel
+from fall_detection.apps.common.gaps import CsiGapPanel
 from fall_detection.radio.availability import AvailabilitySnapshot
 from fall_detection.radio.buffer import PreviewNotReady
 from fall_detection.radio.preprocessing.rendering import (

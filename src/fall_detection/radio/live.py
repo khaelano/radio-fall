@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import secrets
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -27,11 +26,11 @@ from .gateway_diagnostics import (
 )
 from .native import backend_info, require_native
 from .records import AnyCsiRecord, NativeRecord
-from .settings import add_live_arguments, resolve_settings
+from .settings import resolve_settings
 from .state import LiveState
 from .telemetry import BackhaulTelemetrySnapshot
 
-__all__ = ["LiveRadio", "ReceiverBinding", "add_live_arguments"]
+__all__ = ["LiveRadio", "ReceiverBinding"]
 
 # Stale status or delivery beyond this age marks a receiver offline.
 LIVENESS_S = 2.5
@@ -173,12 +172,9 @@ class LiveRadio:
         """Return the JSON-serializable configuration for ``NativeAcquisition``."""
         settings = self.settings
         transport = settings.transport
-        run = secrets.randbits(64) or 1
         return {
             "serial_path": str(self._args.gateway_port),
-            "radio_config": list(
-                transport.encode(run, settings.inventory, settings.profile)
-            ),
+            "radio_config": settings.native_radio_config(),
             "journal_root": str(journal_root),
             "metadata": {
                 "host_processing": backend_info(),

@@ -6,8 +6,9 @@
 - `csi_viewer/`: live CSI viewer entry point.
 - `session_inspector/`: offline inspector interface and video panel.
 - `detector/`: live detector interface and command.
+- `common/`: dashboard widgets, display pacing, shared `--fps` option and Qt
+  bootstrap used by several applications.
 
-`presentation/` contains dashboard widgets shared by multiple applications.
 The other packages contain reusable functionality: `radio/` provides acquisition
 and configuration; `collection/`
 provides collection protocols and session orchestration; `session_inspector/`
@@ -26,8 +27,8 @@ The processing architecture has three layers:
    and signal preprocessing.
 2. The Python domain packages validate settings, manage collection and session
    state, query recordings, and coordinate analysis and inference.
-3. `presentation/` provides shared widgets, and `apps/` presents those
-   capabilities through the desktop applications.
+3. `apps/` presents those capabilities through the desktop applications;
+   `apps/common/` holds the widgets they share.
 
 The Rust extension is built with the Python package; it is required by live
 acquisition and native stream decoding.

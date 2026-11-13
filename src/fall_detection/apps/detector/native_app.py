@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
 import signal
-import sys
 import sysconfig
 import time
 from collections import deque
@@ -15,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from fall_detection.apps.common.qt import qt_application
 
 MODELS = tuple(
     f"{family}-{duration}s"
@@ -110,12 +110,8 @@ def build_config(args: Any, models: list[str] | None = None) -> dict:
         return config
     from fall_detection.radio.settings import resolve_settings
 
-    settings = resolve_settings(args)
-    run = secrets.randbits(64) or 1
     config["serial_path"] = str(args.gateway_port)
-    config["radio_config"] = list(
-        settings.transport.encode(run, settings.inventory, settings.profile)
-    )
+    config["radio_config"] = resolve_settings(args).native_radio_config()
     return config
 
 
@@ -288,10 +284,10 @@ def _status_text(health: dict) -> str:
 
 
 def _gui(args: Any, initial_config: dict) -> int:
+    app = qt_application("detector")
     import pyqtgraph as pg
     from PySide6 import QtCore, QtWidgets
 
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     window = QtWidgets.QMainWindow()
     window.setWindowTitle("Native live fall detection")
     central = QtWidgets.QWidget()

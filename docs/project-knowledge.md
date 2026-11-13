@@ -185,7 +185,7 @@ inspector, and detector application entry points and presentation code.
 provisioning), `storage/`, `analysis/`, `collection/`, `session_inspector/`
 and `contracts/` contain the reusable radio, data, and domain
 components used by these applications and research tools. The viewer and
-collector share the dashboard in `presentation/radio/`.
+collector share the dashboard, pacing and Qt bootstrap in `apps/common/`.
 
 ## Sources of truth
 

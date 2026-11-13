@@ -2,7 +2,6 @@
 
 import re
 import struct
-from math import nan
 
 from wire_encoder import (
     BATCH_HEADER,
@@ -109,11 +108,7 @@ def decode_csi_datagram(data: bytes) -> DecodedCsiDatagram:
         )
         for index in range(0, len(raw_values), 2)
     )
-    csi = list(raw_csi)
     first_word_invalid = bool(flags & FIRST_WORD_INVALID)
-    if first_word_invalid:
-        for index in range(min(2, len(csi))):
-            csi[index] = complex(nan, nan)
 
     record = CsiRecord(
         sequence=sensing_sequence,
@@ -121,7 +116,7 @@ def decode_csi_datagram(data: bytes) -> DecodedCsiDatagram:
         rssi=rssi,
         noise_floor=noise_floor,
         timestamp_us=timestamp,
-        csi=tuple(csi),
+        csi=raw_csi,
         receiver_mac=receiver_mac,
         transport_sequence=transport_sequence,
         tx_timestamp_us=tx_timestamp_us,
@@ -143,8 +138,6 @@ def decode_csi_datagram(data: bytes) -> DecodedCsiDatagram:
         antenna=antenna,
         sig_len=sig_len,
         rx_state=rx_state,
-        csi_length=csi_length,
-        raw_csi=raw_csi,
         profile_fingerprint=profile_fingerprint,
     )
     return DecodedCsiDatagram(

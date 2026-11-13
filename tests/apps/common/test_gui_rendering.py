@@ -63,7 +63,6 @@ def test_phase_display_snapshot_preserves_frames_without_raw_csi_matrices():
             tuple(complex(4 + k % 9, 2 + k % 7) for k in range(245)),
             sig_mode=4,
             bandwidth=0,
-            csi_length=490,
         )
         for sequence in range(4)
     ]
@@ -71,7 +70,7 @@ def test_phase_display_snapshot_preserves_frames_without_raw_csi_matrices():
         buffer.append(record)
     light = buffer.snapshot(seconds=3, include_raw_views=False)
     assert not light.real and not light.imaginary and not light.amplitudes
-    assert all(record._derived_views_cache is None for record in records)
+    assert all(record._views is None for record in records)
     full = buffer.snapshot(seconds=3)
     for mode in (PHASE_MODE_CALIBRATED, PHASE_MODE_CHANGE, PHASE_MODE_RAW):
 
@@ -293,13 +292,10 @@ def test_dashboard_renders_duplicate_sequence_appends_and_reuses_control_frames(
 
 
 def test_cold_preview_prepares_bounded_work_without_changing_full_snapshot():
-    from dataclasses import replace
 
     buffer = RollingCsiBuffer(120)
-    base = CsiRecord(
-        0, "02:00:00:00:00:01", -40, -95, 0, (4 + 2j,) * 245, sig_mode=4, csi_length=490
-    )
-    records = [replace(base, sequence=i, timestamp_us=i * 8333) for i in range(5)]
+    base = CsiRecord(0, "02:00:00:00:00:01", -40, -95, 0, (4 + 2j,) * 128, sig_mode=1)
+    records = [base.replace(sequence=i, timestamp_us=i * 8333) for i in range(5)]
     for record in records:
         buffer.append(record)
     options = {
@@ -317,17 +313,14 @@ def test_cold_preview_prepares_bounded_work_without_changing_full_snapshot():
     assert len(snapshot.timestamps) == 5
     assert buffer.received_records == 5
     assert all(record.phase_views_ready for record in records)
-    assert all(record._derived_views_cache is None for record in records)
+    assert all(record._views is None for record in records)
 
 
 def test_preview_phase_preparation_yields_at_time_budget():
-    from dataclasses import replace
 
     buffer = RollingCsiBuffer(120)
-    base = CsiRecord(
-        0, "02:00:00:00:00:01", -40, -95, 0, (4 + 2j,) * 245, sig_mode=4, csi_length=490
-    )
-    records = [replace(base, sequence=i, timestamp_us=i * 8333) for i in range(3)]
+    base = CsiRecord(0, "02:00:00:00:00:01", -40, -95, 0, (4 + 2j,) * 128, sig_mode=1)
+    records = [base.replace(sequence=i, timestamp_us=i * 8333) for i in range(3)]
     for record in records:
         buffer.append(record)
     times = iter((0, 0, 9_000_000))
@@ -339,7 +332,6 @@ def test_receiver_switch_clears_old_traces_and_waits_for_bounded_preparation(
     monkeypatch,
 ):
     import os
-    from dataclasses import replace
 
     import pytest
 
@@ -352,12 +344,10 @@ def test_receiver_switch_clears_old_traces_and_waits_for_bounded_preparation(
 
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     first, second = RollingCsiBuffer(), RollingCsiBuffer()
-    record = CsiRecord(
-        1, "02:00:00:00:00:01", -40, -95, 1, (4 + 2j,) * 245, sig_mode=4, csi_length=490
-    )
+    record = CsiRecord(1, "02:00:00:00:00:01", -40, -95, 1, (4 + 2j,) * 128, sig_mode=1)
     first.append(record)
     for index in range(3):
-        second.append(replace(record, sequence=index + 2, timestamp_us=10_000 + index))
+        second.append(record.replace(sequence=index + 2, timestamp_us=10_000 + index))
     prepare = second.prepare_phase_views
     monkeypatch.setattr(
         second,
@@ -395,7 +385,6 @@ def test_receiver_switch_clears_old_traces_and_waits_for_bounded_preparation(
 def test_preview_defers_records_arriving_after_budgeted_preparation(monkeypatch):
     """A radio burst between warmup and snapshot must not bypass the GUI budget."""
     import os
-    from dataclasses import replace
 
     import pytest
 
@@ -414,14 +403,11 @@ def test_preview_defers_records_arriving_after_budgeted_preparation(monkeypatch)
         -40,
         -95,
         0,
-        (4 + 2j,) * 245,
-        sig_mode=4,
-        csi_length=490,
+        (4 + 2j,) * 128,
+        sig_mode=1,
     )
     state.buffer.append(record)
-    arrivals = [
-        replace(record, sequence=i, timestamp_us=i * 8333) for i in range(1, 33)
-    ]
+    arrivals = [record.replace(sequence=i, timestamp_us=i * 8333) for i in range(1, 33)]
     warm = state.buffer.prepare_phase_views
     injected = False
 

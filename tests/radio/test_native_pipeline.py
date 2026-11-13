@@ -19,7 +19,7 @@ from fall_detection.radio.provisioning import (
     decode_serial_frame,
     encode_serial_frame,
 )
-from fall_detection.radio.records import NativeRecord, format_csi_record
+from fall_detection.radio.records import CsiRecord, format_csi_record
 
 
 def packet(size, invalid=False, seed=17):
@@ -31,17 +31,7 @@ def packet(size, invalid=False, seed=17):
     values = tuple(
         complex(rng.randrange(-128, 128), rng.randrange(-128, 128)) for _ in range(size)
     )
-    masked = tuple(
-        complex(float("nan"), float("nan")) if invalid and i < 2 else v
-        for i, v in enumerate(values)
-    )
-    record = replace(
-        record,
-        csi=masked,
-        raw_csi=values,
-        csi_length=2 * size,
-        first_word_invalid=invalid,
-    )
+    record = record.replace(csi=values, first_word_invalid=invalid)
     payload = encode_csi_batch(
         (DecodedCsiDatagram(record, record.receiver_mac, record.transport_sequence),),
         boot_id=21,
@@ -59,7 +49,7 @@ def test_native_matches_python_raw_csv_metadata_and_calibrated_phase(size, inval
 
     old = decode_csi_packet(original.payload).records[0].record
     decoded = core.decode_envelope(original.encode())
-    new = NativeRecord(decoded.records[0])
+    new = CsiRecord.from_native(decoded.records[0])
     for key in [
         "sequence",
         "transport_sequence",
@@ -105,7 +95,7 @@ def test_native_rejects_crc_and_preserves_record_context():
         core.decode_envelope(bytes(bad))
     decoded = core.decode_envelope(original)
     assert bytes(decoded.payload) == batch().payload
-    r = NativeRecord(decoded.records[0])
+    r = CsiRecord.from_native(decoded.records[0])
     updated = r.with_context({"run_id": 123, "capture_host_monotonic_ns": 999})
     assert r.run_id is None and updated.run_id == 123
     assert updated.capture_host_monotonic_ns == 999

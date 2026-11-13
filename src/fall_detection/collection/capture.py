@@ -14,7 +14,7 @@ from typing import Any, TextIO
 from .._radio_native import storage_read_file
 from ..protocol import CollectionProtocol, Trial
 from ..radio.recording_io import RecordingIO
-from ..radio.records import CSI_HEADER, AnyCsiRecord, format_csi_record
+from ..radio.records import CSI_HEADER, CsiRecord, format_csi_record
 from ..session.schema import ARTIFACT_SCHEMA_VERSION
 
 TIMING_HEADER = (
@@ -142,7 +142,7 @@ class TrialCapture:
         )
         return all(getattr(s, "saved", s.closed) for s in streams)
 
-    def write_radio(self, record: AnyCsiRecord, host_receive_monotonic_ns: int) -> None:
+    def write_radio(self, record: CsiRecord, host_receive_monotonic_ns: int) -> None:
         """Append one decoded radio record and its timing sidecar row.
 
         Does nothing when the CSV sidecars are disabled; the transport journal
@@ -176,7 +176,7 @@ class TrialCapture:
                 )
 
     def _write_gateway_timing(
-        self, receiver_id: str, record: AnyCsiRecord, arrival_ns: int
+        self, receiver_id: str, record: CsiRecord, arrival_ns: int
     ) -> None:
         if receiver_id not in self._gateway_streams:
             path = self.path / "receivers" / _slug(receiver_id) / "gateway_timing.jsonl"

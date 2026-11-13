@@ -71,7 +71,6 @@ def batch(inv=None, seq=1, receiver=0, payload=None):
         receiver_mac=mac,
         tx_timestamp_us=1000 + seq,
         rx_callback_timestamp_us=1010 + seq,
-        csi_length=490,
         sig_mode=4,
         channel=44,
         profile_fingerprint=profile_fingerprint(profile(), inv),

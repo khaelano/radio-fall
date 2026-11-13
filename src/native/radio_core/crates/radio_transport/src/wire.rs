@@ -19,6 +19,25 @@ pub fn mac(p: &[u8]) -> String {
     )
 }
 
+/// Stored fields of one record; derived values are computed by [`Record::assemble`].
+pub struct RecordParts {
+    pub wire: Arc<[u8]>,
+    pub sequence: u32,
+    pub transport_sequence: u32,
+    pub timestamp: u32,
+    pub receiver: String,
+    pub transmitter: String,
+    pub fingerprint: String,
+    pub tx_timestamp: u64,
+    pub callback: u64,
+    pub flags: u8,
+    pub rssi: i8,
+    pub noise: i8,
+    pub fields: [u8; 15],
+    pub sig_len: u16,
+    pub raw: Arc<[u8]>,
+}
+
 pub struct Record {
     pub wire: Arc<[u8]>,
     pub sequence: u32,
@@ -56,9 +75,35 @@ impl Record {
         if fingerprint.len() != 16 || !fingerprint.bytes().all(|c| c.is_ascii_hexdigit()) {
             return Err("invalid profile fingerprint".into());
         }
-        let raw: Arc<[u8]> = p[87..].into();
-        let (amplitudes, mut si, mut sq) = numeric::iq(&raw);
-        let invalid = p[5] & 1 != 0;
+        let fields: [u8; 15] = p[36..51].try_into().unwrap();
+        Ok(Self::assemble(RecordParts {
+            wire: p.into(),
+            sequence: u32be(p, 26),
+            transport_sequence: u32be(p, 22),
+            timestamp: u32be(p, 30),
+            receiver: mac(&p[10..16]),
+            transmitter: mac(&p[16..22]),
+            fingerprint,
+            tx_timestamp: u64be(p, 55),
+            callback: u64be(p, 63),
+            flags: p[5],
+            rssi: p[34] as i8,
+            noise: p[35] as i8,
+            fields,
+            sig_len: u16be(p, 51),
+            raw: p[87..].into(),
+        }))
+    }
+    /// Build a record from its stored fields, deriving the I/Q means, the
+    /// calibrated phase block and the Espressif CSV line exactly as decoding
+    /// does, so records of any origin are interchangeable.
+    pub fn assemble(parts: RecordParts) -> Arc<Self> {
+        let RecordParts {
+            raw, flags, fields, ..
+        } = &parts;
+        let n = raw.len();
+        let (amplitudes, mut si, mut sq) = numeric::iq(raw);
+        let invalid = flags & 1 != 0;
         let skip = if invalid { 2.min(n / 2) } else { 0 };
         for pair in raw[..skip * 2].chunks_exact(2) {
             si -= pair[1] as i8 as i64;
@@ -75,32 +120,31 @@ impl Record {
         } else {
             f64::NAN
         };
-        let fields: [u8; 15] = p[36..51].try_into().unwrap();
-        let phase = numeric::phase(&raw, fields[1], fields[3], fields[7], invalid, amplitudes)
-            .map(Arc::new);
+        let phase =
+            numeric::phase(raw, fields[1], fields[3], fields[7], invalid, amplitudes).map(Arc::new);
         let r = Arc::new(Self {
-            wire: p.into(),
-            sequence: u32be(p, 26),
-            transport_sequence: u32be(p, 22),
-            timestamp: u32be(p, 30),
-            receiver: mac(&p[10..16]),
-            transmitter: mac(&p[16..22]),
-            fingerprint,
-            tx_timestamp: u64be(p, 55),
-            callback: u64be(p, 63),
-            flags: p[5],
-            rssi: p[34] as i8,
-            noise: p[35] as i8,
-            fields,
-            sig_len: u16be(p, 51),
-            raw,
+            wire: parts.wire,
+            sequence: parts.sequence,
+            transport_sequence: parts.transport_sequence,
+            timestamp: parts.timestamp,
+            receiver: parts.receiver,
+            transmitter: parts.transmitter,
+            fingerprint: parts.fingerprint,
+            tx_timestamp: parts.tx_timestamp,
+            callback: parts.callback,
+            flags: parts.flags,
+            rssi: parts.rssi,
+            noise: parts.noise,
+            fields: parts.fields,
+            sig_len: parts.sig_len,
+            raw: parts.raw,
             mean_i,
             mean_q,
             phase,
             csv: OnceLock::new(),
         });
         let _ = r.csv.set(r.format_csv());
-        Ok(r)
+        r
     }
     fn format_csv(&self) -> String {
         let f = &self.fields;

@@ -211,7 +211,6 @@ class FakeGateway:
             receiver_mac=mac,
             tx_timestamp_us=enqueue,
             rx_callback_timestamp_us=enqueue + 10,
-            csi_length=490,
             sig_mode=4,
             channel=self.profile.channel,
             profile_fingerprint=self.fingerprint,

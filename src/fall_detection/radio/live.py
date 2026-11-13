@@ -25,7 +25,7 @@ from .gateway_diagnostics import (
     ReceiverDiagnostics,
 )
 from .native import backend_info, require_native
-from .records import AnyCsiRecord, NativeRecord
+from .records import CsiRecord
 from .settings import resolve_settings
 from .state import LiveState
 from .telemetry import BackhaulTelemetrySnapshot
@@ -86,7 +86,7 @@ class LiveRadio:
         *,
         require_four: bool = False,
         on_status: Callable[[str, bool], None] | None = None,
-        record_sink: Callable[[AnyCsiRecord, int], None] | None = None,
+        record_sink: Callable[[CsiRecord, int], None] | None = None,
         journal_root: Callable[[], Path | None] | None = None,
         on_interruption: Callable[[str], None] | None = None,
         acquisition_factory: Callable[[str], Any] = _native_acquisition,
@@ -267,7 +267,7 @@ class LiveRadio:
         uncertainty_us: float,
     ) -> None:
         binding = self.bindings[slot]
-        record = NativeRecord(
+        record = CsiRecord.from_native(
             native,
             {
                 "run_id": run,

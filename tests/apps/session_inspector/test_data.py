@@ -90,6 +90,19 @@ def test_attempt_data_synthesizes_csv_rows_and_marks_invalid_first_word(
     assert csi_record_for_table_row(compact, 2) is None
 
 
+def test_csi_value_rows_pair_he_ltf_subcarriers_with_their_slots():
+    values = [complex(i % 50 - 25, i % 40 - 20) for i in range(245)]
+    record = CsiRecord(1, "aa:bb:cc:dd:ee:ff", -40, -90, 1, values, sig_mode=4)
+
+    rows = csi_value_rows(record)
+
+    assert [row.subcarrier for row in rows] == [
+        f"{index:+d}" for index in HE20_COMPACT_SLOT_INDICES
+    ]
+    assert [complex(row.real, row.imaginary) for row in rows] == values
+    assert any(row.calibrated_phase is not None for row in rows)
+
+
 def test_compact_row_selection_never_reconverts_and_caches_the_window(
     session_factory, monkeypatch
 ):
@@ -206,24 +219,20 @@ def _record(
 ) -> CsiRecord:
     raw = tuple(
         complex(
-            12.0 * np.cos(index * 0.071 + sequence * 0.03),
-            12.0 * np.sin(index * 0.071 + sequence * 0.03),
+            round(12.0 * np.cos(index * 0.071 + sequence * 0.03)),
+            round(12.0 * np.sin(index * 0.071 + sequence * 0.03)),
         )
         for index in range(len(layout) * blocks)
     )
     # Exercise the amplitude-floor mask as well as ESP-IDF's invalid prefix.
     raw = (*raw[:7], complex(1.0, 1.0), *raw[8:])
-    plotted = list(raw)
-    if first_word_invalid:
-        plotted[:2] = [complex(np.nan, np.nan)] * 2
     return CsiRecord(
         sequence=sequence,
         mac="00:11:22:33:44:55",
         rssi=-50 - sequence,
         noise_floor=-95,
         timestamp_us=1_000 + sequence * 20_000,
-        csi=tuple(plotted),
-        raw_csi=raw,
+        csi=raw,
         sig_mode=sig_mode,
         bandwidth=0,
         stbc=stbc,

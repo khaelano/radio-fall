@@ -188,21 +188,20 @@ def _frame_record(frame: dict[str, Any], index: int) -> CsiRecord:
     """Build the record of frame ``index`` from its columns.
 
     The payload holds interleaved imaginary and real bytes. The first two values
-    of a frame flagged ``first_word_invalid`` stay in ``raw_csi`` but are not
-    plottable.
+    of a frame flagged ``first_word_invalid`` stay in ``raw_csi`` but the record's
+    ``csi`` view masks them.
     """
 
     payload = np.frombuffer(frame["csi"][index], dtype=np.int8)
     raw = tuple((payload[1::2].astype(np.float64) + 1j * payload[0::2]).tolist())
     invalid = bool(frame["first_word_invalid"][index])
-    shown = (complex(np.nan, np.nan),) * min(2, len(raw)) + raw[2:] if invalid else raw
     return CsiRecord(
         sequence=frame["sequence"][index],
         mac=frame["transmitter_mac"][index],
         rssi=frame["rssi"][index],
         noise_floor=frame["noise_floor"][index],
         timestamp_us=frame["rx_radio_us"][index],
-        csi=shown,
+        csi=raw,
         transport_sequence=frame["transport_sequence"][index],
         run_id=frame["run_id"][index],
         transmitter_boot_id=frame["tx_boot_id"][index],
@@ -228,8 +227,6 @@ def _frame_record(frame: dict[str, Any], index: int) -> CsiRecord:
         antenna=frame["ant"][index],
         sig_len=frame["sig_len"][index],
         rx_state=frame["rx_state"][index],
-        csi_length=payload.size,
-        raw_csi=raw,
     )
 
 
@@ -677,7 +674,7 @@ def csi_value_rows(record: CsiRecord) -> tuple[CsiValueRow, ...]:
             )
             for subcarrier, value, amplitude, raw_phase, calibrated_phase in zip(
                 block.subcarrier_indices,
-                block.values,
+                block.csi,
                 block.amplitudes,
                 block.raw_phases,
                 block.calibrated_phases,

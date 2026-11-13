@@ -1,7 +1,6 @@
 """Build ``CsiRecord`` fixtures from Espressif ``CSI_DATA`` text lines."""
 
 import json
-from math import nan
 
 from fall_detection.radio.records import CsiRecord
 
@@ -20,17 +19,13 @@ def record_from_csi_line(line: str) -> CsiRecord:
         complex(values[index + 1], values[index]) for index in range(0, len(values), 2)
     )
     invalid = int(fields[23])
-    shown = list(raw)
-    if invalid:
-        for index in range(min(2, len(shown))):
-            shown[index] = complex(nan, nan)
     return CsiRecord(
         sequence=int(fields[1]),
         mac=fields[2].strip().lower(),
         rssi=int(fields[3]),
         noise_floor=int(fields[14]),
         timestamp_us=int(fields[18]),
-        csi=tuple(shown),
+        csi=raw,
         first_word_invalid=bool(invalid),
         rate=int(fields[4]),
         sig_mode=int(fields[5]),
@@ -48,6 +43,4 @@ def record_from_csi_line(line: str) -> CsiRecord:
         antenna=int(fields[19]),
         sig_len=int(fields[20]),
         rx_state=int(fields[21]),
-        csi_length=int(fields[22]),
-        raw_csi=raw,
     )

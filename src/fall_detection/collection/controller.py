@@ -14,7 +14,7 @@ from typing import Any, Protocol
 
 from ..protocol import CollectionProtocol, Trial
 from ..radio.recording_io import RecordingIO
-from ..radio.records import AnyCsiRecord
+from ..radio.records import CsiRecord
 from ..radio.telemetry import (
     BackhaulTelemetrySnapshot,
     telemetry_delta,
@@ -100,7 +100,7 @@ class CaptureSink(Protocol):
     """Callback seam used by the radio adapter."""
 
     def write_radio(
-        self, record: AnyCsiRecord, host_receive_monotonic_ns: int
+        self, record: CsiRecord, host_receive_monotonic_ns: int
     ) -> None: ...
 
 
@@ -438,7 +438,7 @@ class SessionController:
             return "clock synchronization is not ready"
         return "unknown readiness failure"
 
-    def write_radio(self, record: AnyCsiRecord, host_receive_monotonic_ns: int) -> None:
+    def write_radio(self, record: CsiRecord, host_receive_monotonic_ns: int) -> None:
         """Receive radio data from an adapter and write it if a trial is active."""
 
         with self._lock:

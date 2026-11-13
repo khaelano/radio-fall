@@ -1,4 +1,4 @@
-use crate::wire::{Batch, Record};
+use crate::wire::{Batch, Record, RecordParts};
 use num_complex::Complex64;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyTuple};
@@ -22,8 +22,111 @@ fn doubles(v: &[f64]) -> &[u8] {
 pub struct NativeRecord {
     pub core: Arc<Record>,
 }
+/// Pack one complex CSI value as the interleaved imaginary, real `i8` bytes the radio reports.
+fn csi_bytes(values: &[Complex64]) -> PyResult<Vec<u8>> {
+    let component = |value: f64| -> PyResult<u8> {
+        if value.fract() == 0.0 && (-128.0..=127.0).contains(&value) {
+            Ok(value as i8 as u8)
+        } else {
+            Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "CSI components must be integers in [-128, 127], got {value}"
+            )))
+        }
+    };
+    let mut bytes = Vec::with_capacity(values.len() * 2);
+    for value in values {
+        bytes.push(component(value.im)?);
+        bytes.push(component(value.re)?);
+    }
+    Ok(bytes)
+}
+
 #[pymethods]
 impl NativeRecord {
+    /// Build a record from Python values.
+    ///
+    /// `csi` holds the complex values exactly as the radio reported them: each
+    /// component is a signed byte. When `first_word_invalid` is set, the `csi`
+    /// view masks the first two values as NaN while `raw_csi` keeps them.
+    /// Passing only one of the two timestamps stores the other as zero. The
+    /// derived I/Q means, phase block and CSV line match decoded records.
+    #[new]
+    #[pyo3(signature = (
+        sequence, mac, rssi, noise_floor, timestamp_us, csi, *,
+        receiver_mac=String::new(), transport_sequence=0, tx_timestamp_us=None,
+        rx_callback_timestamp_us=None, first_word_invalid=false, rate=0, sig_mode=0,
+        mcs=0, bandwidth=0, smoothing=0, not_sounding=0, aggregation=0, stbc=0,
+        fec_coding=0, sgi=0, ampdu_count=0, channel=0, secondary_channel=0,
+        antenna=0, sig_len=0, rx_state=0, profile_fingerprint=String::new()
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        sequence: u32,
+        mac: String,
+        rssi: i8,
+        noise_floor: i8,
+        timestamp_us: u32,
+        csi: Vec<Complex64>,
+        receiver_mac: String,
+        transport_sequence: u32,
+        tx_timestamp_us: Option<u64>,
+        rx_callback_timestamp_us: Option<u64>,
+        first_word_invalid: bool,
+        rate: u8,
+        sig_mode: u8,
+        mcs: u8,
+        bandwidth: u8,
+        smoothing: u8,
+        not_sounding: u8,
+        aggregation: u8,
+        stbc: u8,
+        fec_coding: u8,
+        sgi: u8,
+        ampdu_count: u8,
+        channel: u8,
+        secondary_channel: u8,
+        antenna: u8,
+        sig_len: u16,
+        rx_state: u8,
+        profile_fingerprint: String,
+    ) -> PyResult<Self> {
+        let raw = csi_bytes(&csi)?;
+        let timed = tx_timestamp_us.is_some() || rx_callback_timestamp_us.is_some();
+        let core = Record::assemble(RecordParts {
+            wire: Arc::from(Vec::new()),
+            sequence,
+            transport_sequence,
+            timestamp: timestamp_us,
+            receiver: receiver_mac,
+            transmitter: mac,
+            fingerprint: profile_fingerprint,
+            tx_timestamp: tx_timestamp_us.unwrap_or(0),
+            callback: rx_callback_timestamp_us.unwrap_or(0),
+            flags: u8::from(first_word_invalid) | (u8::from(timed) << 1),
+            rssi,
+            noise: noise_floor,
+            fields: [
+                rate,
+                sig_mode,
+                mcs,
+                bandwidth,
+                smoothing,
+                not_sounding,
+                aggregation,
+                stbc,
+                fec_coding,
+                sgi,
+                ampdu_count,
+                channel,
+                secondary_channel,
+                antenna,
+                rx_state,
+            ],
+            sig_len,
+            raw: raw.into(),
+        });
+        Ok(Self { core })
+    }
     #[getter]
     fn sequence(&self) -> u32 {
         self.core.sequence
@@ -122,6 +225,11 @@ impl NativeRecord {
                 }
             }),
         )
+    }
+    /// True when the native worker prepared a calibrated HE-LTF block.
+    #[getter]
+    fn has_phase(&self) -> bool {
+        self.core.phase.is_some()
     }
     fn phase_bytes<'py>(&self, py: Python<'py>) -> Option<PhaseBytes<'py>> {
         self.core.phase.as_ref().map(|p| {

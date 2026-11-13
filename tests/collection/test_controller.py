@@ -258,7 +258,6 @@ def test_attempt_persists_boot_aware_radio_telemetry_delta(tmp_path: Path):
 
 
 def test_ble_delayed_records_route_by_capture_time_across_attempts(tmp_path: Path):
-    from dataclasses import replace
 
     from fall_detection.radio.records import CsiRecord
 
@@ -290,7 +289,6 @@ def test_ble_delayed_records_route_by_capture_time_across_attempts(tmp_path: Pat
         100,
         (1 + 2j,),
         receiver_mac="00:11:22:33:44:55",
-        csi_length=2,
         run_id=123,
         transmitter_boot_id=11,
         receiver_boot_id=21,
@@ -298,17 +296,17 @@ def test_ble_delayed_records_route_by_capture_time_across_attempts(tmp_path: Pat
     )
     controller.write_radio(record, 1_050_000_000)
     controller.write_radio(
-        replace(record, sequence=2, capture_host_monotonic_ns=1_020_000_000),
+        record.replace(sequence=2, capture_host_monotonic_ns=1_020_000_000),
         1_060_000_000,
     )
     # Alignment failures and arrivals beyond the previous attempt's drain
     # deadline cannot become fresh observations in the new attempt.
     controller.write_radio(
-        replace(record, sequence=3, capture_host_monotonic_ns=None), 1_070_000_000
+        record.replace(sequence=3, capture_host_monotonic_ns=None), 1_070_000_000
     )
     clock.advance(0.4)
     controller.tick()
-    controller.write_radio(replace(record, sequence=4), 1_410_000_000)
+    controller.write_radio(record.replace(sequence=4), 1_410_000_000)
     controller.dispatch(OperatorCommand.ABORT)
     controller.flush_radio()
     root = controller.session_root / "trials" / "001_one"

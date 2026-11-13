@@ -68,22 +68,20 @@ def test_buffer_unwraps_uint32_device_timestamp():
     second = record(2)
     # Replace the tiny fixture timestamp with values around the ESP32 counter
     # wrap while keeping the records otherwise valid.
-    from dataclasses import replace
 
-    buffer.append(replace(first, timestamp_us=0xFFFFFFF0))
-    buffer.append(replace(second, timestamp_us=0x00000010))
+    buffer.append(first.replace(timestamp_us=0xFFFFFFF0))
+    buffer.append(second.replace(timestamp_us=0x00000010))
 
     assert buffer.snapshot().timestamps == (0.0, 32 / 1_000_000)
 
 
 def test_buffer_keeps_progress_after_device_timestamp_reset():
-    from dataclasses import replace
 
     buffer = RollingCsiBuffer(nominal_rate=100, seconds=10, max_records=100)
-    buffer.append(replace(record(1), timestamp_us=1_000_000))
-    buffer.append(replace(record(2), timestamp_us=2_000_000))
-    buffer.append(replace(record(3), timestamp_us=10))
-    buffer.append(replace(record(4), timestamp_us=20))
+    buffer.append(record(1).replace(timestamp_us=1_000_000))
+    buffer.append(record(2).replace(timestamp_us=2_000_000))
+    buffer.append(record(3).replace(timestamp_us=10))
+    buffer.append(record(4).replace(timestamp_us=20))
 
     timestamps = buffer.snapshot().timestamps
     assert timestamps[-1] > timestamps[-2]
@@ -106,7 +104,7 @@ def test_monitor_snapshot_contains_only_compact_scalar_traces_and_downsamples():
     assert snapshot.noise_floor == (-95, -95, -95, -95)
     assert not hasattr(snapshot, "amplitudes")
     assert not hasattr(snapshot, "phases")
-    assert all(parsed._derived_views_cache is None for parsed in records)
-    assert all(parsed._ltf_blocks_cache is None for parsed in records)
+    assert all(parsed._views is None for parsed in records)
+    assert all(parsed._block is ... for parsed in records)
     assert buffer.received_records == 11
     assert len(buffer.snapshot().timestamps) == 11

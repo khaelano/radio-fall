@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from math import nan
 from threading import Lock
 
-from .records import AnyCsiRecord
+from .records import CsiRecord
 
 DEFAULT_NOMINAL_RATE_HZ = 50
 
@@ -78,7 +78,7 @@ class RollingCsiBuffer:
             if max_records is None
             else max(1, max_records)
         )
-        self._records: deque[tuple[AnyCsiRecord, int]] = deque()
+        self._records: deque[tuple[CsiRecord, int]] = deque()
         self._lock = Lock()
         self._last_sequence: int | None = None
         self._missing_sequences = 0
@@ -105,7 +105,7 @@ class RollingCsiBuffer:
         with self._lock:
             return self._last_sequence
 
-    def append(self, record: AnyCsiRecord) -> None:
+    def append(self, record: CsiRecord) -> None:
         with self._lock:
             sequence = record.sequence & 0xFFFFFFFF
             sequence_advanced = False
@@ -172,7 +172,7 @@ class RollingCsiBuffer:
 
     def _window_entries(
         self, seconds: float | None
-    ) -> tuple[tuple[tuple[AnyCsiRecord, int], ...], int | None]:
+    ) -> tuple[tuple[tuple[CsiRecord, int], ...], int | None]:
         with self._lock:
             entries = tuple(self._records)
             origin = self._time_origin_us
@@ -242,10 +242,7 @@ class RollingCsiBuffer:
         if prepared_only and any(not record.phase_views_ready for record in records):
             raise PreviewNotReady
 
-        maximum = max(
-            getattr(record, "sample_count", None) or len(record.csi)
-            for record in records
-        )
+        maximum = max(record.sample_count for record in records)
         selected_end = maximum if end is None else max(start, min(end, maximum))
         selected_start = max(0, min(start, selected_end))
         amplitudes = phases = real = imaginary = ()

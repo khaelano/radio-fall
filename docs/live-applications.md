@@ -9,7 +9,7 @@ writing and trial timing remain in the collection controller and capture modules
 | --- | --- |
 | `radio/live.py` | Resolve settings, start `NativeAcquisition`, deliver accepted records to sinks and receiver buffers, map native health to status, diagnostics and telemetry |
 | `radio_transport::session` (`src/native/radio_core/`) | Gateway preparation and relay recovery, startup, journal-before-ACK acceptance, capture mapping, availability bins, restarts |
-| `radio_transport::quality`, `radio/records.py`, `radio/native.py` | Duplicate-capture removal and delivery counters; Python record types (`NativeRecord` with lazy array views, `CsiRecord` for the inspector) and backend access |
+| `radio_transport::quality`, `radio/records.py`, `radio/native.py` | Duplicate-capture removal and delivery counters; the Python record type (`CsiRecord`, backed by a Rust record, with lazy array views) and backend access |
 | `radio/recording_io.py` | Native bounded recording worker; periodic batched disk writes |
 | `apps/common/live.py` | Compose the dashboard and transport panel; limit diagnostics to four updates per second |
 | `apps/common/pacing.py` | Shared display rates, timer intervals and the `--fps` option |

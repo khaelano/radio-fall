@@ -1,5 +1,4 @@
 import struct
-from dataclasses import replace
 
 import pytest
 from csi_line import record_from_csi_line
@@ -20,7 +19,7 @@ from fall_detection.radio.records import format_csi_record
 
 
 def parse_csi_line(line):
-    return replace(record_from_csi_line(line), profile_fingerprint="0123456789abcdef")
+    return record_from_csi_line(line).replace(profile_fingerprint="0123456789abcdef")
 
 
 from wire_reference import decode_csi_datagram, decode_csi_packet
@@ -204,8 +203,7 @@ def test_batch_accepts_two_large_clocked_records_below_payload_limit():
 
 
 def test_binary_wire_preserves_cross_clock_timestamps():
-    record = replace(
-        parse_csi_line(LINE),
+    record = parse_csi_line(LINE).replace(
         tx_timestamp_us=0x0102030405060708,
         rx_callback_timestamp_us=0x1112131415161718,
     )

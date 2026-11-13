@@ -3768,8 +3768,6 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
-    { name = "pandas" },
-    { name = "zstandard" },
 ]
 
 [package.optional-dependencies]
@@ -3777,9 +3775,11 @@ analysis = [
     { name = "ipykernel" },
     { name = "matplotlib" },
     { name = "nbconvert" },
+    { name = "pandas" },
     { name = "polars" },
     { name = "pyarrow" },
     { name = "scikit-learn" },
+    { name = "zstandard" },
 ]
 cuda = [
     { name = "onnx" },
@@ -3829,7 +3829,7 @@ requires-dist = [
     { name = "onnxruntime-ep-webgpu", marker = "sys_platform == 'linux' and extra == 'detect'", specifier = "==0.5.0" },
     { name = "onnxscript", marker = "extra == 'cuda'", specifier = ">=0.5" },
     { name = "onnxscript", marker = "extra == 'train'", specifier = ">=0.5" },
-    { name = "pandas", specifier = ">=2.0" },
+    { name = "pandas", marker = "extra == 'analysis'", specifier = ">=2.0" },
     { name = "polars", marker = "extra == 'analysis'", specifier = ">=1.0" },
     { name = "pyarrow", marker = "extra == 'analysis'", specifier = ">=18" },
     { name = "pyarrow", marker = "extra == 'radio'", specifier = ">=18" },
@@ -3839,7 +3839,7 @@ requires-dist = [
     { name = "scikit-learn", marker = "extra == 'analysis'", specifier = ">=1.5" },
     { name = "torch", marker = "(sys_platform == 'linux' and extra == 'cuda') or (sys_platform == 'win32' and extra == 'cuda')", specifier = "==2.14.1", index = "https://download.pytorch.org/whl/cu130", conflict = { package = "radio-fall-detection", extra = "cuda" } },
     { name = "torch", marker = "extra == 'train'", specifier = "==2.14.1", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "radio-fall-detection", extra = "train" } },
-    { name = "zstandard", specifier = ">=0.23" },
+    { name = "zstandard", marker = "extra == 'analysis'", specifier = ">=0.23" },
 ]
 provides-extras = ["analysis", "radio", "train", "detect", "cuda"]
 

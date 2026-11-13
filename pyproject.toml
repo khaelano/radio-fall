@@ -10,12 +10,12 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "numpy>=1.24",
-    "pandas>=2.0",
-    "zstandard>=0.23",
 ]
 
 [project.optional-dependencies]
 analysis = [
+    "pandas>=2.0",
+    "zstandard>=0.23",
     "polars>=1.0",
     "matplotlib>=3.8",
     "pyarrow>=18",

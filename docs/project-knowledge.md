@@ -106,13 +106,13 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   C5 receivers send scheduled ESP-NOW batches to a C6 USB gateway; hardware
   qualification evidence and limitations are in the
   [gateway guide](espnow-gateway.md) and [dated reports](reports/README.md).
-- **Storage:** closed sessions use verified ZIP64 archives. New collector
-  streams are written as independent Zstandard frames and retained in version-2
-  archives; newly created archives use version 2 even when files are plain.
-  Readers accept version 2 only. Existing version-1 raw archives are retained
-  unchanged; verified derived copies are stored in `data/normalized/sessions/`.
-  The archive contract documents integrity checks, resume behavior, and
-  durability limits.
+- **Storage:** closed sessions use verified ZIP64 archives. The collector
+  finalizes version-3 archives (raw journals and manifests) into
+  `data/raw/sessions/`; readers go through `fall_detection._radio_native`.
+  Version-1 and version-2 originals are retained unchanged in `data/old_raw/`
+  and are no longer read by Python. See the [dataset format](dataset-format.md)
+  and [storage layout specification](storage-layout-spec.md) for integrity
+  checks, resume behavior, and durability limits.
 - **Analysis:** shared code owns verified session reads, alignment primitives,
   native signal operations, memory-mapped storage, export validation, and
   leakage-safe training inputs. `notebooks/latest/02_preprocess.ipynb` owns
@@ -186,8 +186,8 @@ provisioning), `analysis/`, `collection/`, `session/` and `session_inspector/`
 contain the reusable radio, data, and domain
 components used by these applications and research tools. `session/` is the
 neutral session model (manifest models, directory/archive reader, schema
-version) that analysis, collection and the inspector all import; it depends on
-none of them. `session_inspector/` keeps only inspector-specific frame loading,
+version) that analysis, collection and the inspector all import; its only
+domain dependency is `collection.protocol`, for protocol parsing. `session_inspector/` keeps only inspector-specific frame loading,
 review, export and video. The viewer and
 collector share the dashboard, pacing and Qt bootstrap in `apps/common/`.
 

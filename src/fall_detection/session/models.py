@@ -4,7 +4,7 @@ Loading and scanning read only the small JSON manifests.  The receivers of an
 attempt come from the typed frame tables derived from the raw journals (see
 the Rust ``radio_storage`` library); they are resolved explicitly when a
 single session is opened.  The session inspector loads a selected attempt
-on demand (:mod:`fall_detection.session_inspector.data`).
+on demand (:mod:`fall_detection.apps.session_inspector.data`).
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from typing import Any
 import pyarrow as pa
 
 from .._radio_native import FrameStore
-from ..collection.protocol import (
+from ..protocol import (
     CollectionProtocol,
     ProtocolError,
     Trial,

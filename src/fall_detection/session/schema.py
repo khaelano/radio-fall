@@ -1,7 +1,7 @@
 """On-disk schema version of recorded sessions.
 
 Kept in a leaf module so ``collection`` can import it without loading the
-session models, which in turn depend on ``collection.protocol``.
+session models, which in turn depend on ``protocol``.
 """
 
 ARTIFACT_SCHEMA_VERSION = 2

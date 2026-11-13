@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..protocol import CollectionProtocol, load_protocol
 from ..session import ARTIFACT_SCHEMA_VERSION, SessionSource, read_json_object
 from .capture import SessionMetadata
-from .protocol import CollectionProtocol, load_protocol
 
 
 @dataclass(frozen=True)

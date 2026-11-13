@@ -13,7 +13,7 @@ from fall_detection.collection.controller import (
     SessionSnapshot,
     SessionState,
 )
-from fall_detection.collection.protocol import CollectionProtocol
+from fall_detection.protocol import CollectionProtocol
 
 
 class OperatorWindow:

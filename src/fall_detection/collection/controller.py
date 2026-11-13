@@ -12,6 +12,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Protocol
 
+from ..protocol import CollectionProtocol, Trial
 from ..radio.recording_io import RecordingIO
 from ..radio.records import AnyCsiRecord
 from ..radio.telemetry import (
@@ -19,7 +20,6 @@ from ..radio.telemetry import (
     telemetry_delta,
 )
 from .capture import SessionArtifactStore, SessionMetadata, TrialCapture, _write_json
-from .protocol import CollectionProtocol, Trial
 
 
 class SessionState(str, Enum):

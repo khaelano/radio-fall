@@ -15,7 +15,7 @@ import numpy as np
 import polars as pl
 
 from .._radio_native import storage_read as read_session_file
-from ..collection.protocol import protocol_from_mapping
+from ..protocol import protocol_from_mapping
 from ..radio.preprocessing import phase as phase_module
 from . import _cache_keys, _frames, _receiver, _timeline, session_frames
 from ._frames import as_polars

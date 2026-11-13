@@ -12,10 +12,10 @@ from threading import RLock
 from typing import Any, TextIO
 
 from .._radio_native import storage_read_file
+from ..protocol import CollectionProtocol, Trial
 from ..radio.recording_io import RecordingIO
 from ..radio.records import CSI_HEADER, AnyCsiRecord, format_csi_record
 from ..session.schema import ARTIFACT_SCHEMA_VERSION
-from .protocol import CollectionProtocol, Trial
 
 TIMING_HEADER = (
     "sequence,receiver_mac,transport_sequence,tx_enqueue_timestamp_us,"

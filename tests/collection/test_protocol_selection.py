@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from fall_detection.collection.protocol import (
+from fall_detection.protocol import (
     ProtocolError,
     load_protocol,
     protocol_from_mapping,

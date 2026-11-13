@@ -12,7 +12,7 @@ from fall_detection.collection.controller import (
     SessionController,
     SessionState,
 )
-from fall_detection.collection.protocol import protocol_from_mapping
+from fall_detection.protocol import protocol_from_mapping
 from fall_detection.radio.telemetry import (
     BackhaulTelemetrySnapshot,
     GatewayTelemetry,

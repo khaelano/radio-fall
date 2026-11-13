@@ -25,7 +25,7 @@ from fall_detection.collection.controller import (
     SessionController,
     SessionSnapshot,
 )
-from fall_detection.collection.protocol import (
+from fall_detection.protocol import (
     load_protocol,
     protocol_from_mapping,
     select_blocks,

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from fall_detection.collection.capture import SessionMetadata
-from fall_detection.collection.protocol import (
+from fall_detection.protocol import (
     CollectionProtocol,
     ProtocolError,
     Trial,

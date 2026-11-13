@@ -7,46 +7,51 @@ when the desktop application is closed.
 
 ## Recovery behavior
 
-`radio/live.py` supervises individual `GatewayReceiverManager` runs. A transmitter,
-companion or gateway restart ends the affected run. USB stream truncation during
-reboot also ends that run; it is never treated as a valid packet. Recovery then:
+The native session (`radio_transport::session`, driven through
+`NativeAcquisition` by `radio/live.py` and directly by `fall-detect`) owns
+recovery. A transmitter, companion or gateway restart ends the affected run.
+USB framing errors after acceptance starts also end that run; a damaged frame
+is never treated as a valid packet. Recovery then:
 
-1. Notifies the collection controller immediately, including when GUI refreshes
-   are paused. An active attempt becomes invalid and its partial CSI/video files
+1. Reports the failure once through `health()`. `LiveRadio` calls the
+   interruption callback immediately, including while GUI refreshes are paused.
+   An active collection attempt becomes invalid and its partial CSI/video files
    are retained. The operator must retry or skip it.
-2. Stops and joins the old workers before opening their ports again. Reconnection
-   starts after three seconds and backs off to at most 30 seconds while hardware
-   remains unavailable. Closing the application cancels retries.
-3. Discovers the configured gateway identity. When an old UART relay epoch needs
-   replacing, stops its configuration and requests an idle gateway restart using
-   USB frame type 31 with payload `CRRC`. Firmware rejects this request while the
-   gateway is configured. Pairing keys and radio profiles remain in NVS.
+2. Closes the serial port, sending best-effort stop commands to the gateway and
+   relayed transmitter. Reconnection starts after three seconds and backs off
+   linearly to at most 30 seconds while hardware remains unavailable; a run that
+   accepted data resets the backoff. Stopping the application cancels retries.
+3. Discovers the configured gateway identity. A gateway still configured for an
+   older run receives that run's stop command. After a failure, a faulted relay
+   epoch is restarted with USB frame type 31 and payload `CRRC`; firmware without
+   `relay_recovery_version` 1 makes the session stop. The session then waits up
+   to eight seconds for relay readiness. Pairing keys and radio profiles remain
+   in NVS.
 4. Reconnects the paired C6s. An inactive companion can discard its ended stream
    and clear a recoverable fault when it receives a new authenticated peer boot
-   epoch. Active runs still fail on a peer restart. Old boot/nonce packets cannot
-   restart the ended stream, and cumulative diagnostic counters are retained.
-5. Creates a fresh run ID, clock estimator, receiver states, preview buffers and
-   transport journal. It reconfigures the transmitter, gateway and receivers,
-   re-establishes timing and resumes sensing. Readiness returns after fresh data
-   arrives from all configured receivers.
+   epoch. Active runs still fail on a peer restart.
+5. Starts a fresh run ID, clock fit, receiver ledger, availability grid and
+   transport journal. The journal manifest's `recovery` field and a
+   `run_resuming` event name the previous run and failure. Readiness returns
+   after fresh status and data arrive from all configured receivers.
 
 The C5 and companion release a latched UART fault only after their active run
-ends. CRC/framing checks continue on subsequent frames. The C5's existing
-three-second control lease still stops sensing if host control disappears.
+ends. The C5's three-second control lease still stops sensing if host control
+disappears.
 
-The specific gateway USB receive-buffer age errors now also end the old run and
-trigger recovery. Stale input is not accepted, the interrupted attempt stays
-invalid, and the 200 ms guard is unchanged. This allows a transient host stall
-to recover without stranding the collection session.
+Failures that would recur on every run stop the session instead of retrying:
+identity, profile or boot mismatches, refused or rejected control commands,
+missing firmware capabilities, invalid configuration and journal or storage
+errors (`radio_transport::session::recoverable`). Interrupted links, timeouts,
+lost status or reference evidence, receiver reboots and record-queue overflow
+start a new run. Python storage failures do not stop acquisition: the Rust
+journal already holds every acknowledged envelope, and `LiveRadio` reports the
+failure and invalidates the attempt.
 
-Identity/profile mismatches, storage failures, invalid CSI envelopes and bounded
-buffer overflows remain terminal. Other queue-age errors are not broadly
-reclassified. A lost or truncated USB reference
-frame can trigger a new run, but its damaged run and interrupted attempt remain
-failed. Automatic recovery applies to the live `espnow_uart` and USB-reference
-applications; the deferred BLE reference path remains unchanged. Hardware
-benchmarks retain their strict single-run behavior, so an outage cannot be hidden
-inside a passing concatenated benchmark.
+The retry and classification logic is covered offline by
+`tests/radio/test_native_session.py` against a fake gateway. Automatic recovery
+on the current hardware after the move to the native session has not been
+re-qualified; the hardware evidence below predates it.
 
 ## Resume a saved collection session
 
@@ -77,8 +82,10 @@ checks writers from the older version that did not acquire this lock.
 ## Buffered collection recording
 
 The collector uses a shared 32 MiB in-memory writer for receiver CSV/timing
-streams, session events and raw gateway envelope/event/availability journals.
-It batches physical writes on a separate thread every five seconds. Use
+streams and session events. It batches physical writes on a separate thread
+every five seconds. The native session writes the raw gateway
+envelope/event/availability journals itself and flushes each accepted envelope
+to the file buffer before its ACK. Use
 `--recording-flush-seconds <seconds>` to change the interval. Camera encoding
 retains its existing independent process and per-frame timing.
 
@@ -86,8 +93,9 @@ Frequent stream `flush()` calls check memory admission; the dedicated recording
 service owns disk flushing. The memory limit includes bytes being written.
 Overflow and disk errors fail explicitly. Closing an attempt requests a bounded
 drain, and acceptance waits for its streams to finish saving. Normal collector
-shutdown drains all admitted records. Enabled application ACKs still wait for
-the recording service's file-buffer flush before transmission.
+shutdown delivers and drains all accepted records. Application ACKs certify the
+native envelope journal, not the later CSV write: CSV rows are produced from the
+same accepted records after the ACK, and the journal can regenerate them.
 
 Live availability timestamps describe validated application-memory acceptance,
 not the later physical write. No sensing timestamp or finalized bin is moved.
@@ -108,8 +116,9 @@ which operation caused the earlier host stall.
 
 The old transport journal records `run_interrupted`. Each replacement manifest
 has a `recovery` object containing `previous_run_id` and `reason`, and its events
-include `run_resuming` and, after full readiness, `run_recovered`. Collection also
-records `radio_interrupted` in the session event log. No synthetic CSI or
+include `run_resuming`. The native session does not write the former
+`run_recovered` event; readiness is visible in `health()` and the status log.
+Collection also records `radio_interrupted` in the session event log. No synthetic CSI or
 backfilled availability bins fill the gap between run segments. An accepted
 attempt cannot silently span the interruption.
 

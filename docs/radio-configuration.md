@@ -24,21 +24,17 @@ remain unqualified. See [the backlog investigation](reports/gateway-preview-back
 These results do not establish reliability at every placement. See [measured results and limits](uart-transmitter-relay.md#verification).
 
 The `connection.gateway_port` identifies the laptop gateway. The
-`transmitter_port` supports USB recovery; `companion_port` is used only for
-initial relay pairing. Acquisition uses the gateway alone with `espnow_uart`.
-These paths are specific to the verified boards on Linux; update them on a
-different laptop. Explicit `--gateway-port`, `--port` and `--transmitter-link`
-arguments override file values for one command. For example:
+`transmitter_port` is used by provisioning tools; `companion_port` is used only
+for initial relay pairing. Acquisition uses the gateway alone with `espnow_uart`,
+the only supported `transmitter_link`. These paths are specific to the verified
+boards on Linux; update them on a different laptop. An explicit `--gateway-port`
+overrides the file value for one command. For example:
 
 ```sh
 uv run csi-viewer
 uv run fall-collection
-uv run csi-gateway-benchmark
 uv run csi-radio transmitter status
 uv run csi-radio provision --dry-run
-
-# USB reference recovery, using the configured C5 USB path:
-uv run csi-viewer --transmitter-link usb
 ```
 
 The host accepts gateway transport policy version 7 and operational inventory

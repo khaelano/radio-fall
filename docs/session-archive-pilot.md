@@ -1,10 +1,21 @@
 # Session archive contract, version 2
 
+> **Retired.** Version-2 archives are kept in `data/old_raw/sessions/` and are no
+> longer read or written by the code. The current format is version 3, described
+> in the [storage layout specification](storage-layout-spec.md) and
+> [dataset format](dataset-format.md#version-3-session-archives). The text below
+> documents the old contract for reference; the Python `Recording` API and the
+> `pilot_session_archive`, `migrate_session_archives` and `upgrade_session_archive`
+> tools it mentions were removed.
+
 This is the accepted raw format for a closed schema-2 session. One ZIP64 file
 contains one complete session and Parquet representations of its receiver
 tables. Readers accept version-2 archives with either plain or directly recorded
 Zstandard members. Version-1 raw archives are preserved unchanged; use the
 verified copies in `data/normalized/sessions/` for current analysis.
+Since 13 November 2026 the archives described here live in
+`data/old_raw/sessions/`; `data/raw/sessions/` holds their version-3
+successors ([layout spec](storage-layout-spec.md)).
 The collector publishes `<session-id>.zip` after the application exits and
 radio, video and buffered writers have closed. During collection it uses a
 recoverable schema-2 working directory whose CSI CSVs, radio/clock timing,
@@ -134,9 +145,10 @@ The original session remains unchanged.
 `uv run python tools/processing/upgrade_session_archive.py <destination> <source...>`
 creates separate version-2 archives without modifying the source. It validates
 all declared member sizes and SHA256 checksums, records the source manifest hash,
-and verifies the complete output before publishing it. The `data/normalized.dvc`
-metadata versions the local normalized copies. The session path resolver checks
-the source manifest when both copies are present.
+and verifies the complete output before publishing it. The session path
+resolver checks the source manifest when both copies are present. The
+`data/normalized.dvc` metadata that once versioned these copies was removed on
+13 November 2026; its content remains in the DVC remote under earlier commits.
 
 ## Migration of existing sessions
 
@@ -160,11 +172,11 @@ detection, lock rejection and collector cleanup ordering. The large-session
 comparisons stream every original archive member through the same access API
 used by extraction, without requiring another complete uncompressed copy.
 
-The notebook loaders `load_parquet_session` and `load_amplitude_session` accept
-raw ZIP paths. A cache rebuild extracts only session metadata and receiver
-files into a temporary directory; it excludes transport journals and video and
-removes the temporary files afterward. Archive manifest and exporter-code
-fingerprints validate subsequent cache reuse. Existing derived windows remain
+The notebook loaders `load_analysis_session` and `load_amplitude_session` accept
+raw ZIP paths and read journals and manifests directly from the archive through
+the storage library, so nothing is extracted. The archive's central-directory
+fingerprint validates subsequent cache reuse. (This replaces the earlier
+`load_parquet_session` extraction cache.) Existing derived windows remain
 the inputs to the training notebook.
 
 Fresh loading-cell runs for exploration, preprocessing and amplitude comparison

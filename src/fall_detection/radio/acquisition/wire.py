@@ -1,4 +1,8 @@
-"""Binary CSI wire format used by the Espressif USB receiver."""
+"""Reference encoder for the binary CSI1/CSIB wire format.
+
+Host decoding is implemented in Rust (``radio_transport::wire``). This encoder
+builds deterministic fixtures for firmware contract and Rust parity tests.
+"""
 
 from __future__ import annotations
 

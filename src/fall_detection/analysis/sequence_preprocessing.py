@@ -4,14 +4,12 @@ Experiment selection, transformations, cue labeling, and stage orchestration
 live in notebooks/latest/02_preprocess.ipynb.
 """
 
-import hashlib
 import itertools
 import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from zipfile import BadZipFile, ZipFile
 
 import numpy as np
 import polars as pl
@@ -24,7 +22,6 @@ from .amplitude_pipeline import (
 )
 from .sequence_cache import (
     file_hash,
-    stamp,
 )
 
 _MODULUS = 1 << 32
@@ -312,63 +309,20 @@ class SequenceArtifacts:
     cache_hits: list = field(default_factory=list)
 
     def load_source(self) -> AmplitudeSession:
-        """Open verified session tables, reusing an unchanged local source receipt."""
-        from ..storage import session_archive_path
-        from . import phase_signals, session_parquet
+        """Open the session tables, converting the raw journals only when stale.
 
-        source = session_archive_path(self.root, self.session_id)
-        directory = self.root / "data/interim/parquet" / self.session_id
-        manifest_path = directory / "session.json"
-        checkpoint = self.output / ".cache" / "source.json"
-        paths = [source, manifest_path] + [
-            directory / f"{name}.parquet" for name in ("attempts", "phases", "packets")
-        ]
-        try:
-            identities = {str(p): stamp(p) for p in paths}
-            cached = json.loads(manifest_path.read_text())
-            try:
-                receipt = json.loads(checkpoint.read_text())
-            except (OSError, ValueError):
-                receipt = {}
-            code = [
-                file_hash(Path(m.__file__)) for m in (session_parquet, phase_signals)
-            ]
-            trusted = receipt == {"files": identities, "code": code}
-            if (
-                not receipt
-                and source.stat().st_mtime_ns <= manifest_path.stat().st_mtime_ns
-            ):
-                with ZipFile(source) as archive:
-                    digest = hashlib.sha256(
-                        json.dumps(
-                            json.loads(archive.read("manifest.json")), sort_keys=True
-                        ).encode()
-                    )
-                for m in (session_parquet, phase_signals):
-                    digest.update(Path(m.__file__).read_bytes())
-                trusted = cached.get("archive_fingerprint") == digest.hexdigest()
-            if (
-                trusted
-                and cached.get("schema_version") == session_parquet.SCHEMA_VERSION
-            ):
-                atomic_json({"files": identities, "code": code}, checkpoint)
-                self.cache_hits.append("source")
-                return AmplitudeSession(
-                    directory, cached, pl.read_parquet(directory / "attempts.parquet")
-                )
-        except (OSError, ValueError, KeyError, BadZipFile):
-            pass
-        session = load_amplitude_session(source, directory)
-        atomic_json(
-            {
-                "files": {str(p): stamp(p) for p in paths},
-                "code": [
-                    file_hash(Path(m.__file__))
-                    for m in (session_parquet, phase_signals)
-                ],
-            },
-            checkpoint,
-        )
+        The converted frame tables are reused when their recorded source
+        fingerprint still matches the raw archive, which is read from the
+        archive's central directory and never hashes member data.
+        """
+        from .._radio_native import storage_resolve_source
+
+        source = Path(storage_resolve_source(str(self.root), self.session_id)[0])
+        directory = self.root / "data/interim/frames" / self.session_id
+        conversions: list[str] = []
+        session = load_amplitude_session(source, directory, progress=conversions.append)
+        if not conversions:
+            self.cache_hits.append("source")
         return session
 
     @property

@@ -279,3 +279,176 @@ pub fn decode_envelope(py: Python<'_>, data: &[u8]) -> PyResult<NativeBatch> {
 pub fn simd_kernel() -> &'static str {
     radio_signal::kernel()
 }
+
+/// Read every accepted envelope of a run journal as `(arrival_ns, batch)` pairs.
+///
+/// Partial or oversized trailing entries are rejected rather than skipped.
+#[pyfunction]
+pub fn read_envelopes(
+    py: Python<'_>,
+    path: std::path::PathBuf,
+) -> PyResult<Vec<(u64, NativeBatch)>> {
+    py.detach(|| -> Result<Vec<(u64, Arc<Batch>)>, String> {
+        let file = std::fs::File::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut reader = std::io::BufReader::new(file);
+        let mut entries = Vec::new();
+        while let Some(entry) =
+            radio_transport::journal::read_entry(&mut reader).map_err(|e| e.to_string())?
+        {
+            entries.push(entry);
+        }
+        Ok(entries)
+    })
+    .map(|entries| {
+        entries
+            .into_iter()
+            .map(|(arrival, core)| (arrival, NativeBatch { core }))
+            .collect()
+    })
+    .map_err(pyo3::exceptions::PyValueError::new_err)
+}
+
+/// Affine clock fit from four-timestamp exchanges, with `t1`/`t4` on the reference clock.
+#[pyclass(frozen, skip_from_py_object)]
+pub struct ClockFit {
+    estimate: radio_transport::clock::Estimate,
+}
+#[pymethods]
+impl ClockFit {
+    /// Map an other-clock time in microseconds onto the reference clock.
+    fn map(&self, other_us: f64) -> PyResult<f64> {
+        self.estimate
+            .map(other_us)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+    #[getter]
+    fn offset_us(&self) -> f64 {
+        self.estimate.offset_us
+    }
+    #[getter]
+    fn drift_ppm(&self) -> f64 {
+        self.estimate.drift_ppm
+    }
+    #[getter]
+    fn uncertainty_us(&self) -> f64 {
+        self.estimate.uncertainty_us
+    }
+    #[getter]
+    fn sample_count(&self) -> usize {
+        self.estimate.sample_count
+    }
+    #[getter]
+    fn minimum_round_trip_us(&self) -> u64 {
+        self.estimate.minimum_rtt_us
+    }
+}
+
+/// Fit `(boot, t1, t2, t3, t4)` exchanges in arrival order with the live estimator.
+///
+/// A boot change or backward reference clock restarts the fit, as in live use.
+#[pyfunction]
+#[pyo3(signature=(samples, capacity=32, minimum_drift_span_us=0))]
+pub fn fit_clock(
+    samples: Vec<(u32, u64, u64, u64, u64)>,
+    capacity: usize,
+    minimum_drift_span_us: u64,
+) -> PyResult<ClockFit> {
+    let error = pyo3::exceptions::PyValueError::new_err;
+    let mut estimator =
+        radio_transport::clock::Estimator::new(capacity, minimum_drift_span_us).map_err(error)?;
+    let mut estimate = None;
+    for (boot, t1, t2, t3, t4) in samples {
+        estimate = Some(
+            estimator
+                .add(radio_transport::clock::Sample {
+                    boot,
+                    t1,
+                    t2,
+                    t3,
+                    t4,
+                })
+                .map_err(error)?,
+        );
+    }
+    estimate
+        .map(|estimate| ClockFit { estimate })
+        .ok_or_else(|| error("at least one clock exchange is required".to_owned()))
+}
+
+fn f64_values(bytes: &[u8], name: &str) -> PyResult<Vec<f64>> {
+    if bytes.len() % 8 != 0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "{name} must contain native float64 values"
+        )));
+    }
+    Ok(bytes
+        .chunks_exact(8)
+        .map(|b| f64::from_ne_bytes(b.try_into().unwrap()))
+        .collect())
+}
+
+/// Supported Espressif LTF layouts as `(name, indices, valid_indices)` tuples.
+///
+/// Unsupported layouts return an empty list.
+#[pyfunction]
+pub fn ltf_layouts(
+    sig_mode: u32,
+    bandwidth: u32,
+    stbc: u32,
+    pair_count: usize,
+) -> Vec<(&'static str, Vec<i32>, Vec<i32>)> {
+    radio_signal::layouts(sig_mode, bandwidth, stbc, pair_count)
+        .into_iter()
+        .map(|layout| {
+            let valid = layout
+                .indices
+                .iter()
+                .copied()
+                .filter(|&i| (layout.valid)(i))
+                .collect();
+            (layout.name, layout.indices, valid)
+        })
+        .collect()
+}
+
+/// Prepare one block over an explicit set of valid subcarriers.
+///
+/// Returns native float64 `(amplitudes, raw_phases, calibrated_phases)`;
+/// phases are NaN where a tone is unusable.
+#[pyfunction]
+#[pyo3(signature=(real, imaginary, indices, valid_indices, invalid, floor=4.0))]
+pub fn phase_block<'py>(
+    py: Python<'py>,
+    real: &[u8],
+    imaginary: &[u8],
+    indices: Vec<i32>,
+    valid_indices: std::collections::BTreeSet<i32>,
+    invalid: Vec<bool>,
+    floor: f64,
+) -> PyResult<(
+    Bound<'py, PyBytes>,
+    Bound<'py, PyBytes>,
+    Bound<'py, PyBytes>,
+)> {
+    let (re, im) = (
+        f64_values(real, "real")?,
+        f64_values(imaginary, "imaginary")?,
+    );
+    if re.len() != im.len() || re.len() != indices.len() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "CSI and subcarrier index lengths must match",
+        ));
+    }
+    if !invalid.is_empty() && invalid.len() != re.len() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "invalid-slot mask length must match CSI length",
+        ));
+    }
+    let valid = |index: i32| valid_indices.contains(&index);
+    let block = radio_signal::block(&re, &im, &indices, &valid, &invalid, floor);
+    Ok((
+        PyBytes::new(py, doubles(&block.amplitudes)),
+        PyBytes::new(py, doubles(&block.raw)),
+        PyBytes::new(py, doubles(&block.calibrated)),
+    ))
+}

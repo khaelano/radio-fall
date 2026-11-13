@@ -16,14 +16,14 @@ from fall_detection.presentation.radio.dashboard import DEFAULT_VIEW_SECONDS
 def test_collection_parser_defaults_to_gateway_protocol():
     args = _parser().parse_args(
         [
-            "--port",
-            "/dev/ttyUSB0",
+            "--gateway-port",
+            "/dev/ttyACM0",
             "--output-dir",
             "data/test-sessions",
         ]
     )
 
-    assert args.transport == "espnow_gateway"
+    assert args.gateway_port == "/dev/ttyACM0"
     assert args.output_dir.name == "test-sessions"
     assert args.config is None  # resolved centrally to configs/radio.json
     assert args.protocol is None  # selected in the startup dialog

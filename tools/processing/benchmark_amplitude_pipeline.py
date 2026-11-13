@@ -17,7 +17,7 @@ from fall_detection.analysis.amplitude_pipeline import (
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("session_dir", type=Path)
-    parser.add_argument("--parquet-dir", type=Path)
+    parser.add_argument("--frames-dir", type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--verify-dir", type=Path)
     parser.add_argument("--recordings", type=int)
@@ -33,7 +33,7 @@ def main() -> None:
     started = perf_counter()
     session = load_amplitude_session(
         args.session_dir,
-        args.parquet_dir or Path("data/interim/parquet") / args.session_dir.name,
+        args.frames_dir or Path("data/interim/frames") / args.session_dir.name,
     )
     recordings = (
         session.attempts.filter(

@@ -49,7 +49,7 @@ class LiveState:
         """Register receiver buffers and select the preview stream.
 
         The gateway demultiplexes the configured receiver identities. The
-        acquisition manager keeps an independent rolling buffer per receiver;
+        live radio keeps an independent rolling buffer per receiver;
         the dashboard renders one selected stream so phase and amplitude traces
         never mix sequence or timestamp domains from different boards.
         """

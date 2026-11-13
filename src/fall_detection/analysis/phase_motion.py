@@ -14,9 +14,9 @@ from zipfile import BadZipFile
 import numpy as np
 import pandas as pd
 
-from ..radio.acquisition import clock_sync
 from ..radio.preprocessing import phase as phase_module
-from . import phase_signals
+from . import _frame_cache, phase_signals, session_frames
+from .session_frames import AnalysisSession
 
 _PHASES = ("countdown", "action", "recovery")
 _ARRAY_FIELDS = (
@@ -123,7 +123,7 @@ def phase_motion_score(
 
 
 def load_phase_motion_samples(
-    session_dir: str | Path,
+    session: AnalysisSession,
     attempt_ids: Sequence[str],
     receiver_ids: Sequence[str],
     phase_intervals: pd.DataFrame,
@@ -144,7 +144,7 @@ def load_phase_motion_samples(
     Unavailable scores remain NaN rather than becoming stationary zeros.
 
     Args:
-        session_dir: One schema-2 raw session bundle.
+        session: Analysis session built from the converted frame tables.
         attempt_ids: Trial/attempt identifiers such as ``"001/01"``.
         receiver_ids: Receiver identifiers to retain separately.
         phase_intervals: Integrity table with attempt_id, phase, and host
@@ -152,6 +152,8 @@ def load_phase_motion_samples(
         baseline_seconds: Positive duration at the start of countdown.
         lag_seconds: Positive phase-motion lag in seconds.
         cache_dir: Optional directory outside raw data for NumPy summaries.
+            Entries depend on the frame table files, the source fingerprint,
+            the code of the modules used, the phase intervals, and parameters.
         workers: Positive process count for uncached recordings only.
         refresh: Ignore valid cache entries and recompute.
 
@@ -168,30 +170,13 @@ def load_phase_motion_samples(
         raise ValueError("baseline_seconds must be finite and positive")
     if not np.isfinite(lag_seconds) or lag_seconds <= 0:
         raise ValueError("lag_seconds must be finite and positive")
-    root = Path(session_dir).resolve()
     cache = Path(cache_dir).resolve() if cache_dir is not None else None
-    raw_root = (
-        root.parent.parent
-        if root.parent.name == "sessions" and root.parent.parent.name == "raw"
-        else root
-    )
-    if cache is not None and cache.is_relative_to(raw_root):
+    if cache is not None and cache.is_relative_to(_frame_cache.raw_root_of(session)):
         raise ValueError("Place phase-motion caches outside raw session data")
-    manifest = json.loads((root / "session.json").read_text())
-    if manifest.get("status") == "open":
-        cache = None
-    code_hash = hashlib.sha256(
-        b"".join(
-            Path(module.__file__).read_bytes()
-            for module in (phase_signals, phase_module, clock_sync)
-        )
-        + Path(__file__).read_bytes()
-    ).hexdigest()
-    attempt_paths = {}
-    for path in root.glob("trials/*/attempt_*/attempt.json"):
-        metadata = json.loads(path.read_text())
-        number = int(path.parent.name.removeprefix("attempt_"))
-        attempt_paths[f"{int(metadata['trial_ordinal']):03d}/{number:02d}"] = path
+    code_hash = _frame_cache.code_hash(
+        (phase_signals, phase_module, session_frames), __file__
+    )
+    source = _frame_cache.frame_signature(session)
     jobs = []
     for attempt_id in dict.fromkeys(attempt_ids):
         rows = phase_intervals.loc[phase_intervals["attempt_id"].eq(attempt_id)]
@@ -206,7 +191,7 @@ def load_phase_motion_samples(
         for receiver_id in dict.fromkeys(receiver_ids):
             jobs.append(
                 (
-                    root,
+                    session,
                     attempt_id,
                     receiver_id,
                     intervals,
@@ -214,10 +199,10 @@ def load_phase_motion_samples(
                     lag_seconds,
                 )
             )
-    entries = [_cache_entry(job, cache, code_hash, attempt_paths) for job in jobs]
+    entries = [_cache_entry(job, cache, code_hash, source) for job in jobs]
     results = [
         _read_cache(path, fingerprint) if not refresh else None
-        for _, fingerprint, path in entries
+        for fingerprint, path in entries
     ]
     pending = [index for index, result in enumerate(results) if result is None]
     if workers > 1 and len(pending) > 1:
@@ -232,11 +217,12 @@ def load_phase_motion_samples(
         for index in pending:
             results[index] = _score_recording(jobs[index])
     for index in pending:
-        source, fingerprint, path = entries[index]
+        fingerprint, path = entries[index]
+        # Only store results if the tables did not change while scoring.
         if (
             path is not None
             and not results[index]["read_error"]
-            and source == _source_files(jobs[index], attempt_paths)
+            and source == _frame_cache.frame_signature(session)
         ):
             _write_cache(path, fingerprint, results[index])
     samples, diagnostics = [], []
@@ -273,7 +259,7 @@ def load_phase_motion_samples(
 
 
 def _score_recording(job):
-    root, attempt_id, receiver_id, intervals, baseline_seconds, lag_seconds = job
+    session, attempt_id, receiver_id, intervals, baseline_seconds, lag_seconds = job
     try:
         by_phase = {name: (start, stop) for name, start, stop in intervals}
         if len(intervals) != 3 or set(by_phase) != set(_PHASES):
@@ -282,7 +268,7 @@ def _score_recording(job):
             )
         if any(stop <= start for start, stop in by_phase.values()):
             raise ValueError("Phase intervals must have positive duration")
-        signal = phase_signals.load_phase_signal(root, attempt_id, receiver_id)
+        signal = phase_signals.load_phase_signal(session, attempt_id, receiver_id)
         start, stop = by_phase["countdown"]
         baseline_start = (start - signal.started_monotonic_ns) / 1e9
         baseline_end = min(
@@ -336,45 +322,18 @@ def _score_recording(job):
         return {"read_error": str(exc)}
 
 
-def _source_files(job, attempt_paths):
-    root, attempt_id, receiver_id, _, _, _ = job
-    paths = [root / "session.json"]
-    path = attempt_paths.get(attempt_id)
-    if path is not None:
-        paths.append(path)
-        paths.extend(
-            path.parent / "receivers" / receiver_id / name
-            for name in (
-                "csi.csv",
-                "radio_timing.csv",
-                "usb_clock_sync.csv",
-                "gateway_timing.jsonl",
-            )
-        )
-    return [
-        (
-            str(path),
-            path.stat().st_size,
-            path.stat().st_mtime_ns,
-            path.stat().st_ctime_ns,
-        )
-        if path.is_file()
-        else (str(path), None)
-        for path in paths
-    ]
-
-
-def _cache_entry(job, cache, code_hash, attempt_paths):
-    source = _source_files(job, attempt_paths)
-    root, attempt_id, receiver_id, intervals, baseline_seconds, lag_seconds = job
+def _cache_entry(job, cache, code_hash, source):
+    session, attempt_id, receiver_id, intervals, baseline_seconds, lag_seconds = job
     fingerprint = hashlib.sha256(
         json.dumps(
             [code_hash, source, intervals, baseline_seconds, lag_seconds],
             sort_keys=True,
         ).encode()
     ).hexdigest()
-    name = hashlib.sha256(f"{root}/{attempt_id}/{receiver_id}".encode()).hexdigest()
-    return source, fingerprint, cache / f"{name}.npz" if cache is not None else None
+    name = hashlib.sha256(
+        f"{session.path}/{attempt_id}/{receiver_id}".encode()
+    ).hexdigest()
+    return fingerprint, cache / f"{name}.npz" if cache is not None else None
 
 
 def _read_cache(path, fingerprint):

@@ -1,114 +1,80 @@
 """Check phase decoding, detrending, and event-clock alignment on synthetic CSI."""
 
-import csv
-import json
-
 import numpy as np
 import pytest
 
-from fall_detection.analysis.phase_signals import load_phase_signal
+pytest.importorskip("pyarrow")
+
+from journal_builder import FOREIGN, RX1, RX2, TX, write_session
+
+from fall_detection.analysis.phase_signals import (
+    load_capture_packets,
+    load_phase_signal,
+    phase_signal_from_packets,
+)
+from fall_detection.analysis.session_frames import load_analysis_session
 from fall_detection.radio.preprocessing.phase import HE20_COMPACT_SLOT_INDICES
 
+ORIGIN = 1_000_000_000
 
-def _write_csv(path, rows):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
+
+def _payload(index: int) -> bytes:
+    slots = np.asarray(HE20_COMPACT_SLOT_INDICES)
+    phase = 0.02 * slots + 0.3
+    if index == 1:
+        phase += 0.4 * np.sin(slots / 15)
+    values = 40 * np.exp(1j * phase)
+    values[slots == 20] = 1
+    flat = np.column_stack((np.rint(values.imag), np.rint(values.real))).astype(int)
+    return bytes(int(value) & 0xFF for value in flat.ravel())
+
+
+def _frames(captures=None, **overrides):
+    captures = captures or [
+        ORIGIN + 100_000_000 + index * 100_000_000 for index in range(4)
+    ]
+    return [
+        {
+            "receiver": RX1,
+            "sequence": index,
+            "capture_ns": capture,
+            "payload": _payload(index),
+            "sig_mode": 4,
+            "radio_us": 100_000 + index * 100_000,
+            "transmitter": TX if index < 3 else FOREIGN,
+            **overrides.get(index, {}),
+        }
+        for index, capture in enumerate(captures)
+    ]
+
+
+def _open(tmp_path, frames):
+    root = write_session(
+        tmp_path / "data/raw/sessions/phase",
+        attempts=[
+            {
+                "trial_ordinal": 1,
+                "activity_label": "sit",
+                "status": "accepted",
+                "started_monotonic_ns": ORIGIN,
+                "ended_monotonic_ns": ORIGIN + 500_000_000,
+            }
+        ],
+        frames=frames,
+        receivers=(RX1, RX2),
+    )
+    return load_analysis_session(root, tmp_path / "derived")
 
 
 @pytest.fixture
 def phase_capture(tmp_path):
-    root = tmp_path / "session"
-    receiver = root / "trials/001_fall/attempt_01/receivers/rx-1"
-    receiver.mkdir(parents=True)
-    (root / "session.json").write_text(
-        json.dumps(
-            {
-                "artifact_schema_version": 2,
-                "environment": {
-                    "transport": "espnow_gateway",
-                    "nominal_rate_hz": 100,
-                    "radio_inventory": {
-                        "transmitter": {"mac": "aa:bb:cc:dd:ee:ff"},
-                    },
-                },
-            }
-        )
-    )
-    (receiver.parent.parent / "attempt.json").write_text(
-        json.dumps(
-            {
-                "trial_ordinal": 1,
-                "started_monotonic_ns": 1_000_000_000,
-                "ended_monotonic_ns": 1_400_000_000,
-            }
-        )
-    )
-    slots = np.asarray(HE20_COMPACT_SLOT_INDICES)
-    csi_rows, timing_rows = [], []
-    for index in range(4):
-        phase = 0.02 * slots + 0.3
-        if index == 1:
-            phase += 0.4 * np.sin(slots / 15)
-        values = 40 * np.exp(1j * phase)
-        values[slots == 20] = 1
-        flat = (
-            np.column_stack((np.rint(values.imag), np.rint(values.real)))
-            .ravel()
-            .astype(int)
-            .tolist()
-        )
-        csi_rows.append(
-            {
-                "type": "CSI_DATA",
-                "id": index,
-                "mac": "aa:bb:cc:dd:ee:ff" if index < 3 else "foreign",
-                "sig_mode": 4,
-                "mcs": 0,
-                "bandwidth": 0,
-                "stbc": 0,
-                "first_word": 0,
-                "local_timestamp": 100_000 + index * 100_000,
-                "len": len(flat),
-                "data": json.dumps(flat),
-            }
-        )
-        timing_rows.append(
-            {
-                "sequence": index,
-                "rx_radio_timestamp_us": 100_000 + index * 100_000,
-                "rx_callback_timestamp_us": 1_105_000 + index * 100_000,
-                "host_receive_monotonic_ns": 1_150_000_000 + index * 100_000_000,
-            }
-        )
-    _write_csv(receiver / "csi.csv", csi_rows)
-    _write_csv(receiver / "radio_timing.csv", timing_rows)
-    sidecar = [
-        {
-            "schema_version": 1,
-            "sequence": index,
-            "rx_radio_timestamp_us": 100_000 + index * 100_000,
-            "run_id": "123",
-            "transmitter_boot_id": 11,
-            "receiver_boot_id": 21,
-            "capture_host_monotonic_ns": 1_100_000_000 + index * 100_000_000,
-            "clock_uncertainty_us": 100,
-        }
-        for index in range(4)
-    ]
-    (receiver / "gateway_timing.jsonl").write_text(
-        "".join(json.dumps(row) + "\n" for row in sidecar)
-    )
-    return root, receiver
+    return _open(tmp_path, _frames())
 
 
 def test_load_phase_signal_preserves_physical_axis_and_canonical_calibration(
     phase_capture,
 ):
-    root, _ = phase_capture
-    signal = load_phase_signal(root, "001/01", "rx-1")
+    signal = load_phase_signal(phase_capture, "001/01", "rx-1")
     assert signal.raw_phase.shape == signal.calibrated_phase.shape == (3, 245)
     np.testing.assert_array_equal(signal.subcarriers, np.arange(-122, 123))
     assert np.isnan(
@@ -131,90 +97,60 @@ def test_load_phase_signal_preserves_physical_axis_and_canonical_calibration(
     np.testing.assert_allclose(signal.time_seconds, [0.1, 0.2, 0.3], atol=1e-12)
     assert "gateway" in signal.time_source
     assert signal.skipped_layout_rows == 0
+    assert signal.attempt_id == "001/01" and signal.receiver_id == "rx-1"
+    assert signal.started_monotonic_ns == ORIGIN
+    assert signal.nominal_rate_hz == 100
 
 
-def test_load_phase_signal_requires_gateway_capture_time(phase_capture):
-    root, receiver = phase_capture
-    (receiver / "gateway_timing.jsonl").unlink()
-    with pytest.raises(ValueError, match="capture-time sidecar"):
-        load_phase_signal(root, "001/01", "rx-1")
-
-
-def test_load_phase_signal_rejects_mixed_transmitter_epochs(phase_capture):
-    root, receiver = phase_capture
-    path = receiver / "gateway_timing.jsonl"
-    rows = [json.loads(line) for line in path.read_text().splitlines()]
-    rows[-1]["transmitter_boot_id"] = 12
-    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+def test_load_phase_signal_rejects_mixed_transmitter_epochs(tmp_path):
+    frames = _frames()
+    frames[-1]["run"] = 0xABC  # a second transport run inside one attempt
+    session = _open(tmp_path, frames)
     with pytest.raises(ValueError, match="mixes transmitter epochs"):
-        load_phase_signal(root, "001/01", "rx-1")
+        load_phase_signal(session, "001/01", "rx-1")
 
 
-def test_load_phase_signal_rejects_misaligned_timing(phase_capture):
-    root, receiver = phase_capture
-    path = receiver / "radio_timing.csv"
-    with path.open() as stream:
-        rows = list(csv.DictReader(stream))
-    rows[0]["sequence"] = 100
-    _write_csv(path, rows)
-    with pytest.raises(ValueError, match="align by sequence"):
-        load_phase_signal(root, "001/01", "rx-1")
-
-
-def test_load_phase_signal_rejects_bad_payload_length(phase_capture):
-    root, receiver = phase_capture
-    path = receiver / "csi.csv"
-    with path.open() as stream:
-        rows = list(csv.DictReader(stream))
-    rows[0]["len"] = 12
-    _write_csv(path, rows)
+def test_load_capture_packets_rejects_bad_payload_length(phase_capture):
+    packets = load_capture_packets(phase_capture, "001/01", "rx-1")
+    packets.loc[0, "len"] = 12
     with pytest.raises(ValueError, match="payload length"):
-        load_phase_signal(root, "001/01", "rx-1")
+        phase_signal_from_packets(packets)
 
 
 def test_load_phase_signal_retains_only_supported_packets(phase_capture):
-    root, receiver = phase_capture
-    path = receiver / "csi.csv"
-    with path.open() as stream:
-        rows = list(csv.DictReader(stream))
-    rows[0].update(data="[0,20,0,20,0,20]", len=6)
-    _write_csv(path, rows)
-    signal = load_phase_signal(root, "001/01", "rx-1")
+    packets = load_capture_packets(phase_capture, "001/01", "rx-1")
+    # Six int16 values cannot hold an HE-LTF block, so the row is skipped.
+    packets.at[0, "csi_i"] = np.array([20, 20, 20], dtype=np.int16)
+    packets.at[0, "csi_q"] = np.array([0, 0, 0], dtype=np.int16)
+    packets.loc[0, "len"] = 6
+    signal = phase_signal_from_packets(packets)
     assert signal.skipped_layout_rows == 1
     np.testing.assert_allclose(signal.time_seconds, [0.2, 0.3])
 
 
-def test_load_phase_signal_requires_existing_receiver(phase_capture):
-    root, _ = phase_capture
-    with pytest.raises(FileNotFoundError):
-        load_phase_signal(root, "001/01", "rx-2")
+def test_load_phase_signal_requires_existing_receiver_and_attempt(phase_capture):
+    with pytest.raises(FileNotFoundError, match="rx-2"):
+        load_phase_signal(phase_capture, "001/01", "rx-2")
+    with pytest.raises(FileNotFoundError, match="Expected one attempt"):
+        load_phase_signal(phase_capture, "002/01", "rx-1")
+    with pytest.raises(ValueError, match="look like"):
+        load_phase_signal(phase_capture, "1-1", "rx-1")
 
 
-def test_gateway_phase_uses_capture_clock_sidecar_and_sorts_derived_view(phase_capture):
-    root, receiver = phase_capture
-    values = [1_100_000_000, 1_050_000_000, 1_200_000_000, 1_300_000_000]
-    rows = [
-        {
-            "schema_version": 1,
-            "sequence": i,
-            "rx_radio_timestamp_us": 100000 + i * 100000,
-            "run_id": "123",
-            "transmitter_boot_id": 11,
-            "capture_host_monotonic_ns": value,
-            "clock_uncertainty_us": 100,
-        }
-        for i, value in enumerate(values)
-    ]
-    (receiver / "gateway_timing.jsonl").write_text(
-        "".join(json.dumps(row) + "\n" for row in rows)
-    )
-    signal = load_phase_signal(root, "001/01", "rx-1")
+def test_load_capture_packets_keeps_non_sensing_rows_and_identity(phase_capture):
+    packets = load_capture_packets(phase_capture, "001/01", "rx-1")
+    assert set(packets["attempt_id"]) == {"001/01"}
+    assert set(packets["receiver_id"]) == {"rx-1"}
+    assert packets["is_sensing"].tolist() == [True, True, True, False]
+
+
+def test_gateway_phase_uses_capture_clock_and_sorts_derived_view(tmp_path):
+    captures = [1_100_000_000, 1_050_000_000, 1_200_000_000, 1_300_000_000]
+    session = _open(tmp_path, _frames(captures))
+    signal = load_phase_signal(session, "001/01", "rx-1")
     np.testing.assert_allclose(signal.time_seconds, [0.05, 0.1, 0.2])
     assert "gateway" in signal.time_source and signal.sync_uncertainty_us == 100
-    # The view is sorted; immutable source rows retain their original order.
-    assert (
-        json.loads((receiver / "gateway_timing.jsonl").read_text().splitlines()[0])[
-            "sequence"
-        ]
-        == 0
-    )
+    # The view is sorted by capture time; source_row keeps journal (delivery) order.
+    packets = load_capture_packets(session, "001/01", "rx-1")
+    assert packets["source_row"].tolist() == [1, 0, 2, 3]
+    assert packets["id"].tolist() == [1, 0, 2, 3]

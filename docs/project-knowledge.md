@@ -30,17 +30,74 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
 
 ## Implemented
 
+- **Reviews and archive resolution (13 November 2026):** the mutable review
+  lives at `data/annotations/<session-id>/session_review.json`, tracked in Git.
+  The `radio_storage` crate resolves the archive in `data/raw/sessions` (checking
+  its predecessor in `data/old_raw/sessions`) together with the review and
+  returns effective attempts; the analysis loader and notebooks use it through
+  `fall_detection._radio_native`. The Python `fall_detection.storage` package is retired. Reviews change a derived export's identity but never `frames.parquet`.
+  The session inspector opens session directories and version-3 archives
+  alike. An archive is read in place; only the selected attempt's video clip is
+  extracted, to `data/interim/inspector_media/`. Reviews are saved to
+  `data/annotations`.
+  See [storage layout specification](storage-layout-spec.md#43-resolving-a-recording-and-its-review).
+- **Typed frame storage and version-3 archives (13 November 2026):** the Rust
+  `radio_storage` crate converts raw journals and events into
+  `data/interim/frames/<session-id>/{frames,attempts,phases}.parquet` and writes
+  version-3 archives in `data/raw/sessions/` (the pre-schema-3 originals moved to `data/old_raw/sessions/`). On the three non-empty
+  archives 4,527,879 CSV rows matched the tables with no mismatch, and the
+  archives shrank from 11.9 GB to 6.63 GB (video unchanged). The analysis
+  pipeline, phase and integrity analysis, and the session inspector read the
+  tables; the collector still writes the CSV sidecars, and the Rust-era journal
+  path is verified on synthetic journals only. See the
+  [specification](storage-layout-spec.md) and
+  [report](reports/storage-layout-migration-2026-11-13.md).
+- **Rust-owned live path (12 November 2026):** one Rust transport session
+  (`radio_transport::session`) runs gateway startup, relay recovery,
+  journal-before-ACK acceptance, capture mapping, availability bins,
+  duplicate-capture removal and restarts for the viewer, collector and detector.
+  Python apps receive accepted records and health through `NativeAcquisition`
+  and only display, record CSV rows formatted in Rust, and run the collection
+  workflow. The Python acquisition modules, Python detector, USB transmitter
+  link and `csi-gateway-benchmark` were removed. Phase calibration and clock
+  fitting have one Rust implementation; independent NumPy/Python references
+  remain in tests only. ACKs now certify the native envelope journal rather
+  than the CSV write. Offline sequence alignment for training
+  (`analysis/sequence_preprocessing.py`) remains Python and is mirrored by the
+  live Rust window builder, guarded by the replay parity test; moving it would
+  change published preprocessing. Tested offline against a fake gateway on a
+  pseudo-terminal; not yet exercised on radio hardware, and the 300 s
+  qualification evaluator has not been ported. See
+  [native processing](rust-radio-pipeline.md) and
+  [automatic recovery](automatic-radio-recovery.md).
+- **Native sequence detection:** Rust owns acquisition, sequence alignment,
+  preprocessing, resident ONNX Runtime sessions (WebGPU/Vulkan or CPU) and
+  serial inference scheduling; `fall-detect` (Python) supplies controls through
+  PyO3. Deployment is model-only: the
+  current exports, their saved normalizers and the documented operational
+  preprocessing settings; no training dataset is required. A replay feed
+  streams recorded native captures in real time. On capture C, live inputs
+  matched the offline Python chain bit for bit, and CPU and WebGPU `cnn-4s`
+  scores agreed ([replay report](reports/native-replay-2026-11-12.md)).
+  Recurrent models exceed the 250 ms hop on the Vega 7
+  ([GPU report](reports/native-webgpu-smoke-2026-11-12.md)). Ten-second
+  hardware captures are in the [capture report](reports/native-capture-2026-11-12.md).
+  Unverified: live gateway operation of the full pipeline, radio-failure
+  restart, sustained operation, and detection accuracy. See the
+  [detector guide](live-fall-detection.md).
+
 - **Collection:** the desktop collector supports protocol-driven trials,
   continuous activity segments, session resume, synchronized video, and
-  automatic radio recovery. Accepted recordings are finalized before an attempt
+  automatic radio recovery (performed by the native session). Accepted recordings are finalized before an attempt
   is accepted. See the [collector guide](../src/fall_detection/collection/README.md),
   [recovery notes](automatic-radio-recovery.md), and
   [video guide](video-recording.md).
 - **Radio:** Retired live BLE and UDP experiment acquisition code has been
   removed, along with historical BLE decoding tools. Gateway envelopes and
   CSI1 v3 records are decoded by Rust; the host accepts gateway policy
-  version 7 and operational inventory/profile schema 2 only.
-  `configs/radio.json` is the shared operational settings file.
+  version 7, operational inventory/profile schema 2 and the `espnow_uart`
+  reference link only. `configs/radio.json` is the shared operational settings
+  file.
   C5 receivers send scheduled ESP-NOW batches to a C6 USB gateway; hardware
   qualification evidence and limitations are in the
   [gateway guide](espnow-gateway.md) and [dated reports](reports/README.md).
@@ -105,17 +162,22 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
 
 ## Package organization
 
-`src/native/radio_core/src/low_level/` contains native transport, decoding
-and recording machinery. The Rust workspace has separate `radio_signal` and
-`radio_preprocessing` crates for numeric kernels and signal preprocessing;
-the extension crate composes them with detector preprocessing. Python domain
-and query code sits
-between those native operations and application workflows.
+The Python-free crates are `radio_transport` (framing, CSI decoding, serial
+I/O, gateway preparation and startup, clock and reference maintenance,
+acceptance, journals, availability, quality counters, replay and the live
+`session`), `radio_detection` (feeds, aligned history, window building, ONNX
+Runtime sessions, scheduler, worker and the live coordinator), `radio_signal`
+(I/Q kernels, LTF layouts, phase calibration) and `radio_preprocessing`
+(offline amplitude and Hampel kernels). The extension crate in
+`src/native/radio_core/src/` exposes `NativeAcquisition`, `NativeDetector`,
+the recording writer, record views and offline kernels to Python.
+`tests/test_architecture.py` rejects Python serial I/O or retired acquisition
+modules in live application code.
 
 `src/fall_detection/apps/` contains the collector, CSI viewer, session
 inspector, and detector application entry points and presentation code.
-`radio/`, `storage/`, `analysis/`, `collection/`, `session_inspector/`,
-`detection/`, and `contracts/` contain the reusable radio, data, and domain
+`radio/`, `storage/`, `analysis/`, `collection/`, `session_inspector/`
+and `contracts/` contain the reusable radio, data, and domain
 components used by these applications and research tools. The viewer and
 collector share the dashboard in `presentation/radio/`.
 

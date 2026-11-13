@@ -1,6 +1,5 @@
 """Checks for exploratory sequence-grid preprocessing."""
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -308,51 +307,35 @@ def test_new_segment_stages_preserve_existing_array_files(tmp_path):
     assert (path / "difference.npy").is_file()
 
 
-def test_source_cache_invalidates_changed_archive_identity(tmp_path, monkeypatch):
-    import hashlib
-    import json
-    import os
-    from zipfile import ZipFile
-
-    from fall_detection.analysis import phase_signals, session_parquet
+def test_source_is_converted_once_and_reconverted_when_the_archive_changes(
+    tmp_path, monkeypatch
+):
     from fall_detection.analysis import sequence_preprocessing as module
 
-    w = SequenceArtifacts(tmp_path, "source", "session", {"target_hz": 96})
+    calls = []
+
+    def fake_load(source, directory, *, progress=None):
+        # Mimic the loader: report a conversion only when the archive is new.
+        marker = directory / "converted-from"
+        identity = f"{source.stat().st_size}"
+        if not marker.exists() or marker.read_text() != identity:
+            directory.mkdir(parents=True, exist_ok=True)
+            marker.write_text(identity)
+            progress("converting")
+        calls.append(source)
+        return "session"
+
+    monkeypatch.setattr(module, "load_amplitude_session", fake_load)
+    artifacts = SequenceArtifacts(tmp_path, "source", "session", {"target_hz": 96})
     raw = tmp_path / "data/raw/sessions/session.zip"
     raw.parent.mkdir(parents=True)
-    manifest = {
-        "format": "fall-detection-session-archive",
-        "version": 2,
-        "files": [],
-        "tables": [],
-    }
-    with ZipFile(raw, "w") as archive:
-        archive.writestr("manifest.json", json.dumps(manifest))
-    os.utime(raw, ns=(1, 1))
-    directory = tmp_path / "data/interim/parquet/session"
-    directory.mkdir(parents=True)
-    digest = hashlib.sha256(json.dumps(manifest, sort_keys=True).encode())
-    for m in (session_parquet, phase_signals):
-        digest.update(Path(m.__file__).read_bytes())
-    (directory / "session.json").write_text(
-        json.dumps(
-            {
-                "schema_version": session_parquet.SCHEMA_VERSION,
-                "archive_fingerprint": digest.hexdigest(),
-            }
-        )
-    )
-    for name in ["attempts", "phases", "packets"]:
-        pl.DataFrame({"id": [1]}).write_parquet(directory / f"{name}.parquet")
-
-    def fallback(*args, **kwargs):
-        raise RuntimeError("source changed; full loader required")
-
-    monkeypatch.setattr(module, "load_amplitude_session", fallback)
-    w.load_source()
-    w.load_source()
-    # Even a replaced/backdated archive must invalidate an established receipt.
-    raw.write_bytes(raw.read_bytes() + b"changed")
-    os.utime(raw, ns=(1, 1))
-    with pytest.raises(RuntimeError, match="full loader required"):
-        w.load_source()
+    raw.write_bytes(b"archive")
+    assert artifacts.load_source() == "session"
+    assert artifacts.cache_hits == []  # first load converts
+    artifacts.load_source()
+    assert artifacts.cache_hits == ["source"]  # second load reuses the tables
+    raw.write_bytes(b"archive changed")
+    artifacts.load_source()
+    assert artifacts.cache_hits == ["source"]  # a changed archive converts again
+    assert all(call == raw for call in calls)
+    assert artifacts.cache_hits.count("source") == 1

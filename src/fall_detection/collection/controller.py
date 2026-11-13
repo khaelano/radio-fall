@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from datetime import datetime, timezone
-from enum import Enum
 import json
-from pathlib import Path
 import time
+from collections.abc import Callable
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from enum import Enum
+from pathlib import Path
 from threading import RLock
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
-from ..radio.acquisition.clock_sync import ClockSyncEstimate, ClockSyncSample
 from ..radio.acquisition.protocol import CsiRecord
 from ..radio.acquisition.recording_io import RecordingIO
 from ..radio.acquisition.telemetry import (
@@ -103,13 +103,6 @@ class CaptureSink(Protocol):
         self, record: CsiRecord, host_receive_monotonic_ns: int
     ) -> None: ...
 
-    def write_clock_sync(
-        self,
-        sample: ClockSyncSample,
-        estimate: ClockSyncEstimate,
-        host_receive_monotonic_ns: int,
-    ) -> None: ...
-
 
 class AttemptVideoRecorder(Protocol):
     """Nonblocking attempt markers; camera/encoding I/O belongs to an adapter."""
@@ -122,7 +115,7 @@ class AttemptVideoRecorder(Protocol):
 class SessionController:
     """Own protocol progression, quality gates, and trial artifact lifecycle.
 
-    Adapters only call the three ``write_*`` methods and ``update_health``;
+    Adapters only call ``write_radio``, ``record_event`` and ``update_health``;
     windows only dispatch commands and render snapshots. The controller's
     implementation hides file naming, phase timing, retries, and interruption
     semantics behind that small interface.
@@ -176,7 +169,7 @@ class SessionController:
 
     @staticmethod
     def _default_session_id() -> str:
-        return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        return datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
 
     @property
     def state(self) -> SessionState:
@@ -464,20 +457,6 @@ class SessionController:
                     capture.write_radio(record, host_receive_monotonic_ns)
                     return
 
-    def write_clock_sync(
-        self,
-        sample: ClockSyncSample,
-        estimate: ClockSyncEstimate,
-        host_receive_monotonic_ns: int,
-    ) -> None:
-        """Receive clock samples from an ESP-NOW adapter."""
-
-        with self._lock:
-            if self._capture is not None:
-                self._capture.write_clock_sync(
-                    sample, estimate, host_receive_monotonic_ns
-                )
-
     @property
     def _current_trial(self) -> Trial | None:
         if 0 <= self._trial_index < len(self.protocol.trials):
@@ -712,11 +691,7 @@ class SessionController:
             SessionState.COUNTDOWN,
             SessionState.ACTION,
             SessionState.RECOVERY,
-        ):
-            self._finish_capture_locked(
-                "incomplete", self._clock(), interruption_reason=reason
-            )
-        elif (
+        ) or (
             self._state is SessionState.REVIEW
             and self._attempt_status == "pending_review"
         ):

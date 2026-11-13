@@ -5,15 +5,15 @@ Run: uv run --no-sync python tools/processing/benchmark_amplitude_preprocessing.
 
 import argparse
 import json
+import warnings
 from pathlib import Path
 from time import perf_counter
-import warnings
 
 import numpy as np
 
 from fall_detection.analysis.amplitude import hampel_subcarriers, normalize_subcarriers
 from fall_detection.analysis.phase_signals import phase_signal_from_packets
-from fall_detection.analysis.session_parquet import load_parquet_session
+from fall_detection.analysis.session_frames import load_analysis_session
 
 HAMPEL_WINDOW_SECONDS = 0.1
 HAMPEL_MIN_PERIODS = 5
@@ -67,16 +67,14 @@ def numpy_hampel_subcarriers(amplitude, times):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("session_dir", type=Path)
-    parser.add_argument("--parquet-dir", type=Path)
+    parser.add_argument("--frames-dir", type=Path)
     parser.add_argument("--recordings", type=int, default=4)
     parser.add_argument("--repeats", type=int, default=5)
     args = parser.parse_args()
     if args.recordings < 1 or args.repeats < 1:
         parser.error("recordings and repeats must be positive")
-    parquet_dir = (
-        args.parquet_dir or Path("data/interim/parquet") / args.session_dir.name
-    )
-    session = load_parquet_session(args.session_dir, parquet_dir)
+    frames_dir = args.frames_dir or Path("data/interim/frames") / args.session_dir.name
+    session = load_analysis_session(args.session_dir, frames_dir)
     attempts = session.attempts
     recordings = (
         attempts.loc[attempts.status.eq("accepted") & attempts.inclusion.ne("exclude")]

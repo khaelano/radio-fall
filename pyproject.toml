@@ -33,6 +33,10 @@ video = [
 detection = [
     "torch==2.14.1",
 ]
+native-detection = [
+    "onnxruntime==1.31.1",
+    "onnxruntime-ep-webgpu==0.5.0; sys_platform == 'linux'",
+]
 cuda = [
     "torch==2.14.1; sys_platform == 'linux' or sys_platform == 'win32'",
 ]
@@ -49,7 +53,6 @@ onnx = [
 [project.scripts]
 csi-viewer = "fall_detection.apps.csi_viewer.app:main"
 csi-radio = "fall_detection.radio.provisioning:main"
-csi-gateway-benchmark = "fall_detection.radio.experiments.gateway:main"
 fall-collection = "fall_detection.apps.collector.app:main"
 fall-session-inspector = "fall_detection.apps.session_inspector.app:main"
 fall-detect = "fall_detection.apps.detector.app:main"

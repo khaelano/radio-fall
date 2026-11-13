@@ -11,11 +11,10 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, TextIO
 
+from .._radio_native import storage_read_file
 from ..contracts import ARTIFACT_SCHEMA_VERSION
-from ..radio.acquisition.clock_sync import ClockSyncEstimate, ClockSyncSample
 from ..radio.acquisition.protocol import CSI_HEADER, CsiRecord, format_csi_record
 from ..radio.acquisition.recording_io import RecordingIO
-from ..storage.compressed import read_bytes
 from .protocol import CollectionProtocol, Trial
 
 TIMING_HEADER = (
@@ -180,27 +179,6 @@ class TrialCapture:
             json.dumps(value, separators=(",", ":")) + "\n"
         )
 
-    def write_clock_sync(
-        self,
-        sample: ClockSyncSample,
-        estimate: ClockSyncEstimate,
-        host_receive_monotonic_ns: int,
-    ) -> None:
-        """Append one clock-sync exchange and its current fit."""
-
-        with self._lock:
-            receiver_id = self.receiver_ids.get(sample.receiver_mac.lower())
-            if receiver_id is None:
-                return
-            self._clock_streams[receiver_id].write(
-                f"{host_receive_monotonic_ns},{sample.receiver_mac},{sample.sync_id},"
-                f"{sample.sensing_sequence},{sample.receiver_boot_id},"
-                f"{sample.tx_t1_us},{sample.rx_t2_us},{sample.rx_t3_us},"
-                f"{sample.tx_t4_us},{sample.rx_radio_t2_us},{sample.tx_radio_t4_us},"
-                f"{sample.round_trip_us},{sample.receiver_minus_transmitter_us:.6f},"
-                f"{estimate.drift_ppm:.6f},{estimate.uncertainty_us:.6f}\n"
-            )
-
     def close_streams(self) -> None:
         """Close writers after the optional radio drain interval."""
         with self._lock:
@@ -350,7 +328,7 @@ class SessionArtifactStore:
         self._session["status"] = "open"
         _write_json(self.root / "session.json", self._session)
         # A fully written last JSON value may lack its final newline after exit.
-        data = read_bytes(self.root / "events.jsonl")
+        data = storage_read_file(self.root / "events.jsonl")
         if data and not data.endswith(b"\n"):
             self._event_file.write("\n")
         self.event("session_resumed", monotonic_ns, **value)

@@ -10,6 +10,7 @@ import pytest
 pytest.importorskip("PySide6")
 pytest.importorskip("pyqtgraph")
 
+from inspector_sessions import FrameSpec, attempt_origin
 from PySide6 import QtCore, QtWidgets
 
 from fall_detection.apps.session_inspector.app import (
@@ -18,11 +19,6 @@ from fall_detection.apps.session_inspector.app import (
     TextTableModel,
     ValuesPanel,
     _parser,
-)
-from fall_detection.radio.acquisition.protocol import (
-    CSI_HEADER,
-    CsiRecord,
-    format_csi_record,
 )
 from fall_detection.session_inspector.data import (
     TableData,
@@ -85,7 +81,6 @@ def test_active_session_disables_review_controls(session_factory, application):
 def test_text_table_model_paginates_and_maps_source_rows(application):
     table = TableData(
         name="long",
-        path=None,
         headers=("value",),
         rows=tuple((f"row-{index}",) for index in range(505)),
     )
@@ -141,19 +136,15 @@ def test_signal_panel_reuses_plot_items(application):
 
 
 def test_values_panel_parses_compact_csi_row_on_demand(session_factory, application):
-    root = session_factory(attempts=((1, 1, "accepted"),))
-    csi_path = next(root.glob("trials/*/attempt_*/receivers/rx-1/csi.csv"))
-    record = CsiRecord(
-        sequence=10,
-        mac="00:11:22:33:44:55",
-        rssi=-50,
-        noise_floor=-95,
-        timestamp_us=1_000,
-        csi=(complex(3, 4), complex(-2, 1)),
-    )
-    csi_path.write_text(
-        CSI_HEADER + "\n" + format_csi_record(record) + "\n",
-        encoding="utf-8",
+    root = session_factory(
+        attempts=((1, 1, "accepted"),),
+        frames=(
+            FrameSpec(
+                10,
+                attempt_origin(0) + 100_000_000,
+                values=(complex(3, 4), complex(-2, 1)),
+            ),
+        ),
     )
     session = load_session(root)
     data = load_attempt_data_for_ui(session.attempts[0], "rx-1")
@@ -164,7 +155,22 @@ def test_values_panel_parses_compact_csi_row_on_demand(session_factory, applicat
 
     assert data.records == ()
     assert panel.models["detail"].rowCount() == 2
+    assert panel.models["radio_timing"].rowCount() == 1
+    assert panel.tabs.count() == 3
     panel.close()
+
+
+def test_window_resolves_receivers_of_a_listed_session(session_factory, application):
+    root = session_factory(attempts=((1, 1, "accepted"),))
+    window = SessionInspectorWindow(root.parent)
+
+    assert window.session is not None and window.session.receivers_resolved
+    assert window.current_attempt is not None
+    assert window.receiver_combo.count() == 1
+    assert window.receiver_combo.itemText(0) == "rx-1"
+    assert window.sessions[0].receivers_resolved
+    window._cancel_load()
+    window.close()
 
 
 def test_attempt_load_is_debounced_and_cache_hits_skip_worker(

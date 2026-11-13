@@ -23,14 +23,14 @@ tools/
 
 - `tools/processing/prune_data.py` previews local cleanup candidates;
   `--apply` removes only the paths it reports.
-- `tools/processing/upgrade_session_archive.py` copies version-1 session
-  archives into verified version-2 derived archives without changing sources.
-- `tools/processing/pilot_session_archive.py` creates or verifies archives;
-  `migrate_session_archives.py` validates and migrates session directories.
-- `benchmark_*.py` and `check_*.py` measure or inspect processing and model paths.
-  Sequence model training is defined in `notebooks/latest/03_training.ipynb`.
-  `benchmark_live_detector.py` requires an experiment directory via
-  `--experiment`.
+- Session archives are written, migrated, verified and extracted by the Rust
+  `radio_storage` library (`radio_storage` CLI: `convert`, `verify`, `migrate`,
+  `verify-archive`; Python: `fall_detection._radio_native.storage_*`).
+- `benchmark_*.py` measure offline amplitude preprocessing. Sequence model
+  training is defined in `notebooks/latest/03_training.ipynb`. Live radio and
+  detector runtime checks are Rust binaries in `radio_detection`; the earlier
+  Python live-detector and radio-pipeline tools were removed with the Python
+  acquisition path.
 
 ## Other utilities
 

@@ -1,19 +1,30 @@
-"""On-demand CSV and signal loading for one recorded attempt."""
+"""On-demand frame and signal loading for one recorded attempt.
+
+Attempts are read from the typed frame tables derived from the raw journals
+(the Rust ``radio_storage`` library). The CSV-style rows shown by the
+inspector are synthesized from those frames, so the table layout is unchanged.
+"""
 
 from __future__ import annotations
 
 import csv
-import json
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from io import StringIO
 from math import atan2, hypot
-from pathlib import Path
+from typing import Any
 
 import numpy as np
+import pyarrow as pa
 
+from .._radio_native import FrameStore
 from ..radio.acquisition.buffer import BufferSnapshot
-from ..radio.acquisition.protocol import CsiRecord, parse_csi_line
+from ..radio.acquisition.protocol import (
+    CSI_HEADER,
+    CsiRecord,
+    format_csi_record,
+    parse_csi_line,
+)
 from ..radio.preprocessing.phase import (
     DEFAULT_PHASE_AMPLITUDE_FLOOR,
     HE20_COMPACT_SLOT_INDICES,
@@ -23,10 +34,67 @@ from ..radio.preprocessing.phase import (
     HT20_VALID_SUBCARRIERS,
 )
 from ..radio.preprocessing.rendering import PreparedCsiFrame, prepare_frame
-from .models import RecordedAttempt
+from .models import RecordedAttempt, attempt_indices
 
 CancellationCallback = Callable[[], bool]
 MAX_PLOT_RECORDS = 800
+CAPTURE_TIME_SOURCE = "capture → host clock; seconds from attempt start"
+UNALIGNED_TIME_SOURCE = "receiver elapsed; not aligned to video"
+RADIO_TIMING_HEADER = (
+    "sequence",
+    "transport_sequence",
+    "tx_enqueue_timestamp_us",
+    "rx_radio_timestamp_us",
+    "rx_callback_timestamp_us",
+    "host_receive_monotonic_ns",
+    "capture_time_ns",
+    "clock_uncertainty_us",
+)
+"""Columns of the radio timing table synthesized from frame timing columns."""
+_TIMING_COLUMNS = (
+    "sequence",
+    "transport_sequence",
+    "tx_enqueue_us",
+    "rx_radio_us",
+    "rx_callback_us",
+    "host_arrival_ns",
+    "capture_time_ns",
+    "capture_uncertainty_us",
+)
+_FRAME_COLUMNS = (
+    "transmitter_mac",
+    "run_id",
+    "tx_boot_id",
+    "rx_boot_id",
+    "sequence",
+    "transport_sequence",
+    "capture_time_ns",
+    "capture_uncertainty_us",
+    "host_arrival_ns",
+    "rx_radio_us",
+    "tx_enqueue_us",
+    "rx_callback_us",
+    "rssi",
+    "noise_floor",
+    "rate",
+    "sig_mode",
+    "mcs",
+    "bandwidth",
+    "smoothing",
+    "not_sounding",
+    "aggregation",
+    "stbc",
+    "fec_coding",
+    "sgi",
+    "ampdu_cnt",
+    "channel",
+    "secondary_channel",
+    "ant",
+    "rx_state",
+    "sig_len",
+    "first_word_invalid",
+    "csi",
+)
 
 
 def timed_phase_image(times: np.ndarray, phase: np.ndarray) -> np.ndarray:
@@ -49,10 +117,9 @@ class DataLoadCancelled(RuntimeError):
 
 @dataclass(frozen=True)
 class TableData:
-    """Exact textual contents of one CSV file."""
+    """Textual rows of one table shown by the inspector."""
 
     name: str
-    path: Path | None
     headers: tuple[str, ...] = ()
     rows: tuple[tuple[str, ...], ...] = ()
     warnings: tuple[str, ...] = ()
@@ -72,7 +139,6 @@ class AttemptData:
     receiver_id: str
     csi: TableData
     radio_timing: TableData
-    clock_sync: TableData
     records: tuple[CsiRecord, ...]
     record_row_indices: tuple[int, ...]
     total_record_count: int | None = None
@@ -80,7 +146,7 @@ class AttemptData:
     prepared_frame: PreparedCsiFrame | None = None
     warnings: tuple[str, ...] = ()
     signal_times: tuple[float, ...] | None = None
-    time_source: str = "receiver elapsed; not aligned to video"
+    time_source: str = UNALIGNED_TIME_SOURCE
 
     @property
     def record_count(self) -> int:
@@ -110,112 +176,92 @@ def _check_cancelled(cancelled: CancellationCallback | None) -> None:
         raise DataLoadCancelled("attempt data load cancelled")
 
 
-def _normalize_row(row: list[str], width: int) -> tuple[str, ...]:
-    if len(row) >= width:
-        return tuple(row)
-    return tuple(row + [""] * (width - len(row)))
+def _split_row(line: str) -> tuple[str, ...]:
+    return tuple(next(csv.reader([line])))
 
 
-def load_table(
-    path: Path | None,
-    name: str,
-    *,
-    cancelled: CancellationCallback | None = None,
-) -> TableData:
-    """Load a CSV exactly as text, preserving every parseable row."""
+def _frame_record(frame: dict[str, Any], index: int) -> CsiRecord:
+    """Build the record of frame ``index`` from its columns.
 
-    if path is None:
-        return TableData(name=name, path=None, warnings=(f"missing {name}",))
-    warnings: list[str] = []
-    try:
-        with path.open("r", encoding="utf-8", newline="") as stream:
-            reader = csv.reader(stream)
-            try:
-                headers = tuple(next(reader))
-            except StopIteration:
-                return TableData(
-                    name=name,
-                    path=path,
-                    warnings=(f"{path.name} is empty",),
-                )
-            rows: list[tuple[str, ...]] = []
-            for index, row in enumerate(reader, start=2):
-                if index % 128 == 0:
-                    _check_cancelled(cancelled)
-                if len(row) != len(headers):
-                    warnings.append(
-                        f"{path.name}:{index}: expected {len(headers)} columns, got {len(row)}"
-                    )
-                rows.append(_normalize_row(row, len(headers)))
-    except (OSError, csv.Error, UnicodeError) as exc:
-        warnings.append(f"unable to read {path}: {exc}")
-        return TableData(name=name, path=path, warnings=tuple(warnings))
-    return TableData(
-        name=name,
-        path=path,
-        headers=headers,
-        rows=tuple(rows),
-        warnings=tuple(warnings),
+    The payload holds interleaved imaginary and real bytes. As in the legacy CSV
+    parser, the first two values of a frame flagged ``first_word_invalid`` stay
+    in ``raw_csi`` but are not plottable.
+    """
+
+    payload = np.frombuffer(frame["csi"][index], dtype=np.int8)
+    raw = tuple((payload[1::2].astype(np.float64) + 1j * payload[0::2]).tolist())
+    invalid = bool(frame["first_word_invalid"][index])
+    shown = (complex(np.nan, np.nan),) * min(2, len(raw)) + raw[2:] if invalid else raw
+    return CsiRecord(
+        sequence=frame["sequence"][index],
+        mac=frame["transmitter_mac"][index],
+        rssi=frame["rssi"][index],
+        noise_floor=frame["noise_floor"][index],
+        timestamp_us=frame["rx_radio_us"][index],
+        csi=shown,
+        transport_sequence=frame["transport_sequence"][index],
+        run_id=frame["run_id"][index],
+        transmitter_boot_id=frame["tx_boot_id"][index],
+        receiver_boot_id=frame["rx_boot_id"][index],
+        capture_host_monotonic_ns=frame["capture_time_ns"][index],
+        capture_clock_uncertainty_us=frame["capture_uncertainty_us"][index],
+        tx_timestamp_us=frame["tx_enqueue_us"][index],
+        rx_callback_timestamp_us=frame["rx_callback_us"][index],
+        first_word_invalid=invalid,
+        rate=frame["rate"][index],
+        sig_mode=frame["sig_mode"][index],
+        mcs=frame["mcs"][index],
+        bandwidth=frame["bandwidth"][index],
+        smoothing=frame["smoothing"][index],
+        not_sounding=frame["not_sounding"][index],
+        aggregation=frame["aggregation"][index],
+        stbc=frame["stbc"][index],
+        fec_coding=frame["fec_coding"][index],
+        sgi=frame["sgi"][index],
+        ampdu_count=frame["ampdu_cnt"][index],
+        channel=frame["channel"][index],
+        secondary_channel=frame["secondary_channel"][index],
+        antenna=frame["ant"][index],
+        sig_len=frame["sig_len"][index],
+        rx_state=frame["rx_state"][index],
+        csi_length=payload.size,
+        raw_csi=raw,
     )
 
 
-def _load_csi(
-    path: Path | None,
+def _frame_tables(
+    frames: pa.Table,
+    start_ns: int,
     *,
     cancelled: CancellationCallback | None = None,
-) -> tuple[TableData, tuple[CsiRecord, ...], tuple[int, ...]]:
-    if path is None:
-        return TableData(name="CSI", path=None, warnings=("missing CSI",)), (), ()
-    warnings: list[str] = []
+) -> tuple[TableData, TableData, tuple[CsiRecord, ...], tuple[float, ...] | None]:
+    """Synthesize CSV-style tables, records and plot times from attempt frames.
+
+    Rows keep journal (delivery) order. Times are capture times relative to the
+    attempt start, one per record, or ``None`` when there are no frames.
+    """
+
+    frame = frames.select(_FRAME_COLUMNS).to_pydict()
     records: list[CsiRecord] = []
-    record_row_indices: list[int] = []
-    rows: list[tuple[str, ...]] = []
-    headers: tuple[str, ...] = ()
-    try:
-        with path.open("r", encoding="utf-8", newline="") as stream:
-            header_line = next(stream, None)
-            if header_line is None:
-                return (
-                    TableData(
-                        name="CSI",
-                        path=path,
-                        warnings=(f"{path.name} is empty",),
-                    ),
-                    (),
-                    (),
-                )
-            headers = tuple(next(csv.reader([header_line])))
-            for line_number, line in enumerate(stream, start=2):
-                if line_number % 128 == 0:
-                    _check_cancelled(cancelled)
-                try:
-                    row = next(csv.reader([line]))
-                except csv.Error as exc:
-                    warnings.append(f"{path.name}:{line_number}: {exc}")
-                    row = []
-                if len(row) != len(headers):
-                    warnings.append(
-                        f"{path.name}:{line_number}: expected {len(headers)} "
-                        f"columns, got {len(row)}"
-                    )
-                rows.append(_normalize_row(row, len(headers)))
-                try:
-                    records.append(parse_csi_line(line))
-                    record_row_indices.append(line_number - 2)
-                except ValueError as exc:
-                    warnings.append(f"{path.name}:{line_number}: {exc}")
-    except (OSError, UnicodeError) as exc:
-        warnings.append(f"unable to parse {path}: {exc}")
+    csi_rows: list[tuple[str, ...]] = []
+    timing_rows: list[tuple[str, ...]] = []
+    for index in range(frames.num_rows):
+        if index % 128 == 0:
+            _check_cancelled(cancelled)
+        record = _frame_record(frame, index)
+        records.append(record)
+        csi_rows.append(_split_row(format_csi_record(record)))
+        timing_rows.append(tuple(str(frame[name][index]) for name in _TIMING_COLUMNS))
+    times = (
+        tuple((value - start_ns) / 1e9 for value in frame["capture_time_ns"])
+        if records
+        else None
+    )
     return (
-        TableData(
-            name="CSI",
-            path=path,
-            headers=headers,
-            rows=tuple(rows),
-            warnings=tuple(dict.fromkeys(warnings)),
-        ),
+        TableData("CSI", _split_row(CSI_HEADER), tuple(csi_rows)),
+        TableData("Radio timing", RADIO_TIMING_HEADER, tuple(timing_rows)),
         tuple(records),
-        tuple(record_row_indices),
+        times,
     )
 
 
@@ -407,161 +453,61 @@ def load_attempt_data(
     prepare_signals: bool = False,
     cancelled: CancellationCallback | None = None,
 ) -> AttemptData:
-    """Load one receiver's tables and parse its valid CSI records.
+    """Load one receiver's frames in an attempt window.
 
+    The frame tables are converted from the raw journals when missing or stale.
     Signal matrices are intentionally deferred by default. They require phase
     calibration for every record and are only needed when the Signals tab is
     shown. Use :func:`prepare_attempt_signals` to enrich a loaded result in a
     worker thread.
+
+    Args:
+        attempt: Attempt returned by :func:`~.models.load_session`.
+        receiver_id: Receiver whose frames are loaded.
+        prepare_signals: Also build the plot matrices.
+        cancelled: Optional callback returning ``True`` to abort the load.
+
+    Returns:
+        The tables, records and plot times of the recording.
+
+    Raises:
+        DataLoadCancelled: If ``cancelled`` reports cancellation.
+        ValueError: If the frame tables hold no window for the attempt.
     """
 
-    files = attempt.files_for(receiver_id)
-    csi, records, record_row_indices = _load_csi(files.csi, cancelled=cancelled)
+    session = FrameStore.ensure(str(attempt.session_path), str(attempt.frames_path))
     _check_cancelled(cancelled)
-    timing = load_table(files.radio_timing, "Radio timing", cancelled=cancelled)
-    _check_cancelled(cancelled)
-    clock = load_table(files.clock_sync, "Clock sync", cancelled=cancelled)
-    _check_cancelled(cancelled)
-    signal_times, time_source, clock_warnings = _attempt_times(
-        attempt, receiver_id, records, record_row_indices, csi, timing, clock
+    index = attempt_indices(session).get(
+        (attempt.trial_ordinal, attempt.attempt_number)
     )
-    warnings = tuple(
-        dict.fromkeys(
-            (*csi.warnings, *timing.warnings, *clock.warnings, *clock_warnings)
-        )
+    if index is None:
+        raise ValueError(f"no frame window for attempt {attempt.key}")
+    start_ns = pa.table(session.attempts()).column("start_ns")[index].as_py()
+    frames = pa.table(
+        session.attempt_frames(index, receiver_id, columns=_FRAME_COLUMNS)
+    )
+    _check_cancelled(cancelled)
+    csi, timing, records, times = _frame_tables(frames, start_ns, cancelled=cancelled)
+    warnings = (
+        () if frames.num_rows else (f"no frames from {receiver_id} in this attempt",)
     )
     result = AttemptData(
         attempt_key=attempt.key,
         receiver_id=receiver_id,
         csi=csi,
         radio_timing=timing,
-        clock_sync=clock,
         records=records,
-        record_row_indices=record_row_indices,
+        record_row_indices=tuple(range(len(records))),
         total_record_count=len(records),
         warnings=warnings,
-        signal_times=signal_times,
-        time_source=time_source,
+        signal_times=times,
+        time_source=CAPTURE_TIME_SOURCE if times is not None else UNALIGNED_TIME_SOURCE,
     )
     return (
         prepare_attempt_signals(result, cancelled=cancelled)
         if prepare_signals
         else result
     )
-
-
-def _attempt_times(attempt, receiver_id, records, row_indices, csi, timing, clock):
-    """Align derived signal plots; never change exact saved tables or raw order."""
-    fallback = (None, "receiver elapsed; not aligned to video", ())
-    origin = attempt.metadata.get("started_monotonic_ns")
-    if not isinstance(origin, int) or not records:
-        return fallback
-    directory = attempt.path / "receivers" / receiver_id
-    sidecar = next(
-        (
-            directory / name
-            for name in ["gateway_timing.jsonl"]
-            if (directory / name).is_file()
-        ),
-        None,
-    )
-    try:
-        if sidecar is not None:
-            rows = [
-                json.loads(line)
-                for line in sidecar.read_text().splitlines()
-                if line.strip()
-            ]
-            if len(rows) != csi.row_count:
-                raise ValueError("CSI/capture timing row counts differ")
-            values = []
-            for record, index in zip(records, row_indices, strict=True):
-                row = rows[index]
-                captured = row["capture_host_monotonic_ns"]
-                if (
-                    row["sequence"] != record.sequence
-                    or row["rx_radio_timestamp_us"] != record.timestamp_us
-                    or row.get("schema_version") != 1
-                    or not isinstance(captured, int)
-                    or isinstance(captured, bool)
-                ):
-                    raise ValueError("CSI/capture timing identities or clocks differ")
-                values.append((captured - origin) / 1e9)
-            return tuple(values), "capture → host clock; seconds from attempt start", ()
-        if timing.row_count != csi.row_count:
-            return fallback
-        rows = [dict(zip(timing.headers, row, strict=True)) for row in timing.rows]
-        selected = [rows[index] for index in row_indices]
-        if any(
-            int(row["sequence"]) != record.sequence
-            for row, record in zip(selected, records, strict=True)
-        ):
-            raise ValueError("CSI/radio timing sequences differ")
-        # Only USB clock exchanges use the host as reference. Gateway exchanges
-        # must never be interpreted as receiver-to-host mappings.
-        sync = [dict(zip(clock.headers, row, strict=True)) for row in clock.rows]
-        if sync and all(
-            int(row["rx_radio_t2_us"]) == int(row["tx_radio_t4_us"]) == 0
-            for row in sync
-        ):
-            from ..radio.acquisition.clock_sync import (
-                ClockSyncEstimator,
-                ClockSyncSample,
-            )
-
-            if len({row["receiver_boot_id"] for row in sync}) != 1:
-                raise ValueError("USB clock timing mixes receiver boots")
-            estimator = ClockSyncEstimator()
-            for row in sorted(
-                sync, key=lambda row: int(row["host_receive_monotonic_ns"])
-            ):
-                fields = {
-                    key: int(row[key])
-                    for key in [
-                        "sync_id",
-                        "sensing_sequence",
-                        "receiver_boot_id",
-                        "tx_t1_us",
-                        "rx_t2_us",
-                        "rx_t3_us",
-                        "tx_t4_us",
-                        "rx_radio_t2_us",
-                        "tx_radio_t4_us",
-                    ]
-                }
-                sample = ClockSyncSample(**fields, receiver_mac=row["receiver_mac"])
-                if (
-                    sample.round_trip_us < 0
-                    or sample.tx_t4_us < sample.tx_t1_us
-                    or sample.rx_t3_us < sample.rx_t2_us
-                ):
-                    raise ValueError("Invalid USB clock-sync exchange")
-                estimator.add(sample)
-            estimate = estimator.estimate
-            return (
-                tuple(
-                    (
-                        estimate.receiver_to_transmitter(
-                            int(row["rx_callback_timestamp_us"])
-                        )
-                        - origin / 1000
-                    )
-                    / 1e6
-                    for row in selected
-                ),
-                "USB callback → host clock; seconds from attempt start",
-                (),
-            )
-        return (
-            tuple(
-                (int(row["host_receive_monotonic_ns"]) - origin) / 1e9
-                for row in selected
-            ),
-            "host receipt time (not sensing time); seconds from attempt start",
-            (),
-        )
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        return None, fallback[1], (f"Video/CSI alignment unavailable: {exc}",)
 
 
 def load_attempt_data_for_ui(

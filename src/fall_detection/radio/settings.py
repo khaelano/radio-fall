@@ -73,8 +73,11 @@ class RadioSettings:
         for key, item in connection.items():
             if not isinstance(item, str) or not item.strip():
                 raise ValueError(f"connection.{key} must be a non-empty string")
-        if connection["transmitter_link"] not in {"usb", "espnow_uart"}:
-            raise ValueError("unsupported connection.transmitter_link")
+        if connection["transmitter_link"] != "espnow_uart":
+            raise ValueError(
+                "connection.transmitter_link must be espnow_uart; the USB "
+                "transmitter link was retired with the Python acquisition path"
+            )
         inventory_value = _object(
             value.get("inventory"),
             "inventory",
@@ -125,6 +128,12 @@ def add_config_argument(parser: argparse.ArgumentParser) -> None:
         type=Path,
         help="radio settings JSON (default: repository configs/radio.json)",
     )
+
+
+def add_live_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the shared configuration and gateway override to a live command."""
+    add_config_argument(parser)
+    parser.add_argument("--gateway-port", help="override the configured C6 USB path")
 
 
 def resolve_settings(args: argparse.Namespace) -> RadioSettings:

@@ -3,19 +3,20 @@
 import json
 
 import pytest
+from test_controller import FakeClock, protocol, ready_health
 
 from fall_detection.collection.capture import SessionMetadata
-from fall_detection.collection.controller import SessionController, OperatorCommand
+from fall_detection.collection.controller import OperatorCommand, SessionController
 from fall_detection.collection.protocol import protocol_from_mapping
 from fall_detection.collection.resume import load_session_resume
-from test_controller import FakeClock, protocol, ready_health
 
 ENV = {"receiver_ids": {"00:11:22:33:44:55": "rx-1"}}
 
 
 def test_resume_reads_and_appends_compressed_events(tmp_path):
+    from fall_detection._radio_native import storage_read_file as read_bytes
+
     from fall_detection.radio.acquisition.recording_io import RecordingIO
-    from fall_detection.storage.compressed import read_bytes
 
     clock = FakeClock()
     old = controller(tmp_path, clock)

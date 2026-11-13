@@ -1,16 +1,25 @@
 # Native radio processing
 
-The live POSIX gateway path uses the Rust extension in
-`src/native/radio_core`. USB reading, framing, CRC checks, CSI decoding, scalar
-statistics, HE20 phase preparation and CSV formatting execute without calling
-Python. A separate Rust thread writes buffered recordings. Python retains radio
-control, clock estimation, run/profile validation, duplicate tracking, immutable
-availability bins, trial state and the Qt interface. Firmware and radio settings
-are unchanged.
+The Rust workspace in `src/native/radio_core` owns every live radio path:
+gateway startup and relay recovery, USB framing, CRC and CSI decoding,
+journal-before-ACK acceptance, clock fitting and capture mapping, availability
+bins, duplicate-capture removal, signal preprocessing and inference. Python
+applications receive accepted records and health snapshots; they display data,
+run the collection workflow and write per-attempt CSV files from Rust-formatted
+rows. Firmware and radio settings are unchanged.
+
+| Crate | Responsibility |
+| --- | --- |
+| `radio_signal` | Signed I/Q kernels (AVX2/scalar), Espressif LTF layouts, phase calibration |
+| `radio_preprocessing` | Batch amplitude preparation and Hampel filtering for offline analysis |
+| `radio_transport` | Framing, CSI decoding, serial I/O, startup, clock and reference, acceptance, journals, availability, quality counters, `session` |
+| `radio_detection` | Live sequence windows, ONNX Runtime sessions, scheduling, live and replay feeds |
+| `radio-core` (extension) | PyO3 bindings: `NativeAcquisition`, `NativeDetector`, recording writer, record views, offline kernels |
 
 ## Build and run
 
-Install a stable Rust toolchain (Rust 1.85 or newer) and run:
+Install a stable Rust toolchain (Rust 1.85 or newer; 1.92 for `radio_detection`)
+and run:
 
 ```bash
 uv sync --extra radio --extra video
@@ -21,53 +30,42 @@ uv run fall-collection --resume-session data/raw/sessions/<session>
 
 The setuptools build compiles an optimized release extension with thin LTO.
 `Cargo.lock` fixes native dependency versions. Source distributions include the
-crate and lockfile; neither generated binaries nor Cargo build output are
+crates and lockfile; neither generated binaries nor Cargo build output are
 versioned. Live acquisition reports an actionable error if the extension is
-missing. Gateway envelopes are decoded by Rust; an independent current-format
-Python reference decoder is kept in the test suite for protocol comparisons. The native serial worker currently targets
-POSIX hosts; it does not silently select the previous Python process reader.
-The configured [uv build cache keys](https://docs.astral.sh/uv/concepts/cache/)
-include Rust sources, manifest and lockfile, so later native edits trigger a
+missing; it has no Python fallback. The serial transport targets Linux. The
+configured [uv build cache keys](https://docs.astral.sh/uv/concepts/cache/)
+include Rust sources, manifests and lockfile, so later native edits trigger a
 rebuild. For an explicit rebuild, use
 `uv sync --extra radio --extra video --reinstall-package radio-fall-detection`.
 
-## Threads, ownership and deadlines
+## Live session, threads and bounds
+
+`radio_transport::session::run` drives one run at a time: prepare the gateway,
+discover the gateway and relayed transmitter, fit the clock from eight
+exchanges, configure and start sensing, then accept data until stop or failure.
+The detector feed and `NativeAcquisition` both use it.
 
 | Stage | Execution | Bound |
 | --- | --- | --- |
-| USB drain | Native poll/read thread, 5 ms poll | 4 KiB reads; 256 KiB / 256 raw chunks |
-| Frame dispatch | Native ordered dispatcher | Up to eight raw chunks per group |
-| CSI preparation | Two Rayon workers | Complete envelopes, at most 1,400 bytes each |
-| Completed-frame handoff | Native queue consumed by Python | 16 MiB accounted retained data / 8,192 frames |
-| Recording | Native writer thread | 32 MiB admitted and in-progress bytes; five-second flush |
+| USB read and framing | Session thread, raw serial with 200 ms read timeout | 4 KiB reads; frames above the envelope limit are counted and fail the run |
+| Receiver evidence wait | Session thread | 256 envelopes, 750 ms for current receiver status |
+| Acceptance | Session thread | Journal flush before ACK; 4,096 remembered batch identities |
+| Record handoff to Python | `NativeAcquisition` queue, polled by `LiveRadio` | 65,536 records; overflow fails the run |
+| Detector handoff | Bounded channel to the detection coordinator | Packet capacity setting; overflow fails the run |
+| CSV and session recording | Native writer thread | 32 MiB admitted and in-progress bytes; five-second flush |
 
-The 200 ms limit now measures the native raw queue and native preparation
-completion, which are independent of Python's GIL. Completed frames have already
-passed framing, CRC and CSI validation and have their numerical/CSV work
-prepared. They can wait separately for Python session acceptance. This changes
-the stage to which the old fatal age check applies; it does not redefine arrival
-or sensing time. Handoff age is measured separately and included in application
-latency. Overflow remains an explicit failure. An indefinite Python or storage
-stall cannot be absorbed by these finite buffers.
-
-Raw queue accounting excludes the dispatcher's at most eight in-progress
-chunks. Handoff accounting includes retained frame bytes, nested payloads,
-records, formatted CSV and phase arrays, plus metadata allowances. It is a
-queue-data budget rather than a process RSS limit. In-progress decode groups,
-Python rolling history and allocator overhead are additional bounded storage.
-
-Workers preserve wire order after parallel preparation. Shared immutable Rust
-records avoid copying complex samples for session metadata. NumPy receives
-read-only buffers when a view is requested; constructing Python complex tuples
-is deferred until an explicit legacy API request. The original envelope is
-journaled without re-encoding or repeating its CRC.
+Gateway status must arrive within 2.5 s, and clock and authoritative round
+evidence must stay fresh within 2.5 s; otherwise the run fails. A failed run
+journals `run_interrupted`; recoverable failures start a fresh run after a
+linear backoff (see [automatic radio recovery](automatic-radio-recovery.md)).
+Python never runs on the session thread, so GIL or GUI stalls delay only record
+delivery and display. The ACK certifies the native envelope journal, not the
+later CSV write.
 
 USB read completion uses the host monotonic clock. Transmitter enqueue time,
-receiver radio/callback times, capture-clock mapping, uncertainty and application
-acceptance time remain distinct. Journals additionally retain native processing
-completion and separate raw/native/application queue metrics. Late acceptance
-does not revise finalized availability bins. The one-second delivery criterion
-and radio retention policies remain unchanged.
+receiver radio/callback times, capture-clock mapping, uncertainty and
+application acceptance time remain distinct. Late acceptance does not revise
+finalized availability bins.
 
 ## Numeric work and compatibility
 
@@ -75,24 +73,25 @@ The signed I/Q kernel dispatches to AVX2 on supporting x86-64 processors, with
 a scalar fallback. It widens signed bytes, calculates squared complex magnitude
 and square roots in vectors, and uses exact integer reductions for mean I/Q.
 Delimiter scanning uses `memchr` runtime acceleration; CRC uses `crc32fast`.
-The HE20 compact 245-slot and full 256-slot layouts retain physical masks,
-first-word invalidity and the existing amplitude floor. A centered weighted
-two-parameter fit replaces the per-record Python/NumPy least-squares setup.
-No fast-math flags relax floating-point semantics.
+`radio_signal::layouts` selects the HE20 (compact 245-slot and full 256-slot)
+and HT20 LLTF/HT-LTF/STBC layouts; `calibrate` applies a centered,
+amplitude-weighted two-parameter fit after unwrapping. Live records use exact
+integer amplitudes; offline Python callers of `radio/preprocessing/phase.py`
+use the same kernels through `phase_block` and `ltf_layouts`. No fast-math
+flags relax floating-point semantics.
 
-Cross-checks compare raw I/Q and CSV bytes exactly, magnitude and wrapped phase
-within explicit numerical tolerances, and invalid masks exactly. The live native phase path
-prepares the current HE20 layouts; unsupported layouts provide no calibrated
-phase rather than guessing a subcarrier arrangement.
+Python keeps independent references only in the tests:
+`tests/radio/wire_reference.py` decodes the wire format and
+`tests/radio/phase_reference.py` calibrates phase with NumPy. Cross-checks
+compare raw I/Q and CSV bytes exactly, magnitude and wrapped phase within
+explicit tolerances, and invalid masks exactly.
 
 Recording admission copies into bounded native memory and returns without disk
 I/O. The writer releases its admission mutex during writes, including blocked
 storage. Bytes remain counted until their write completes. Periodic flush,
-explicit barriers and shutdown drain release the GIL. A stream reports saved
-only after every admitted byte is written and its descriptors close. Disk
-errors remain sticky; overflow fails explicitly. Enabled application ACKs still
-wait for recorder/journal file-buffer acceptance. Neither the five-second
-buffer nor `flush` provides an `fsync`/power-loss durability guarantee.
+explicit barriers and shutdown drain release the GIL. Disk errors remain sticky;
+overflow fails explicitly. Neither the five-second buffer nor `flush` provides
+an `fsync`/power-loss durability guarantee.
 
 ## Reproduce verification
 
@@ -101,22 +100,23 @@ uv run pytest
 cargo test --manifest-path src/native/radio_core/Cargo.toml --workspace
 cargo clippy --manifest-path src/native/radio_core/Cargo.toml --workspace --all-targets -- -D warnings
 cargo test --release --manifest-path src/native/radio_core/Cargo.toml -p radio-signal benchmark_iq_kernel -- --ignored --nocapture
-uv run python tools/processing/benchmark_radio_pipeline.py <path/to/envelopes.bin>
 ```
 
-The automated GIL stress test sends 200 distinct envelopes through a real PTY
-while Python holds the GIL for 350 ms. It requires native processing to finish
-within 200 ms, ordered and complete delivery, truthful application-wait
-diagnostics and drained shutdown. Other tests cover nested corruption,
-truncation, sequence wrap, cached-envelope invalidation, manager/ACK integration,
-explicit handoff overflow, periodic flushing during a GIL stall, blocked
-storage ownership and ENOSPC propagation. The exhaustive native numeric test
-compares all 65,536 signed I/Q pairs against scalar arithmetic.
+`tests/radio/test_native_session.py` runs the session against a fake gateway on
+a pseudo-terminal, covering startup, journal-before-ACK, rounds, availability,
+duplicate removal, restart after lost gateway status and a fatal identity
+mismatch. Other tests cover nested corruption, truncation, sequence wrap,
+framing across every split, layout and calibration parity, blocked storage
+ownership and ENOSPC propagation. The exhaustive native numeric test compares
+all 65,536 signed I/Q pairs against scalar arithmetic. None of these tests
+exercises radio timing, USB hardware or firmware.
 
-CPU benchmarks exclude live radio, session acceptance, storage and rendering;
-they cannot establish usable radio throughput or detector accuracy.
+## Historical measurements, 4 November 2026
 
-## Measurements, 4 November 2026
+These measurements describe the superseded design, in which Python owned
+session acceptance and Rust prepared frames for a Python handoff. They have not
+been repeated for the native session. The `benchmark_radio_pipeline.py` tool
+used below was removed with the Python decoder.
 
 On this laptop (AMD Ryzen 7 PRO 4750U, Linux x86-64, Rust 1.97.1), the warmed,
 alternating Python/Rust preparation benchmark used 256 preserved envelopes from

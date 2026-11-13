@@ -1,18 +1,22 @@
-"""Espressif CSI LTF layout and phase calibration helpers."""
+"""Espressif CSI LTF layouts and phase calibration backed by the Rust kernels.
+
+Layout selection, tone masking and per-packet phase calibration run in
+``radio_signal``, the same code used by live acquisition and detection. This
+module keeps the Python data types consumed by analysis and display code.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Sequence
 
 import numpy as np
-
 
 # ESP-IDF serializes the 20 MHz CSI slots in this order.  The slot at zero
 # and the outer guard slots are retained for alignment but are not usable
 # channel estimates.
-HT20_SLOT_INDICES: tuple[int, ...] = tuple(range(0, 32)) + tuple(range(-32, 0))
+HT20_SLOT_INDICES: tuple[int, ...] = tuple(range(32)) + tuple(range(-32, 0))
 HT20_VALID_SUBCARRIERS: frozenset[int] = frozenset(
     index for index in range(-28, 29) if index != 0
 )
@@ -20,9 +24,7 @@ HT20_VALID_SUBCARRIERS: frozenset[int] = frozenset(
 # ascending signed-subcarrier order. Older tooling can emit a compact vector
 # containing only -122..122, serialized with the non-negative half first.
 HE20_SLOT_INDICES: tuple[int, ...] = tuple(range(-128, 128))
-HE20_COMPACT_SLOT_INDICES: tuple[int, ...] = tuple(range(0, 123)) + tuple(
-    range(-122, 0)
-)
+HE20_COMPACT_SLOT_INDICES: tuple[int, ...] = tuple(range(123)) + tuple(range(-122, 0))
 HE20_VALID_SUBCARRIERS: frozenset[int] = frozenset(
     index for index in range(-122, 123) if index not in (-1, 0, 1)
 )
@@ -49,38 +51,17 @@ class LtfBlock:
         if len(invalid) != len(self.csi):
             raise ValueError("invalid-slot mask length must match CSI length")
 
-        # Prepare a whole LTF at once. Per-tone NumPy dispatch and Python
-        # loops can otherwise stall a cold receiver switch beyond the ingestion deadline.
-        values = np.asarray(self.csi, dtype=np.complex128)
-        with np.errstate(invalid="ignore", over="ignore"):
-            amplitudes = np.abs(values)
-            phases = np.angle(values)
-        usable = (
-            ~np.asarray(invalid, dtype=bool)
-            & np.isfinite(values.real)
-            & np.isfinite(values.imag)
-            & (amplitudes > 0)
-            & (amplitudes >= DEFAULT_PHASE_AMPLITUDE_FLOOR)
-            & np.asarray(
-                [index in self.valid_subcarriers for index in self.subcarrier_indices],
-                dtype=bool,
-            )
+        amplitudes, raw_phases, calibrated = _prepare_block(
+            self.csi,
+            self.subcarrier_indices,
+            self.valid_subcarriers,
+            invalid,
+            DEFAULT_PHASE_AMPLITUDE_FLOOR,
         )
-        phases[~usable] = np.nan
-        amplitudes[~np.isfinite(amplitudes)] = np.nan
         object.__setattr__(self, "invalid_slots", tuple(invalid))
-        object.__setattr__(self, "_amplitudes", tuple(map(float, amplitudes)))
-        object.__setattr__(self, "_raw_phases", tuple(map(float, phases)))
-        object.__setattr__(
-            self,
-            "_calibrated_phases",
-            calibrate_phase(
-                self.csi,
-                self.subcarrier_indices,
-                invalid_slots=invalid,
-                valid_subcarriers=self.valid_subcarriers,
-            ),
-        )
+        object.__setattr__(self, "_amplitudes", amplitudes)
+        object.__setattr__(self, "_raw_phases", raw_phases)
+        object.__setattr__(self, "_calibrated_phases", calibrated)
 
     @property
     def amplitudes(self) -> tuple[float, ...]:
@@ -101,6 +82,34 @@ class LtfBlock:
         return self._calibrated_phases
 
 
+def _native():
+    from ..acquisition.native import require_native
+
+    return require_native()
+
+
+def _prepare_block(
+    csi: Sequence[complex],
+    indices: Sequence[int],
+    valid_subcarriers: frozenset[int],
+    invalid: Sequence[bool],
+    amplitude_floor: float,
+) -> tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]]:
+    values = np.asarray(tuple(csi), dtype=np.complex128)
+    buffers = _native().phase_block(
+        np.ascontiguousarray(values.real).tobytes(),
+        np.ascontiguousarray(values.imag).tobytes(),
+        [int(index) for index in indices],
+        set(valid_subcarriers),
+        [bool(flag) for flag in invalid],
+        float(amplitude_floor),
+    )
+    return tuple(
+        tuple(np.frombuffer(buffer, dtype="=f8").tolist()) for buffer in buffers
+    )
+
+
+@lru_cache(maxsize=64)
 def _block_layouts(
     *,
     sig_mode: int,
@@ -109,43 +118,12 @@ def _block_layouts(
     pair_count: int,
 ) -> tuple[tuple[str, tuple[int, ...], frozenset[int]], ...]:
     """Return supported LTF layouts for one CSI payload."""
-
-    if bandwidth != 0:
-        return ()
-
-    # Classic ESP32 firmware reports HT as sig_mode=1 and emits one or more
-    # padded 64-slot blocks. ESP32-C6 reports HE SU as cur_bb_format=4. Current
-    # firmware emits a complete 256-slot FFT; retain the older compact 245-slot
-    # representation so existing recordings remain readable.
-    if sig_mode == 4 and not stbc:
-        if pair_count == len(HE20_SLOT_INDICES):
-            return (("HE-LTF", HE20_SLOT_INDICES, HE20_VALID_SUBCARRIERS),)
-        if pair_count == len(HE20_COMPACT_SLOT_INDICES):
-            return (
-                (
-                    "HE-LTF",
-                    HE20_COMPACT_SLOT_INDICES,
-                    HE20_VALID_SUBCARRIERS,
-                ),
-            )
-    if pair_count % len(HT20_SLOT_INDICES) != 0:
-        return ()
-    block_count = pair_count // len(HT20_SLOT_INDICES)
-    if sig_mode == 1 and not stbc and block_count in (1, 2):
-        names = ("LLTF", "HT-LTF")
-        return tuple(
-            (names[index], HT20_SLOT_INDICES, HT20_VALID_SUBCARRIERS)
-            for index in range(block_count)
+    return tuple(
+        (name, tuple(indices), frozenset(valid))
+        for name, indices, valid in _native().ltf_layouts(
+            sig_mode, bandwidth, stbc, pair_count
         )
-    if sig_mode == 1 and stbc and block_count == 3:
-        names = ("LLTF", "HT-LTF", "STBC-HT-LTF")
-        return tuple(
-            (names[index], HT20_SLOT_INDICES, HT20_VALID_SUBCARRIERS)
-            for index in range(block_count)
-        )
-    if sig_mode != 1 and block_count == 1:
-        return (("LLTF", HT20_SLOT_INDICES, HT20_VALID_SUBCARRIERS),)
-    return ()
+    )
 
 
 @lru_cache(maxsize=64)
@@ -244,48 +222,33 @@ def calibrate_phase(
 ) -> tuple[float, ...]:
     """Remove packet-wise phase offset and frequency slope.
 
-    Phase is unwrapped in ascending signed-subcarrier order, then a weighted
-    line is fitted and removed.  Amplitude is used as the confidence weight;
-    null, invalid, and weak samples are excluded from both the fit and output.
+    Phase is unwrapped in ascending signed-subcarrier order, then an
+    amplitude-weighted line is fitted and removed. Null, invalid and weak
+    samples are excluded from both the fit and output.
+
+    Args:
+        csi: Complex CSI in serialized order.
+        subcarrier_indices: Signed subcarrier index of each value.
+        invalid_slots: Optional per-value invalid flags.
+        amplitude_floor: Minimum usable amplitude.
+        valid_subcarriers: Physical tones eligible for calibration.
+
+    Returns:
+        Calibrated phase per value, NaN where a tone is unusable.
+
+    Raises:
+        ValueError: Lengths of CSI, indices or mask differ.
     """
 
-    values = np.asarray(tuple(csi), dtype=np.complex128)
-    indices = np.asarray(tuple(subcarrier_indices), dtype=np.float64)
-    if values.shape != indices.shape:
+    values = tuple(csi)
+    if len(values) != len(tuple(subcarrier_indices)):
         raise ValueError("CSI and subcarrier index lengths must match")
-    invalid = np.zeros(values.shape, dtype=bool)
-    if invalid_slots is not None:
-        invalid = np.asarray(tuple(invalid_slots), dtype=bool)
-        if invalid.shape != values.shape:
-            raise ValueError("invalid-slot mask length must match CSI length")
-
-    amplitudes = np.abs(values)
-    phases = np.angle(values)
-    valid = (
-        ~invalid
-        & np.isfinite(values.real)
-        & np.isfinite(values.imag)
-        & np.isfinite(amplitudes)
-        & (amplitudes >= amplitude_floor)
-        & np.asarray([index in valid_subcarriers for index in indices], dtype=bool)
-    )
-    result = np.full(values.shape, np.nan, dtype=np.float64)
-    if int(valid.sum()) < 3:
-        return tuple(float(value) for value in result)
-
-    order = np.argsort(indices)
-    ordered_valid = valid[order]
-    valid_order = order[ordered_valid]
-    valid_indices = indices[valid_order]
-    valid_phases = np.unwrap(phases[valid_order])
-    weights = np.maximum(amplitudes[valid_order], amplitude_floor)
-    design = np.column_stack((valid_indices, np.ones(valid_indices.shape)))
-    weighted_design = design * np.sqrt(weights)[:, None]
-    weighted_phases = valid_phases * np.sqrt(weights)
-    slope, offset = np.linalg.lstsq(weighted_design, weighted_phases, rcond=None)[0]
-    residual = _wrap_phase(valid_phases - (slope * valid_indices + offset))
-    result[valid_order] = residual
-    return tuple(float(value) for value in result)
+    invalid = () if invalid_slots is None else tuple(invalid_slots)
+    if invalid and len(invalid) != len(values):
+        raise ValueError("invalid-slot mask length must match CSI length")
+    return _prepare_block(
+        values, subcarrier_indices, valid_subcarriers, invalid, amplitude_floor
+    )[2]
 
 
 def phase_change_from_baseline(

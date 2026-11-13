@@ -5,17 +5,29 @@ where each file lives, what it contains, and how to read it without guessing.
 It is the reference for anyone building datasets, annotations, or models from
 `data/raw/sessions/`.
 
-**Session container:** the current reader accepts version-2 ZIP64
+**Session container:** the version-3 archives in `data/raw/sessions/` keep only the raw journals and manifests (see
+[Version-3 session archives](#version-3-session-archives)). The sections below
+describe the schema-2 per-attempt CSV layout, which older archives and working
+directories still use. The reader also accepts version-2 ZIP64
 [session archives](session-archive-pilot.md). New collector streams use
 independent Zstandard frames; archives made from plain session directories also
-use version 2. Original version-1 archives remain immutable under
-`data/raw/sessions/`. Their verified version-2 copies are stored under
-`data/normalized/sessions/` and versioned separately with DVC.
+use version 2. The original version-1/2 archives remain immutable under
+`data/old_raw/sessions/`. Their verified version-2 copies are stored under
+`data/normalized/sessions/`; they are no longer tracked (`normalized.dvc` was
+removed) and remain in the DVC remote under earlier commits.
 
-Use `fall_detection.storage.session_archive_path` to locate a session by ID and
-`Recording` to open its current archive. The resolver checks that a normalized
-copy's source-manifest fingerprint matches the raw archive when both exist.
-Working session directories remain supported for collection and review.
+The Rust `radio_storage` library, called from Python as
+`fall_detection._radio_native` (`storage_*` functions plus `FrameStore`), is the
+only storage code. `storage_resolve_source(root, session_id)` locates a session
+by ID and returns its path and archive version. It checks that a version-3
+archive's recorded source fingerprint matches its predecessor in
+`data/old_raw/sessions/` when that is present. `storage_files`, `storage_read`
+and `storage_read_file` read logical files from a directory or archive.
+`storage_extract_archive(archive, destination)` verifies a version-3 archive and
+writes it as a session directory. The Python `fall_detection.storage` package was
+retired; reading version-1 and version-2 archives through `Recording` is no
+longer supported, so use the migrated archives. Working session directories
+remain supported for collection and review.
 
 **Inner artifact schema:** `2` (receiver-split). The obsolete schema 1 is
 described in [Legacy format](#8-legacy-format-and-cleanup) and is no longer
@@ -84,9 +96,10 @@ data/
 │   │                           └── usb_clock_sync.csv
 │   └── receivers/<receiver-id>/             ad-hoc captures, not sessions
 ├── archive/                                 compressed obsolete bundles (local)
+├── old_raw/sessions/                        pre-schema-3 archives (immutable predecessors)
 ├── normalized/sessions/                     verified version-2 copies
 ├── interim/                                 extracted windows and features
-├── annotations/                             reviewed labels
+├── annotations/<session-id>/                session_review.json (Git-tracked reviews)
 ├── processed/                               model-ready dataset versions
 ├── splits/                                  train/validation/test assignments
 ├── experiments/                             engineering experiment outputs
@@ -305,7 +318,18 @@ event kind appears in every session; aborted sessions may stop early, and
 
 This optional sidecar is created by `fall-session-inspector` when the operator
 saves a review. It never modifies `session.json`, `attempt.json`, or the CSV
-data. Schema:
+data.
+
+**Location.** Reviews are stored at
+`data/annotations/<session-id>/session_review.json` and tracked in Git, because
+version-3 archives are immutable. The inspector writes there (`--annotations-dir`,
+default `data/annotations`). A `session_review.json` inside a session directory
+or archive is still read when no annotation exists, and the first save moves it.
+`_radio_native.storage_open_session(root, session_id)` returns the recording
+with the review applied (reviewed label, inclusion, quality, notes and
+`review_revision` for every attempt); `load_analysis_session` uses it. See
+[section 4.3 of the storage layout specification](storage-layout-spec.md#43-resolving-a-recording-and-its-review).
+Schema:
 
 ```json
 {
@@ -679,10 +703,13 @@ Reading caveats for USB sessions:
 ```sh
 uv run fall-session-inspector --sessions-dir data/raw/sessions
 # or open one session directly
-uv run fall-session-inspector data/raw/sessions/20261026T174653764289Z
+uv run fall-session-inspector data/raw/sessions/20261109T161519702956Z.zip
 ```
 
-The inspector reads manifests first and loads CSI/timing only when an attempt is
+The inspector opens session directories and version-3 archives alike and never
+extracts an archive up front: manifests and frames are read in place, and only the
+selected attempt's video clip is written to `data/interim/inspector_media/`. It
+reads manifests first and loads CSI/timing only when an attempt is
 selected. It shows the session and trial tables, exact CSV rows, signal plots,
 review fields, and the curated-export action. It requires the `radio` extra
 (PySide6 and pyqtgraph):
@@ -709,6 +736,9 @@ from fall_detection.session_inspector.models import scan_sessions
 sessions = scan_sessions(Path("data/raw/sessions"))
 for session in sessions:
     print(session.session_id, session.status, session.protocol.protocol_id)
+    # Receivers come from the converted frame tables; this converts the
+    # session's journals the first time and reuses the tables afterwards.
+    session = session.with_receivers()
     for attempt in session.attempts:
         print(
             attempt.key,
@@ -718,7 +748,7 @@ for session in sessions:
             attempt.receiver_ids,
         )
         data = load_attempt_data(attempt, attempt.receiver_ids[0])
-        print("  csi rows:", data.csi.row_count, "parsed:", len(data.records))
+        print("  csi rows:", data.csi.row_count, "records:", len(data.records))
 ```
 
 Useful entry points:
@@ -727,19 +757,20 @@ Useful entry points:
 | --- | --- |
 | `scan_sessions(path)` | Load every session below a directory; invalid children are skipped |
 | `load_session(path)` | Load one session; raises `SessionReadError` for an unsupported artifact schema |
-| `session.attempts` | All attempts with their relative `key`, status, and receiver files |
+| `session.attempts` | All attempts with their relative `key`, status, and receiver ids |
+| `session.with_receivers()` | Convert or reuse the frame tables and fill each attempt's `receiver_ids` from the receivers that have frames in its window |
 | `session.trials` | Planned protocol trials joined with their recorded attempts |
-| `attempt.files_for(receiver_id)` | Exact `csi.csv`, `radio_timing.csv`, `usb_clock_sync.csv` paths |
-| `load_attempt_data(attempt, receiver_id)` | Parsed CSI records plus exact CSV tables |
+| `load_attempt_data(attempt, receiver_id)` | CSI records and display tables built from the attempt's frames; times are capture time from the attempt start |
 | `csi_value_rows(record)` | Per-subcarrier real, imaginary, amplitude, and phase values |
 | `prepare_attempt_signals(data)` | Plotting matrices with phase calibration |
 | `ReviewStore(session)` | Load/save the review sidecar with optimistic concurrency |
 | `export_curated_bundle(session, review, destination)` | Write a reviewed export |
 
-`load_attempt_data` deliberately keeps malformed rows as warnings instead of
-raising. Check `data.warnings`, `data.csi.row_count`, and `len(data.records)` if
-you need strict validation. Use `parse_csi_line()` directly when a bad row
-should be an error.
+`load_attempt_data` reads frames from `data/interim/frames/<session-id>/`,
+converting the session's journals when the tables are missing or stale. Rows
+stay in delivery order; the plotted time axis is capture time. The CSI and
+radio-timing tables are synthesized from the frame columns, and the former
+clock-sync table is gone. Check `data.warnings` for receivers without frames.
 
 ### 5.3 Building a flat manifest
 
@@ -965,62 +996,74 @@ Related documentation:
 - [`data/README.md`](../data/README.md) — directory roles and pruning
 - [`configs/collection/README.md`](../configs/collection/README.md) — protocol and scenario selection
 - [`src/fall_detection/collection/README.md`](../src/fall_detection/collection/README.md) — collector operation and schema-2 writer
-- [`src/fall_detection/session_inspector/`](../src/fall_detection/session_inspector/) — manifest reader, CSV loader, review sidecar, exporter
+- [`src/fall_detection/session_inspector/`](../src/fall_detection/session_inspector/) — manifest reader, frame-table loader, review sidecar, exporter
 - [`src/fall_detection/radio/acquisition/protocol.py`](../src/fall_detection/radio/acquisition/protocol.py) — exact `CSI_DATA` parser and formatter
 
-## Derived session Parquet export
+## Derived frame tables (schema 3)
 
-`fall_detection.analysis.session_parquet.load_parquet_session(raw, destination)`
-builds a versioned analysis export outside the raw data tree. The exploration
-notebook uses `data/interim/parquet/<session-id>/`. Install the Parquet reader
-with `uv sync --extra analysis`.
+The raw journals under `transport/gateway/<run>/` are the lossless record of a
+session. `radio_storage` converts them into typed tables under
+`data/interim/frames/<session-id>/` and `fall_detection.analysis.session_frames`
+adds the analysis context. The full design, measurements and open questions are
+in the [storage layout specification](storage-layout-spec.md). Install the
+Arrow reader with `uv sync --extra radio --extra analysis`.
 
 | File | Rows and purpose |
 | --- | --- |
-| `session.json` | Export schema, source manifest/protocol hash, source fingerprint, packet counts, and representation settings |
-| `attempts.parquet` | One row per attempt, including retries, status, effective/original labels, review revision, directions, timestamps, and receiver IDs |
-| `phases.parquet` | One row per observed collection-cue interval, including intervals containing no CSI |
-| `packets.parquet` | One row per CSI record, with scenario/attempt/receiver/review fields, phase, raw metadata, timing, and typed I/Q arrays |
+| `frames.parquet` | One row per CSI frame per receiver inside an attempt window: identity (`run_index`, `receiver_id`, `transmitter_mac`, run and boot ids, `sequence`), `capture_time_ns` and its uncertainty, host arrival and radio timestamps, the header bytes, and the firmware payload `csi` unchanged |
+| `attempts.parquet` | One row per attempt from `attempt.json`: window, label, status |
+| `phases.parquet` | One row per observed collection-cue interval |
+| `conversion.json` | Source fingerprint, counts per run, and the SHA-256 of each table |
 
-`phase` is `preparation`, `action`, or `resting`, mapped respectively from the
-original `collection_phase` values `countdown`, `action`, and `recovery`.
-`annotation_source = collection_cue` distinguishes these instructions from
-manually annotated movement boundaries. Assignment uses half-open host-clock
-intervals `[start_ns, end_ns)` and mapped capture times; rows outside intervals
-remain `unassigned`. Missing phases are not fabricated. Invalid phase ordering
-or bounds reject the export. These groups do not average, resample, interpolate,
-or combine receivers' packets.
+`csi` holds the payload bytes as the firmware sent them: interleaved signed
+pairs with the imaginary byte first. Amplitude and phase decoding happen in
+`prepare_amplitude` and the phase signals, so there is no separate decoder.
+`driver_valid` (`rx_state == 0`) is derived when
+packets are read.
 
-`csi_i` and `csi_q` are numeric lists in original raw slot order, corresponding
-to the real and imaginary components. They preserve invalid slots and raw
-values. Interpret them using the recorded layout fields (`sig_mode`,
-`bandwidth`, `stbc`, `first_word`, and `len`); raw slot positions are not a
-physical-subcarrier axis. `phase_signal_from_packets()` uses the same physical
-layout decoding and masks as `load_phase_signal()` for plotting.
+Convert or reuse tables with `FrameStore.ensure(source, frames_dir)`, which
+converts only when the source fingerprint changed. `FrameStore.frames(
+receiver_id=..., capture_start_ns=..., capture_end_ns=..., columns=...)` prunes
+row groups by statistics, and `attempts()`, `phases()` and
+`attempt_frames(index, receiver_id)` return the small tables and one attempt
+window. Tables are returned as objects that export the Arrow PyCapsule interface:
+wrap them with `pyarrow.table(...)` (or hand them to Polars or DuckDB).
 
-The packet table retains non-sensing and driver-invalid records for auditing;
-`is_sensing` marks the standard transmitter/HE20/MCS0 filter, while
-`driver_valid` records `rx_state == 0`. `source_row`, sequence, receiver, and
-run/boot identities preserve attribution through capture-time sorting.
-`capture_time_ns`, `time_source`, `clock_uncertainty_us`, and host-receive timing
-remain distinct. Wireless recordings require validated capture sidecars; USB
-fallbacks retain their explicit time-source description.
+`load_analysis_session(raw, frames_dir)` returns an `AnalysisSession` with
+`attempts` and `phases` (review decisions and trial directions applied) and
+per-recording packets through `packets(attempt_key, receiver_id, columns)` and
+`read_packets(filters=..., columns=..., arrow_backed=...)`. Packet columns keep
+the names of the previous CSV export (`id`, `len`, `first_word`, `sig_mode`,
+`csi_i`, `csi_q`, `time_seconds`, `is_sensing`, `phase`, and so on). `phase` is
+`preparation`, `action`, or `resting`, mapped from `countdown`, `action`, and
+`recovery`; assignment uses half-open intervals `[start_ns, end_ns)` on capture
+time, and uncovered rows stay `unassigned`. `csi_i` is the real and `csi_q` the
+imaginary part in raw slot order. `is_sensing` marks the standard
+transmitter/HE20/MCS0 filter. Packets of one recording are sorted by capture
+time and a recording that mixes transmitter epochs is rejected.
 
-The export streams one receiver recording at a time into Zstandard-compressed
-packet row groups. `ParquetSession.read_packets(filters=..., columns=...)`
-supports filtering and column selection before loading. Its optional
-`arrow_backed=True` keeps a full-session pandas DataFrame in Arrow-backed
-columns. Frequent label/review fields are already on packets, so ordinary
-scenario/phase queries require no joins. Attempt distributions should use the
-attempt table so empty recordings still count once.
+An attempt window is `[start_ns, end_ns)` on capture time. `frames.parquet`
+holds exactly the frames the per-attempt CSV files held, so existing analyses
+see the same packets. `source_fingerprint` of the analysis session covers the raw
+data, the review revision, the protocol hash and the analysis semantics;
+changing any of them invalidates derived exports.
 
-All attempts are retained; analysis selects accepted attempts without an
-explicit review exclusion. Source file paths, sizes, modification times, and
-exporter code form a cache fingerprint. Changes to review, phase events, or
-recording inputs rebuild the export. The manifest is published only after a
-successful build; this cache check is not a cryptographic raw-data integrity
-audit. Active sessions are rejected. Video files and full transport journals
-are excluded, so this derived export does not replace the raw session bundle.
+## Version-3 session archives
+
+`storage_migrate(source, destination)` writes a
+version-3 archive that keeps the raw journals, events and manifests and drops the
+per-receiver CSV sidecars and the string-typed `tables/` copies, which the
+journals determine. Journals and event logs are stored as Zstandard members
+(`<name>.zst`) and `manifest.json` records a SHA-256 for every member. The
+migration proves that tables converted from the new archive equal those from the
+source before publishing it, and never modifies the source.
+`storage_archive_session(directory, destination)` writes a version-3 archive from
+a session directory; the collector calls it when a session finishes. It keeps the
+per-receiver sidecars (`drop_derived=False`) until the journal conversion of
+newly collected sessions is validated on real data, stores logs and sidecars as
+Zstandard members, and publishes only after the tables converted from the
+archive equal those converted from the directory. Sessions without journals skip
+that check.
 
 ## Optional BLE transport sidecars
 
@@ -1057,8 +1100,8 @@ file-buffer acceptance; it does not guarantee persistence through power failure.
 Automatic live recovery adds another `transport/gateway/<run-id>/` segment;
 it does not append a reboot to the old clock/run domain. The previous journal
 records `run_interrupted`; the new manifest's optional `recovery` object and
-`run_resuming`/`run_recovered` events link `previous_run_id` and the interruption
-`reason`. Collection records `radio_interrupted` and marks an active attempt
+`run_resuming` event (plus `run_recovered` in journals written before
+12 November 2026) link `previous_run_id` and the interruption `reason`. Collection records `radio_interrupted` and marks an active attempt
 invalid. Raw partial files remain available, and no synthetic CSI fills the gap.
 See [automatic recovery](automatic-radio-recovery.md).
 
@@ -1080,6 +1123,26 @@ their 200 ms guard applies to native preparation. Recording writer ownership
 and the separate handoff bounds are documented in
 [native processing](rust-radio-pipeline.md). All fields are additive; historical
 recordings remain readable without them.
+
+From 12 November 2026 the Rust session writes every gateway journal, with the
+same directory layout, envelope encoding and `availability.jsonl` bin format.
+Viewer and collector manifests contain `host_processing`, `transmitter_link`,
+`transport_config`, `transport_fingerprint`, `inventory` and `profile`; detector
+manifests instead record `source`, `models` and `preprocessing`. All contain
+`transport`, `recovery` and `host_policy` (bin rate, delivery grace, status,
+pending and reference timeouts). Events are `reference_initial` (preflight clock samples),
+`gateway_status`, `reference_frame` (every relayed transmitter/receiver frame
+as hex, including `CGST`, `CGMT`, `CGQE` and `CGCK`), `clock_request`, `round`
+(authoritative rounds with mapped `host_capture_ns`), `batch_acceptance`
+(arrival and acceptance times, a per-batch `clock_uncertainty_us` added on
+13 November 2026 and null when no reference estimate existed, plus per-record
+`capture_ns`),
+`round_availability`, `run_resuming` and `run_interrupted`. The Python-era
+decoded `receiver_status`, `mac_completion_summary`, `queue_event` and
+`channel_interval` events, per-record `record` events, `host_acceptance*`
+events and `gateway_host_buffer` counters are no longer written; the raw
+`reference_frame` payloads retain their source evidence. Readers of older
+journals are unaffected.
 
 Optional CGCF-v2 policies add an eight-batch window and early-return grace to the
 manifest/fingerprint without changing CSI rows. `CGQE` events 9/10 distinguish

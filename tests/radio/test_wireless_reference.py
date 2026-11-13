@@ -2,26 +2,21 @@
 
 import hashlib
 import hmac
-import json
 import shutil
 import struct
 import subprocess
-import time
-import zlib
 from pathlib import Path
 
 import pytest
-from test_gateway import FakeUsb, batch, inventory, profile
 
-from fall_detection.radio.acquisition.gateway_reader import GatewayReceiverManager
 from fall_detection.radio.acquisition.serial_framing import (
     decode_serial_frame,
     encode_serial_frame,
 )
-from fall_detection.radio.acquisition.transmitter_reference import ROUND
 from fall_detection.radio.acquisition.wireless_reference import WirelessReferenceSerial
-from fall_detection.radio.espnow_config import EspnowTransportConfig
-from fall_detection.radio.profile import profile_fingerprint
+
+# Authoritative CGRD transmitter round log, as emitted by firmware.
+ROUND = struct.Struct("!4sQIIQQIII3B")
 
 
 def test_wireless_serial_demultiplexes_and_bounds_queue():
@@ -234,162 +229,3 @@ int main(int argc,char **argv){
             ],
             check=True,
         )
-
-
-class WirelessUsb(FakeUsb):
-    """One USB endpoint carrying distinct gateway and transmitter messages."""
-
-    def __init__(self, paired=True, link="ble"):
-        super().__init__()
-        self.paired = paired
-        self.link = link
-        self.wireless_commands = []
-
-    def inject(self, kind, payload):
-        if kind == 27:
-            payload = (
-                b"\x00" + struct.pack("!BH", payload[0], len(payload) - 1) + payload[1:]
-            )
-        super().inject(kind, payload)
-
-    def write(self, data):
-        frame = decode_serial_frame(data[1:-1])
-        if frame.type == 5:
-            status = {
-                "role": "gateway",
-                "target": "esp32c6",
-                "mac": self.mac,
-                "protocol_version": 3,
-                "transport_config_max_version": 7,
-                "csi_transport": "espnow_gateway",
-                "boot_id": 99,
-                "wireless_version": 2,
-                "wireless_paired": self.paired,
-                "wireless_ready": True,
-                "wireless_fault": False,
-                "wireless_drops": 0,
-                "wireless_peer_changes": 0,
-            }
-            if self.link == "espnow_uart":
-                status = {
-                    (
-                        key.replace("wireless_", "relay_")
-                        if key.startswith("wireless_")
-                        else key
-                    ): value
-                    for key, value in status.items()
-                }
-                status.update(relay_version=1, relay_transport="espnow_uart")
-            self.inject(6, json.dumps(status).encode())
-        elif frame.type == 26:
-            kind, payload = frame.payload[0], frame.payload[1:]
-            if kind == 5:
-                status = {
-                    "role": "transmitter",
-                    "mac": inventory().transmitter.mac,
-                    "protocol_version": 3,
-                    "ready": True,
-                    "sensing_version": 4,
-                    "csi_transport": "espnow_gateway",
-                    "sensing_phy": "he20",
-                    "transport_config_max_version": 7,
-                    "profile_fingerprint": profile_fingerprint(profile(), inventory()),
-                }
-                self.inject(27, b"\x06" + json.dumps(status).encode())
-            elif kind == 20:
-                self.wireless_commands.append(payload[:4])
-                if payload[:4] == b"CGHC":
-                    now = time.monotonic_ns() // 1000
-                    response = payload + struct.pack("!QQII", now, now, 11, 0)
-                else:
-                    response = b"ok"
-                self.inject(27, b"\x15" + response)
-                if payload[:4] == b"CGGO":
-                    now = time.monotonic_ns() // 1000
-                    self.inject(
-                        27,
-                        b"\x16"
-                        + ROUND.pack(
-                            b"CGRD", 123, 11, 0, now, now, 12500, 15, 0, 255, 255, 255
-                        ),
-                    )
-                    for slot in range(4):
-                        status = bytearray(96)
-                        status[:4] = b"CGST"
-                        status[4:6] = bytes([1, slot])
-                        struct.pack_into("!QII", status, 8, 123, 11, 21)
-                        struct.pack_into("!I", status, 92, zlib.crc32(status[:-4]))
-                        self.inject(27, b"\x17" + status)
-                        self.inject(24, batch(receiver=slot).encode())
-        else:
-            return super().write(data)
-        self.writes.append(frame)
-        return len(data)
-
-
-@pytest.mark.parametrize("paired", [True, False])
-@pytest.mark.parametrize("link", ["espnow_uart"])
-def test_gateway_only_usb_uses_real_wireless_reference(tmp_path, paired, link):
-    usb = WirelessUsb(paired, link)
-    seen = []
-    manager = GatewayReceiverManager(
-        inventory(),
-        profile(),
-        tmp_path,
-        transmitter_port=None,
-        gateway_port="gateway",
-        transmitter_link=link,
-        run_id=123,
-        require_four=True,
-        config=EspnowTransportConfig(drain_ms=500),
-        record_sink=lambda record, accepted: seen.append(record),
-        serial_factory=lambda *a, **k: usb,
-    )
-    manager.bind()
-    manager.start()
-    deadline = time.monotonic() + 3
-    while (
-        not manager.failure
-        and not manager.preflight_ready
-        and time.monotonic() < deadline
-    ):
-        time.sleep(0.01)
-    manager.stop()
-    if paired:
-        assert manager.failure is None
-        assert len(seen) == 4
-        assert b"CGCF" in usb.wireless_commands and b"CGGO" in usb.wireless_commands
-        assert usb.wireless_commands[-1] == b"CGSP"
-    else:
-        assert "paired connectionless" in manager.failure
-        assert b"CGGO" not in usb.wireless_commands
-
-
-@pytest.mark.parametrize("link", ["espnow_uart"])
-def test_wireless_missing_boot_evidence_fails_within_bound(tmp_path, link):
-    class MissingStatusUsb(WirelessUsb):
-        def inject(self, kind, payload):
-            if kind == 27 and payload[:5] == b"\x17CGST":
-                return
-            super().inject(kind, payload)
-
-    usb = MissingStatusUsb(link=link)
-    manager = GatewayReceiverManager(
-        inventory(),
-        profile(),
-        tmp_path,
-        transmitter_port=None,
-        gateway_port="gateway",
-        transmitter_link=link,
-        run_id=123,
-        require_four=True,
-        config=EspnowTransportConfig(drain_ms=500),
-        serial_factory=lambda *a, **k: usb,
-    )
-    manager.start()
-    deadline = time.monotonic() + 3
-    while not manager.failure and time.monotonic() < deadline:
-        time.sleep(0.01)
-    manager.stop()
-    assert "boot evidence unavailable" in manager.failure
-    assert usb.wireless_commands[-1] == b"CGSP"

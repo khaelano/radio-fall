@@ -262,7 +262,7 @@ def _run(
                 "capacity_bytes": recording_io.capacity_bytes,
             },
         },
-        telemetry_provider=lambda: radio.manager.telemetry_snapshot(),
+        telemetry_provider=lambda: radio.telemetry_snapshot(),
         video_recorder=video,
         recording_io=recording_io,
         manual_confirmation_required=not args.continuous,

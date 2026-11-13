@@ -12,6 +12,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import numpy as np
+import pandas as pd
 import polars as pl
 import pytest
 
@@ -59,9 +60,9 @@ def synthetic_session(path):
                 }
             )
     path.mkdir()
-    pl.DataFrame(rows).with_columns(
+    packets = pl.DataFrame(rows).with_columns(
         pl.col("csi_i", "csi_q").cast(pl.List(pl.Int16))
-    ).write_parquet(path / "packets.parquet")
+    )
     attempts = pl.DataFrame(
         [
             {
@@ -81,17 +82,41 @@ def synthetic_session(path):
             }
         ]
     )
-    pl.DataFrame(
+    phases = pd.DataFrame(
         {
             "attempt_key": ["trial/attempt"],
             "phase": ["action"],
             "start_ns": [2_000_000_000],
             "end_ns": [8_000_000_000],
         }
-    ).write_parquet(path / "phases.parquet")
+    )
+
+    class Analysis:
+        """The part of ``AnalysisSession`` that the notebook reads."""
+
+        def __init__(self):
+            self.phases = phases
+
+        def packets(self, attempt_key, receiver_id, columns):
+            frame = packets.filter(
+                (pl.col("attempt_key") == attempt_key)
+                & (pl.col("receiver_id") == receiver_id)
+            ).sort("capture_time_ns")
+            return frame.select(columns).to_arrow()
+
+        def recording_summary(self, attempt_keys=None):
+            frame = packets.group_by("attempt_key", "receiver_id").agg(
+                pl.len().alias("packets"),
+                pl.col("driver_valid").sum().alias("driver_valid_packets"),
+                pl.col("capture_time_ns").min().alias("first_ns"),
+                pl.col("capture_time_ns").max().alias("last_ns"),
+            )
+            return frame.to_pandas()
+
     return SimpleNamespace(
         path=path,
         attempts=attempts,
+        analysis=Analysis(),
         manifest={"source_fingerprint": "synthetic-source"},
     )
 

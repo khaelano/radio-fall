@@ -53,6 +53,89 @@ fn doubles(data: &[u8]) -> Vec<f64> {
         .collect()
 }
 
+/// Filter column-major float64 signals using the shared centered offline arithmetic.
+#[allow(clippy::too_many_arguments)]
+pub fn filter_native(
+    input: &[f64],
+    times: &[f64],
+    columns: usize,
+    window_seconds: f64,
+    min_periods: usize,
+    threshold: f64,
+    parallel: bool,
+    simd: bool,
+) -> Result<(Vec<f64>, Vec<u8>), String> {
+    let rows = times.len();
+    if rows.checked_mul(columns) != Some(input.len())
+        || !window_seconds.is_finite()
+        || window_seconds <= 0.0
+        || min_periods == 0
+        || !threshold.is_finite()
+        || threshold < 0.0
+        || times.iter().any(|v| !v.is_finite())
+        || times.windows(2).any(|v| v[1] < v[0])
+        || input.iter().any(|v| v.is_infinite())
+    {
+        return Err("invalid Hampel input or parameters".into());
+    }
+    let half = window_seconds / 2.0;
+    let bounds: Vec<_> = times
+        .iter()
+        .map(|t| {
+            (
+                times.partition_point(|v| *v < t - half),
+                times.partition_point(|v| *v <= t + half),
+            )
+        })
+        .collect();
+    let mut output = input.to_vec();
+    let mut replaced = vec![0u8; input.len()];
+    if rows != 0 {
+        let process = |column: usize, out: &mut [f64], mask: &mut [u8]| {
+            let source = &input[column * rows..(column + 1) * rows];
+            let mut scratch = Vec::new();
+            for (row, &(start, stop)) in bounds.iter().enumerate() {
+                if !source[row].is_finite() || stop - start < min_periods {
+                    continue;
+                }
+                scratch.clear();
+                scratch.extend(
+                    source[start..stop]
+                        .iter()
+                        .copied()
+                        .filter(|v| v.is_finite()),
+                );
+                if scratch.len() < min_periods {
+                    continue;
+                }
+                let middle = median(&mut scratch);
+                deviations(&mut scratch, middle, simd);
+                let mad = median(&mut scratch);
+                if mad > 0.0 && (source[row] - middle).abs() > threshold * 1.4826 * mad {
+                    out[row] = middle;
+                    mask[row] = 1;
+                }
+            }
+        };
+        if parallel {
+            output
+                .par_chunks_mut(rows)
+                .zip(replaced.par_chunks_mut(rows))
+                .enumerate()
+                .for_each(|(col, (out, mask))| process(col, out, mask));
+        } else {
+            for (col, (out, mask)) in output
+                .chunks_mut(rows)
+                .zip(replaced.chunks_mut(rows))
+                .enumerate()
+            {
+                process(col, out, mask);
+            }
+        }
+    }
+    Ok((output, replaced))
+}
+
 /// Inputs and outputs are native-endian float64 matrices in column-major order.
 /// Immutable bytes own the input while the GIL is released (no NumPy alias race).
 #[pyfunction]
@@ -92,64 +175,20 @@ pub fn hampel_filter<'py>(
             "Amplitude must contain finite values or NaN",
         ));
     }
-    let (output, replaced) = py.detach(|| {
-        let half = window_seconds / 2.0;
-        let bounds: Vec<_> = times
-            .iter()
-            .map(|t| {
-                (
-                    times.partition_point(|v| *v < t - half),
-                    times.partition_point(|v| *v <= t + half),
-                )
-            })
-            .collect();
-        let mut output = input.clone();
-        let mut replaced = vec![0u8; input.len()];
-        if rows != 0 {
-            let process = |column: usize, out: &mut [f64], mask: &mut [u8]| {
-                let source = &input[column * rows..(column + 1) * rows];
-                let mut scratch = Vec::new();
-                for (row, &(start, stop)) in bounds.iter().enumerate() {
-                    if !source[row].is_finite() || stop - start < min_periods {
-                        continue;
-                    }
-                    scratch.clear();
-                    scratch.extend(
-                        source[start..stop]
-                            .iter()
-                            .copied()
-                            .filter(|v| v.is_finite()),
-                    );
-                    if scratch.len() < min_periods {
-                        continue;
-                    }
-                    let middle = median(&mut scratch);
-                    deviations(&mut scratch, middle, simd);
-                    let mad = median(&mut scratch);
-                    if mad > 0.0 && (source[row] - middle).abs() > threshold * 1.4826 * mad {
-                        out[row] = middle;
-                        mask[row] = 1;
-                    }
-                }
-            };
-            if parallel {
-                output
-                    .par_chunks_mut(rows)
-                    .zip(replaced.par_chunks_mut(rows))
-                    .enumerate()
-                    .for_each(|(col, (out, mask))| process(col, out, mask));
-            } else {
-                for (col, (out, mask)) in output
-                    .chunks_mut(rows)
-                    .zip(replaced.chunks_mut(rows))
-                    .enumerate()
-                {
-                    process(col, out, mask);
-                }
-            }
-        }
-        (output, replaced)
-    });
+    let (output, replaced) = py
+        .detach(|| {
+            filter_native(
+                &input,
+                &times,
+                columns,
+                window_seconds,
+                min_periods,
+                threshold,
+                parallel,
+                simd,
+            )
+        })
+        .map_err(PyValueError::new_err)?;
     // SAFETY: initialized f64 values have no padding; the read-only byte view
     // cannot outlive output and PyBytes::new copies it before returning.
     let bytes = unsafe {
@@ -164,6 +203,20 @@ pub fn hampel_filter<'py>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn centered_replacements_and_missingness_are_explicit() {
+        let values = [0.0, 1.0, 2.0, 100.0, 4.0, 5.0, 6.0];
+        let times: Vec<_> = (0..7).map(|v| v as f64).collect();
+        let (out, replaced) =
+            filter_native(&values, &times, 1, 12.0, 5, 3.0, false, false).unwrap();
+        assert_eq!(out[3], 4.0);
+        assert_eq!(replaced, vec![0, 0, 0, 1, 0, 0, 0]);
+        let missing = [1.0, 1.0, f64::NAN, 99.0, 1.0, 1.0, 1.0];
+        let (out, replaced) = filter_native(&missing, &times, 1, 12.0, 5, 3.0, true, true).unwrap();
+        assert!(out[2].is_nan());
+        assert_eq!(out[3], 99.0);
+        assert_eq!(replaced, vec![0; 7]);
+    }
     #[test]
     fn simd_deviations_match_scalar_with_tails() {
         for n in 0..40 {

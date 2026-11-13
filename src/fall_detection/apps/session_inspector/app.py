@@ -57,8 +57,11 @@ from fall_detection.session_inspector.review import (
     ReviewError,
     ReviewStore,
 )
+from fall_detection.session_inspector.source import SessionSource
 
 DEFAULT_SESSIONS_DIR = Path("data/raw/sessions")
+DEFAULT_ANNOTATIONS_DIR = Path("data/annotations")
+REVIEW_FILE = "session_review.json"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -69,13 +72,19 @@ def _parser() -> argparse.ArgumentParser:
         "session",
         nargs="?",
         type=Path,
-        help="optional individual session directory to open",
+        help="optional individual session directory or archive to open",
     )
     parser.add_argument(
         "--sessions-dir",
         type=Path,
         default=DEFAULT_SESSIONS_DIR,
-        help="directory containing collection session bundles",
+        help="directory containing session directories and archives",
+    )
+    parser.add_argument(
+        "--annotations-dir",
+        type=Path,
+        default=DEFAULT_ANNOTATIONS_DIR,
+        help="directory where reviews are saved, one folder per session id",
     )
     return parser
 
@@ -125,7 +134,7 @@ if QtCore is not None:
             page_size: int = 250,
         ) -> None:
             super().__init__(parent)
-            self.table = table or TableData(name="", path=None)
+            self.table = table or TableData(name="")
             self.page_size = max(1, page_size)
             self.page = 0
 
@@ -467,7 +476,6 @@ if QtCore is not None:
             for key, title in (
                 ("csi", "CSI rows"),
                 ("radio_timing", "Radio timing"),
-                ("clock_sync", "Clock sync"),
                 ("detail", "Selected CSI values"),
             ):
                 view = QtWidgets.QTableView()
@@ -494,9 +502,7 @@ if QtCore is not None:
 
         def _current_model(self) -> TextTableModel:
             return self.models[
-                ("csi", "radio_timing", "clock_sync", "detail")[
-                    self.tabs.currentIndex()
-                ]
+                ("csi", "radio_timing", "detail")[self.tabs.currentIndex()]
             ]
 
         @QtCore.Slot()
@@ -516,7 +522,7 @@ if QtCore is not None:
             self._record_by_row = {}
             self.summary.setText(message)
             for model in self.models.values():
-                model.set_table(TableData(name="", path=None))
+                model.set_table(TableData(name=""))
             self._update_paging()
 
         def set_data(self, data: AttemptData) -> None:
@@ -528,12 +534,10 @@ if QtCore is not None:
             )
             self.models["csi"].set_table(data.csi)
             self.models["radio_timing"].set_table(data.radio_timing)
-            self.models["clock_sync"].set_table(data.clock_sync)
-            self.models["detail"].set_table(TableData(name="", path=None))
+            self.models["detail"].set_table(TableData(name=""))
             summary = (
                 f"{data.receiver_id}: {data.record_count} valid CSI records · "
-                f"{data.radio_timing.row_count} timing rows · "
-                f"{data.clock_sync.row_count} clock-sync rows"
+                f"{data.radio_timing.row_count} timing rows"
             )
             if data.warnings:
                 summary += f" · {len(data.warnings)} warning(s)"
@@ -545,7 +549,7 @@ if QtCore is not None:
 
         def _csi_row_changed(self, current: Any, _previous: Any) -> None:
             if not current.isValid():
-                self.models["detail"].set_table(TableData(name="", path=None))
+                self.models["detail"].set_table(TableData(name=""))
                 return
             record = self._record_by_row.get(
                 self.models["csi"].source_row(current.row())
@@ -556,12 +560,11 @@ if QtCore is not None:
                     self.models["csi"].source_row(current.row()),
                 )
             if record is None:
-                self.models["detail"].set_table(TableData(name="", path=None))
+                self.models["detail"].set_table(TableData(name=""))
                 return
             rows = csi_value_rows(record)
             table = TableData(
                 name="Selected CSI values",
-                path=None,
                 headers=(
                     "subcarrier",
                     "real (I)",
@@ -586,7 +589,7 @@ if QtCore is not None:
             )
             self.models["detail"].set_table(table)
             self.views["detail"].resizeColumnsToContents()
-            if self.tabs.currentIndex() == 3:
+            if self.tabs.currentIndex() == 2:
                 self._update_paging()
 
     class SignalsPanel(QtWidgets.QWidget):
@@ -863,9 +866,12 @@ if QtCore is not None:
     class SessionInspectorWindow(QtWidgets.QMainWindow):
         """Main offline session browser and review editor."""
 
-        def __init__(self, source_path: Path) -> None:
+        def __init__(
+            self, source_path: Path, annotations_dir: Path | None = None
+        ) -> None:
             super().__init__()
             self.source_path = source_path
+            self.annotations_dir = annotations_dir
             self.sessions: tuple[SessionBundle, ...] = ()
             self.session: SessionBundle | None = None
             self.store: ReviewStore | None = None
@@ -891,7 +897,7 @@ if QtCore is not None:
             self._load_timer.timeout.connect(self._dispatch_attempt_load)
             self.thread_pool = QtCore.QThreadPool(self)
             self.thread_pool.setMaxThreadCount(2)
-            # Python's CSV/JSON CSI decoding is CPU-bound and can starve the
+            # Python's frame-to-record decoding is CPU-bound and can starve the
             # GUI event loop even from a QThread. A spawned process pool keeps
             # the interpreter work isolated without forking Qt state.
             self.process_pool = ProcessPoolExecutor(
@@ -1164,11 +1170,37 @@ if QtCore is not None:
             if session is not None:
                 self._open_session(session)
 
+        def _resolve_receivers(self, session: SessionBundle) -> SessionBundle:
+            """Fill in the session's receivers, converting its journals if needed."""
+            if session.receivers_resolved:
+                return session
+
+            def progress(message: str) -> None:
+                self.statusBar().showMessage(message)
+                self.statusBar().repaint()
+
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+            try:
+                resolved = session.with_receivers(progress)
+            finally:
+                QtWidgets.QApplication.restoreOverrideCursor()
+            self.sessions = tuple(
+                resolved if item.path == resolved.path else item
+                for item in self.sessions
+            )
+            return resolved
+
         def _open_session(self, session: SessionBundle) -> None:
             self._cancel_load()
+            session = self._resolve_receivers(session)
             self._data_cache.clear()
             self.session = session
-            self.store = ReviewStore(session)
+            self.store = ReviewStore(
+                session,
+                None
+                if self.annotations_dir is None
+                else self.annotations_dir / session.session_id / REVIEW_FILE,
+            )
             review_error = None
             try:
                 self.loaded_review = self.store.load()
@@ -1345,13 +1377,8 @@ if QtCore is not None:
                             "attributes": trial.attributes if trial else {},
                         },
                         "attempt": attempt.metadata,
-                        "files": {
-                            files.receiver_id: [
-                                path.relative_to(self.session.path).as_posix()
-                                for path in files.available
-                            ]
-                            for files in attempt.receiver_files
-                        },
+                        "receivers": list(attempt.receiver_ids),
+                        "frame_tables": attempt.frames_path.as_posix(),
                     }
                 )
             )
@@ -1368,8 +1395,8 @@ if QtCore is not None:
             if self.receiver_combo.count():
                 self._schedule_attempt_load(self.receiver_combo.currentText())
             else:
-                self.signals_tab.clear("No receiver files found")
-                self.values_tab.clear("No receiver files found")
+                self.signals_tab.clear("No receiver frames found")
+                self.values_tab.clear("No receiver frames found")
 
         def _clear_attempt(self, message: str = "Select a recorded attempt") -> None:
             self._cancel_load()
@@ -1672,7 +1699,7 @@ if QtCore is not None:
             )
             if not parent_text:
                 return
-            default_name = f"{self.session.path.name}-curated"
+            default_name = f"{SessionSource(self.session.path).name}-curated"
             name, accepted = QtWidgets.QInputDialog.getText(
                 self,
                 "Curated bundle name",
@@ -1767,6 +1794,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     source = args.session if args.session is not None else args.sessions_dir
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     pg.setConfigOptions(antialias=False, imageAxisOrder="row-major")
-    window = SessionInspectorWindow(source)
+    window = SessionInspectorWindow(source, args.annotations_dir)
     window.show()
     return application.exec()

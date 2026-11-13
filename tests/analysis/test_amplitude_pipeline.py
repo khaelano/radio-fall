@@ -1,6 +1,5 @@
 """Check native physical CSI preparation and the Polars/NPZ pipeline."""
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -25,28 +24,28 @@ def packets(counts=(245, 256, 245, 256, 245, 256)):
         q = rng.integers(-128, 128, size=count, dtype=np.int16)
         i[:3], q[:3] = [0, 3, 4], [0, 0, 0]
         rows.append(
-            dict(
-                attempt_key="trials/001_walk/attempt_01",
-                attempt_id="001/01",
-                receiver_id="rx-1",
-                is_sensing=True,
-                time_source="test",
-                time_seconds=row / 100,
-                capture_time_ns=row * 10000000,
-                phase="action",
-                driver_valid=row != 2,
-                sig_mode=4,
-                bandwidth=0,
-                stbc=0,
-                first_word=row % 2,
-                len=count * 2,
-                csi_i=i.tolist(),
-                csi_q=q.tolist(),
-                attempt_started_monotonic_ns=0,
-                attempt_ended_monotonic_ns=100000000,
-                nominal_rate_hz=100.0,
-                clock_uncertainty_us=0.0,
-            )
+            {
+                "attempt_key": "trials/001_walk/attempt_01",
+                "attempt_id": "001/01",
+                "receiver_id": "rx-1",
+                "is_sensing": True,
+                "time_source": "test",
+                "time_seconds": row / 100,
+                "capture_time_ns": row * 10000000,
+                "phase": "action",
+                "driver_valid": row != 2,
+                "sig_mode": 4,
+                "bandwidth": 0,
+                "stbc": 0,
+                "first_word": row % 2,
+                "len": count * 2,
+                "csi_i": i.tolist(),
+                "csi_q": q.tolist(),
+                "attempt_started_monotonic_ns": 0,
+                "attempt_ended_monotonic_ns": 100000000,
+                "nominal_rate_hz": 100.0,
+                "clock_uncertainty_us": 0.0,
+            }
         )
     return pl.DataFrame(rows).with_columns(
         pl.col("csi_i", "csi_q").cast(pl.List(pl.Int16))
@@ -99,42 +98,56 @@ def test_prepare_recording_rejects_mixed_identity_and_backwards_time():
         prepare_recording(frame.reverse())
 
 
-def test_packet_reader_handles_mixed_row_groups_and_projection(tmp_path):
+class FakeAnalysis:
+    """Serve in-memory recordings through the analysis ``packets`` contract."""
+
+    def __init__(self, recordings):
+        self.recordings = recordings
+
+    def packets(self, attempt_key, receiver_id, columns=None):
+        frame = self.recordings[(attempt_key, receiver_id)]
+        return (frame if columns is None else frame.select(columns)).to_arrow()
+
+
+def test_packet_reader_returns_one_recording_with_projection():
     frame = packets()
     other = frame.with_columns(pl.lit("rx-2").alias("receiver_id"))
-    path = tmp_path / "packets.parquet"
-    pl.concat([frame, other]).write_parquet(path, row_group_size=7)
-    reader = AmplitudePacketReader(path)
+    key = frame["attempt_key"][0]
+    reader = AmplitudePacketReader(
+        FakeAnalysis({(key, "rx-1"): frame, (key, "rx-2"): other})
+    )
     try:
-        actual = reader.read(frame["attempt_key"][0], "rx-1")
+        actual = reader.read(key, "rx-1")
         assert len(actual) == len(frame)
         assert actual["receiver_id"].unique().to_list() == ["rx-1"]
         assert "nominal_rate_hz" not in actual.columns
+        assert reader.read(key, "rx-2")["receiver_id"].unique().to_list() == ["rx-2"]
     finally:
         reader.close()
+    with pytest.raises(ValueError, match="packets"):
+        AmplitudePacketReader(SimpleNamespace(analysis=None))
 
 
 def test_preprocess_dataset_saves_arrays_and_summary_in_order(tmp_path):
-    source = tmp_path / "parquet"
-    source.mkdir()
     frame = packets()
-    frame.write_parquet(source / "packets.parquet")
+    key = frame["attempt_key"][0]
     session = SimpleNamespace(
-        path=source,
+        path=tmp_path / "frames",
         manifest={
             "source_directory": str(tmp_path / "raw/session"),
             "session_id": "test",
         },
+        analysis=FakeAnalysis({(key, "rx-1"): frame}),
     )
     recordings = pl.DataFrame(
         [
-            dict(
-                attempt_key=frame["attempt_key"][0],
-                receiver_ids="rx-1",
-                activity_label="walk",
-                scenario_id="walk",
-                quality="good",
-            )
+            {
+                "attempt_key": key,
+                "receiver_ids": "rx-1",
+                "activity_label": "walk",
+                "scenario_id": "walk",
+                "quality": "good",
+            }
         ]
     )
     summary = preprocess_dataset(

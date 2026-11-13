@@ -1,37 +1,84 @@
-"""Shared acquisition setup for live desktop applications, without Qt imports."""
+"""Live gateway acquisition for desktop applications, without Qt imports.
+
+Rust owns the radio session: startup, journal-before-ACK acceptance, capture
+mapping, availability bins, duplicate removal, quality counters and restarts.
+This module only moves accepted records to the host's sinks and display
+buffers and turns native health into presentation-ready snapshots.
+"""
 
 from __future__ import annotations
 
 import argparse
+import json
+import secrets
+import time
 from collections.abc import Callable
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Any
 
-from .acquisition.gateway_reader import GatewayReceiverManager
+from .acquisition.availability import AvailabilitySnapshot
+from .acquisition.buffer import RollingCsiBuffer
+from .acquisition.gateway_diagnostics import (
+    DeliveryRates,
+    GatewayDiagnostics,
+    ReceiverDiagnostics,
+)
+from .acquisition.native import NativeRecord, backend_info, require_native
 from .acquisition.protocol import CsiRecord
-from .acquisition.recovery import RecoveryUnavailable, can_recover, recover_gateway
-from .settings import add_config_argument, resolve_settings
+from .acquisition.recorder import CsiRecorder
+from .acquisition.telemetry import BackhaulTelemetrySnapshot
+from .settings import add_live_arguments, resolve_settings
 from .state import LiveState
 
+__all__ = ["LiveRadio", "ReceiverBinding", "add_live_arguments"]
 
-def add_live_arguments(parser: argparse.ArgumentParser) -> None:
-    """Add the common configuration and connection overrides to a live command."""
-    add_config_argument(parser)
-    parser.add_argument(
-        "--transport", choices=("espnow_gateway",), default="espnow_gateway"
-    )
-    parser.add_argument("--gateway-port", help="override the configured C6 USB path")
-    parser.add_argument("--port", help="override the C5 USB path for USB fallback")
-    parser.add_argument("--transmitter-link", choices=("usb", "espnow_uart"))
+# Stale status or delivery beyond this age marks a receiver offline.
+LIVENESS_S = 2.5
+# Plot work waits while more accepted records than this await Python delivery.
+PREVIEW_MAX_PENDING_RECORDS = 512
+HEALTH_INTERVAL_S = 0.1
+POLL_IDLE_S = 0.005
+
+
+@dataclass(frozen=True)
+class ReceiverBinding:
+    """A configured receiver slot; the USB port belongs to the shared gateway."""
+
+    receiver_id: str
+    mac: str
+    target: str
+    port: str
+    profile_fingerprint: str
+
+
+def _native_acquisition(config_json: str) -> Any:
+    native = require_native()
+    if not hasattr(native, "NativeAcquisition"):
+        raise RuntimeError("Rebuild the native extension to enable NativeAcquisition")
+    return native.NativeAcquisition(config_json)
 
 
 class LiveRadio:
-    """Validate and bind acquisition once, then share its buffers with the UI.
+    """Validate configuration once, then deliver native records to the host.
 
-    Construction does not open hardware. The manager factory is the seam for
-    offline lifecycle tests. Call ``start`` only after the host is ready to
-    accept data, and ``stop`` on every exit, including failed startup.
+    Construction does not open hardware. ``acquisition_factory`` receives the
+    JSON configuration and is the seam for offline lifecycle tests. Call
+    ``start`` only after the host's sinks are ready, and ``stop`` on every exit.
+
+    Args:
+        args: Parsed live arguments with ``config``, ``gateway_port`` and
+            ``output_dir``; ``receiver_id`` optionally selects the preview.
+        require_four: Require exactly four configured receivers.
+        on_status: Receives human-readable radio state changes.
+        record_sink: Receives each accepted first-capture record and its host
+            arrival time. Without a sink, records are written to per-receiver
+            CSV files below ``args.output_dir``.
+        journal_root: Returns the directory for transport journals at start.
+        on_interruption: Called once per failed run with the failure reason.
+        recording_io: Optional native recording writer for the CSV fallback.
+        acquisition_factory: Builds the native acquisition from JSON.
     """
 
     def __init__(
@@ -42,74 +89,60 @@ class LiveRadio:
         on_status: Callable[[str, bool], None] | None = None,
         record_sink: Callable[[CsiRecord, int], None] | None = None,
         journal_root: Callable[[], Path | None] | None = None,
-        manager_factory: Callable[..., Any] = GatewayReceiverManager,
         on_interruption: Callable[[str], None] | None = None,
-        repair_link: Callable[[Any], None] = recover_gateway,
-        recording_io=None,
+        recording_io: Any = None,
+        acquisition_factory: Callable[[str], Any] = _native_acquisition,
     ) -> None:
         self.settings = resolve_settings(args)
         self.settings.transport.validate(
             self.settings.inventory, self.settings.profile, require_four=require_four
         )
+        if not args.gateway_port:
+            raise ValueError("a gateway USB port is required (--gateway-port)")
+        receivers = self.settings.inventory.receivers
         selected = getattr(args, "receiver_id", None)
-        receiver_ids = {device.id for device in self.settings.inventory.receivers}
+        receiver_ids = [device.id for device in receivers]
         if selected is not None and selected not in receiver_ids:
             raise ValueError(
                 "--receiver-id must match one of: " + ", ".join(sorted(receiver_ids))
             )
+        fingerprint = self.settings.profile_fingerprint
+        self.bindings = tuple(
+            ReceiverBinding(
+                device.id, device.mac, device.target, args.gateway_port, fingerprint
+            )
+            for device in receivers
+        )
+        self.buffers = {
+            device.id: RollingCsiBuffer(
+                nominal_rate=self.settings.profile.nominal_rate_hz, seconds=10
+            )
+            for device in receivers
+        }
         self.state = LiveState(self.settings.profile.nominal_rate_hz)
+        self.state.configure_receivers(self.buffers, selected)
+        self._args = args
+        self._on_status = on_status
+        self._record_sink = record_sink
+        self._journal_root = journal_root
+        self._on_interruption = on_interruption
+        self._recording_io = recording_io
+        self._factory = acquisition_factory
+        self._acquisition: Any = None
+        self._recorders: dict[str, CsiRecorder] = {}
+        self._rates = DeliveryRates()
+        self._health: dict[str, Any] = {"session": {"state": "idle"}}
+        self._health_lock = Lock()
+        self._stop = Event()
+        self._thread: Thread | None = None
+        self._started = self._stopped = False
+        self._announced: tuple[str | None, int] = (None, 0)
+        self._sink_failure: str | None = None
 
-        def report_status(message: str, connected: bool) -> None:
-            self.state.set_status(message, connected)
-            if on_status is not None:
-                on_status(message, connected)
-
-        self._report_status = report_status
-        self._manager_factory = manager_factory
-        self._manager_args = (
-            self.settings.inventory,
-            self.settings.profile,
-            args.output_dir,
-        )
-        self._manager_options = {
-            "transmitter_port": args.port,
-            "gateway_port": args.gateway_port,
-            "transmitter_link": args.transmitter_link,
-            "config": self.settings.transport,
-            "require_four": require_four,
-            "on_status": report_status,
-            "record_sink": record_sink,
-            "journal_root": journal_root,
-            "reference_failure_sink": on_interruption,
-            "recording_io": recording_io,
-        }
-        self.manager = manager_factory(*self._manager_args, **self._manager_options)
-        self.bindings = self.manager.bind()
-        self.state.configure_receivers(
-            {key: reader.buffer for key, reader in self.manager.readers.items()},
-            selected,
-        )
-        self._stopped = False
-        self._recovery_stop = Event()
-        self._recovery_lock = Lock()
-        self._recovery_thread: Thread | None = None
-        self._retired_manager = None
-        self._repair_link = repair_link
-        self._recovery_delay_s = 3.0
-        self._recovery_attempt = 0
-        self._inputs = {
-            "port": args.port,
-            "gateway_port": args.gateway_port,
-            "transmitter_link": args.transmitter_link,
-            "radio_config": str(args.config) if args.config else None,
-        }
+    # ------------------------------------------------------------------ setup
 
     def environment(self) -> dict[str, Any]:
         """Snapshot resolved radio inputs for an immutable session manifest."""
-        from dataclasses import asdict
-
-        from .acquisition.native import backend_info
-
         settings = self.settings
         return {
             "host_processing": backend_info(),
@@ -118,7 +151,9 @@ class LiveRadio:
             "gateway_transport_fingerprint": settings.transport.fingerprint(
                 settings.inventory, settings.profile
             ),
-            **self._inputs,
+            "gateway_port": self._args.gateway_port,
+            "transmitter_link": settings.connection["transmitter_link"],
+            "radio_config": str(self._args.config) if self._args.config else None,
             "nominal_rate_hz": settings.profile.nominal_rate_hz,
             "receiver_ids": {
                 device.mac: device.id for device in settings.inventory.receivers
@@ -137,105 +172,353 @@ class LiveRadio:
             },
         }
 
-    def start(self) -> None:
-        """Start the acquisition worker after the host's sinks are ready."""
-        if self._stopped:
-            raise RuntimeError("a stopped radio cannot be restarted; create a new run")
-        self.manager.start()
-        if self.manager.transmitter_link in {"usb", "espnow_uart"}:
-            self._recovery_thread = Thread(
-                target=self._recover, name="csi-radio-recovery", daemon=True
-            )
-            self._recovery_thread.start()
+    def native_config(self, journal_root: Path) -> dict[str, Any]:
+        """Return the JSON-serializable configuration for ``NativeAcquisition``."""
+        settings = self.settings
+        transport = settings.transport
+        run = secrets.randbits(64) or 1
+        return {
+            "serial_path": str(self._args.gateway_port),
+            "radio_config": list(
+                transport.encode(run, settings.inventory, settings.profile)
+            ),
+            "journal_root": str(journal_root),
+            "metadata": {
+                "host_processing": backend_info(),
+                "transmitter_link": settings.connection["transmitter_link"],
+                "transport_config": asdict(transport),
+                "transport_fingerprint": transport.fingerprint(
+                    settings.inventory, settings.profile
+                ),
+                "inventory": settings.inventory.as_dict(),
+                "profile": settings.profile.as_dict(),
+            },
+            "bin_hz": transport.bin_hz,
+            "delivery_grace_ms": transport.delivery_grace_ms,
+            "restart_delay_ms": 3000,
+            "maximum_restart_delay_ms": 30000,
+            "relay_ready_timeout_ms": 8000,
+        }
 
-    def _recover(self) -> None:
-        announced = None
-        while not self._recovery_stop.wait(0.1):
-            previous = self.manager
-            reason = previous.failure
-            if not reason:
-                if previous.preflight_ready:
-                    self._recovery_attempt = 0
-                    if previous.recovery_context and announced != previous.run_id:
-                        if previous.journal:
-                            try:
-                                previous.journal.event(
-                                    "run_recovered", **previous.recovery_context
-                                )
-                            except OSError as exc:
-                                previous._fail(f"journal recovery event failed: {exc}")
-                                return
-                        self._report_status(
-                            "Radio recovered; sensing resumed with fresh timing", True
-                        )
-                        announced = previous.run_id
-                continue
-            if not can_recover(reason):
-                return
-            with self._recovery_lock:
-                if self._recovery_stop.is_set():
-                    return
-                try:
-                    previous.stop()
-                except Exception as exc:  # noqa: BLE001 — recovery boundary
-                    self._report_status(f"Recovery stopped: {exc}", False)
-                    return
-                self._retired_manager = previous
-            while not self._recovery_stop.is_set():
-                self._recovery_attempt += 1
-                self._report_status("Radio interrupted; reconnecting: " + reason, False)
-                # Also lets the independent C5 control lease end before a new run.
-                if self._recovery_stop.wait(
-                    min(30.0, self._recovery_delay_s * self._recovery_attempt)
-                ):
-                    return
-                try:
-                    with self._recovery_lock:
-                        if self._recovery_stop.is_set():
-                            return
-                        self._repair_link(previous)
-                        replacement = self._manager_factory(
-                            *self._manager_args,
-                            **self._manager_options,
-                            recovery_context={
-                                "previous_run_id": str(previous.run_id),
-                                "reason": reason,
-                            },
-                        )
-                        replacement.bind()
-                        self.manager = replacement
-                        self._retired_manager = None
-                        self.state.configure_receivers(
-                            {
-                                key: reader.buffer
-                                for key, reader in replacement.readers.items()
-                            },
-                            self.state.selected_receiver_id,
-                        )
-                        self._report_status(
-                            "Radio reconnected; establishing fresh timing", False
-                        )
-                        replacement.start()
-                    break
-                except RecoveryUnavailable as exc:
-                    previous.failure = str(exc)
-                    self._report_status(str(exc), False)
-                    return
-                except (OSError, TimeoutError) as exc:
-                    self._report_status(f"Waiting for radio: {exc}", False)
-                except Exception as exc:  # noqa: BLE001 — recovery boundary
-                    self.manager._fail(f"Recovery stopped: {exc}")
-                    return
+    # -------------------------------------------------------------- lifecycle
+
+    def start(self) -> None:
+        """Start native acquisition after the host's sinks are ready."""
+        if self._stopped or self._started:
+            raise RuntimeError("a live radio starts once; create a new instance")
+        root = self._journal_root() if self._journal_root else None
+        root = Path(root or self._args.output_dir)
+        config = self.native_config(root)
+        self._acquisition = self._factory(json.dumps(config, allow_nan=False))
+        self._started = True
+        self._report("Starting radio", False)
+        self._acquisition.start()
+        self._thread = Thread(target=self._deliver, name="csi-delivery", daemon=True)
+        self._thread.start()
 
     def stop(self) -> None:
-        """Stop and drain acquisition; repeated successful shutdown is harmless."""
-        if not self._stopped:
-            self._recovery_stop.set()
-            with self._recovery_lock:
-                if self.manager is not self._retired_manager:
-                    self.manager.stop()
-            if self._recovery_thread:
-                self._recovery_thread.join(timeout=2)
-                if self._recovery_thread.is_alive():
-                    raise TimeoutError("radio recovery did not stop")
-            self._stopped = True
+        """Stop acquisition and deliver every accepted record; repeat calls are harmless."""
+        if self._stopped:
+            return
+        self._stopped = True
+        error = None
+        if self._acquisition is not None:
+            try:
+                self._acquisition.stop(10.0)
+            except Exception as exc:  # noqa: BLE001 — continue draining before raising
+                error = exc
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+            if self._thread.is_alive():
+                raise TimeoutError("radio record delivery did not stop")
+        if self._acquisition is not None:
+            self._drain()
+            self._refresh_health()
+        for recorder in self._recorders.values():
+            recorder.close()
+        if error is not None:
+            raise error
+
+    def _deliver(self) -> None:
+        last_health = 0.0
+        while not self._stop.is_set():
+            delivered = self._drain(limit=4096)
+            now = time.monotonic()
+            if now - last_health >= HEALTH_INTERVAL_S:
+                self._refresh_health()
+                last_health = now
+            if not delivered:
+                self._stop.wait(POLL_IDLE_S)
+
+    def _drain(self, limit: int | None = None) -> int:
+        delivered = 0
+        while limit is None or delivered < limit:
+            items = self._acquisition.poll(4096)
+            if not items:
+                break
+            for item in items:
+                self._deliver_record(*item)
+            delivered += len(items)
+        return delivered
+
+    def _deliver_record(
+        self,
+        native: Any,
+        slot: int,
+        run: int,
+        transmitter_boot: int,
+        receiver_boot: int,
+        _batch: int,
+        capture_ns: int,
+        arrival_ns: int,
+        available_ns: int,
+        uncertainty_us: float,
+    ) -> None:
+        binding = self.bindings[slot]
+        record = NativeRecord(
+            native,
+            {
+                "run_id": run,
+                "transmitter_boot_id": transmitter_boot,
+                "receiver_boot_id": receiver_boot,
+                "transport": "espnow_gateway",
+                "capture_host_monotonic_ns": capture_ns,
+                "capture_clock_uncertainty_us": uncertainty_us,
+                "native_processed_ns": available_ns,
+            },
+        )
+        if self._sink_failure is None:
+            try:
+                if self._record_sink is not None:
+                    self._record_sink(record, arrival_ns)
+                else:
+                    self._recorder(binding.receiver_id).write_record(
+                        record, host_receive_monotonic_ns=arrival_ns
+                    )
+            except Exception as exc:  # noqa: BLE001 — storage failure ends delivery
+                self._sink_failure = f"record storage failed: {exc}"
+                self._report(self._sink_failure, False)
+                if self._on_interruption is not None:
+                    self._on_interruption(self._sink_failure)
+        self.buffers[binding.receiver_id].append(record)
+        self._rates.observe(binding.receiver_id, 1, time.monotonic_ns())
+
+    def _recorder(self, receiver_id: str) -> CsiRecorder:
+        recorder = self._recorders.get(receiver_id)
+        if recorder is None:
+            recorder = self._recorders[receiver_id] = CsiRecorder(
+                Path(self._args.output_dir) / receiver_id,
+                recording_io=self._recording_io,
+            )
+        return recorder
+
+    # ----------------------------------------------------------------- health
+
+    def _refresh_health(self) -> None:
+        health = json.loads(self._acquisition.health())
+        with self._health_lock:
+            self._health = health
+        session = health.get("session", {})
+        state, runs = session.get("state"), health.get("runs", 0)
+        if (state, runs) == self._announced:
+            return
+        self._announced = (state, runs)
+        if state == "running":
+            self._report(
+                "Radio recovered; sensing resumed with fresh timing"
+                if runs > 1
+                else "Radio live; sensing",
+                True,
+            )
+        elif state == "starting_radio":
+            self._report(
+                "Radio reconnected; establishing fresh timing"
+                if runs
+                else "Starting radio",
+                False,
+            )
+        elif state in {"restarting", "failed"}:
+            reason = session.get("error") or "unknown radio failure"
+            self._report(
+                "Radio interrupted; reconnecting: " + reason
+                if state == "restarting"
+                else "Radio stopped: " + reason,
+                False,
+            )
+            if self._on_interruption is not None:
+                self._on_interruption(reason)
+
+    def _report(self, message: str, connected: bool) -> None:
+        self.state.set_status(message, connected)
+        if self._on_status is not None:
+            self._on_status(message, connected)
+
+    def health(self) -> dict[str, Any]:
+        """Return the latest native health document."""
+        with self._health_lock:
+            return self._health
+
+    @property
+    def failure(self) -> str | None:
+        """Return the current run failure, a fatal stop, or a storage failure."""
+        health = self.health()
+        if self._sink_failure:
+            return self._sink_failure
+        if health.get("fatal") or health.get("session", {}).get("state") in {
+            "restarting",
+            "starting_radio",
+            "failed",
+        }:
+            return health.get("failure")
+        return None
+
+    @property
+    def _running(self) -> bool:
+        return self.health().get("session", {}).get("state") == "running"
+
+    @property
+    def clock_sync_ready(self) -> bool:
+        """Capture-time mapping is valid for the current run."""
+        clock = self.health().get("session", {}).get("clock") or {}
+        return bool(self._running and clock.get("ready") and not self.failure)
+
+    @property
+    def all_live(self) -> bool:
+        """Every configured receiver reported status recently."""
+        receivers = self.health().get("session", {}).get("receivers") or []
+        return (
+            self._running
+            and len(receivers) == len(self.bindings)
+            and all(
+                r.get("status_age_ns") is not None
+                and r["status_age_ns"] < LIVENESS_S * 1e9
+                for r in receivers
+            )
+        )
+
+    @property
+    def any_recent_record(self) -> bool:
+        """Every configured receiver delivered a record recently."""
+        receivers = self.health().get("receivers") or []
+        return len(receivers) >= len(self.bindings) and all(
+            r.get("last_record_age_ns") is not None
+            and r["last_record_age_ns"] < LIVENESS_S * 1e9
+            for r in receivers[: len(self.bindings)]
+        )
+
+    @property
+    def preflight_ready(self) -> bool:
+        return self.all_live and self.any_recent_record and self.clock_sync_ready
+
+    @property
+    def preview_ready(self) -> bool:
+        """Allow plot work only while record delivery keeps up.
+
+        This affects display only; acquisition and recording are independent.
+        """
+        queue = self.health().get("queue") or {}
+        return (
+            not self.failure and queue.get("pending", 0) <= PREVIEW_MAX_PENDING_RECORDS
+        )
+
+    def availability(
+        self, seconds: float, now_ns: int | None = None
+    ) -> AvailabilitySnapshot | None:
+        """Return recent availability bins of the current run, if one started."""
+        del now_ns  # The native snapshot uses the shared monotonic clock.
+        if self._acquisition is None:
+            return None
+        value = self._acquisition.availability(seconds)
+        return None if value is None else AvailabilitySnapshot.from_json(value)
+
+    def telemetry_snapshot(self) -> BackhaulTelemetrySnapshot:
+        """Aggregate native quality counters for collection artifacts."""
+        totals = self.health().get("totals") or {}
+        return BackhaulTelemetrySnapshot(
+            captured_monotonic_ns=time.monotonic_ns(),
+            records=totals.get("records", 0),
+            batches=totals.get("batches", 0),
+            host_missing_sequences=totals.get("host_missing_sequences", 0),
+            transport_missing=totals.get("transport_missing", 0),
+            transport_reordered=totals.get("transport_reordered", 0),
+            batch_missing=totals.get("batch_missing", 0),
+            batch_reordered=totals.get("batch_reordered", 0),
+            malformed=0,
+            foreign=0,
+            receiver_restarts=totals.get("receiver_restarts", 0),
+            serial_frames=None,
+            receiver_boot_id=None,
+            receiver_stats=None,
+            transmitter_stats=None,
+            gateway_stats=None,
+        )
+
+    def diagnostics(self, *, now_ns: int | None = None) -> GatewayDiagnostics:
+        """Snapshot reported gateway and receiver counters for display."""
+        now_ns = time.monotonic_ns() if now_ns is None else now_ns
+        health = self.health()
+        session = health.get("session", {})
+        statuses = session.get("receivers") or []
+        quality = health.get("receivers") or []
+        rates = self._rates.snapshot(now_ns)
+        receivers = []
+        for slot, binding in enumerate(self.bindings):
+            report = statuses[slot] if slot < len(statuses) else {}
+            status = report.get("status") or {}
+            counters = quality[slot] if slot < len(quality) else {}
+            status_age = report.get("status_age_ns")
+            delivery_age = counters.get("last_record_age_ns")
+            receivers.append(
+                ReceiverDiagnostics(
+                    receiver_id=binding.receiver_id,
+                    status_age_s=None if status_age is None else status_age / 1e9,
+                    delivery_age_s=None if delivery_age is None else delivery_age / 1e9,
+                    online=bool(
+                        status_age is not None
+                        and status_age < LIVENESS_S * 1e9
+                        and not self.failure
+                    ),
+                    reported_state=status.get("state"),
+                    records=counters.get("records", 0),
+                    records_s=rates.get(binding.receiver_id, 0.0),
+                    last_sequence=counters.get("last_sequence"),
+                    captured=status.get("captured"),
+                    queued=status.get("queued"),
+                    queue_peak=status.get("peak"),
+                    expired=status.get("expired"),
+                    dropped=status.get("dropped"),
+                    send_errors=status.get("send_errors"),
+                    diagnostic_loss=status.get("queue_event_loss"),
+                    sequence_gaps=counters.get("missing_sequences", 0),
+                    transport_gaps=counters.get("transport_missing", 0),
+                    batch_gaps=counters.get("batch_missing", 0),
+                    malformed_packets=0,
+                )
+            )
+        clock = session.get("clock") or {}
+        gateway = session.get("gateway") or {}
+        gateway_age = session.get("gateway_age_ns")
+        transport = self.settings.transport
+        return GatewayDiagnostics(
+            nominal_rate_hz=self.settings.profile.nominal_rate_hz,
+            sensing_channel=self.settings.profile.channel,
+            backhaul_channel=transport.channel,
+            backhaul_phy=transport.phy,
+            slot_ms=transport.slot_ms,
+            queue_capacity=transport.queue_capacity,
+            application_acknowledgements=transport.application_acknowledgements,
+            transmitter_link=self.settings.connection["transmitter_link"],
+            reference_present=bool(clock),
+            reference_ready=self.clock_sync_ready,
+            clock_uncertainty_us=clock.get("uncertainty_us"),
+            gateway_age_s=None if gateway_age is None else gateway_age / 1e9,
+            gateway_configured=gateway.get("configured"),
+            received_envelopes=gateway.get("received"),
+            forwarded_envelopes=gateway.get("forwarded"),
+            rejected_or_dropped=gateway.get("rejected"),
+            usb_errors=gateway.get("usb_errors"),
+            gateway_queued=gateway.get("queued"),
+            failure=self.failure,
+            receivers=tuple(receivers),
+        )

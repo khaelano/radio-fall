@@ -1,17 +1,21 @@
 """Exercise the shared integrity interface with tiny deterministic sessions."""
 
-import csv
 import hashlib
 import json
-from pathlib import Path
+import os
 import shutil
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from fall_detection.analysis import analyze_latest_session, analyze_session
-from fall_detection.analysis import _receiver
+pa = pytest.importorskip("pyarrow")
+
+from journal_builder import FOREIGN, RX1, TX, write_session
+
+from fall_detection.analysis import _receiver, analyze_latest_session, analyze_session
+from fall_detection.analysis.session_frames import load_analysis_session
 from fall_detection.radio.preprocessing.phase import (
     HE20_COMPACT_SLOT_INDICES,
     HE20_SLOT_INDICES,
@@ -20,7 +24,28 @@ from fall_detection.radio.preprocessing.phase import (
     phase_slot_mask,
 )
 
-_TX = "aa:bb:cc:dd:ee:ff"
+_EVENTS = [
+    {"kind": "attempt_started", "monotonic_ns": 1_000_000_000},
+    {"kind": "phase_changed", "state": "countdown", "monotonic_ns": 1_000_000_000},
+    {"kind": "phase_changed", "state": "action", "monotonic_ns": 2_000_000_000},
+    {"kind": "action_confirmed", "monotonic_ns": 2_250_000_000},
+    {"kind": "phase_changed", "state": "recovery", "monotonic_ns": 2_250_000_000},
+    {
+        "kind": "trial_resolved",
+        "disposition": "accepted",
+        "monotonic_ns": 3_250_000_000,
+    },
+]
+for _event in _EVENTS:
+    _event.update(trial_ordinal=1, attempt=1)
+_ATTEMPT = {
+    "trial_ordinal": 1,
+    "activity_label": "sit",
+    "status": "accepted",
+    "action_confirmed": True,
+    "started_monotonic_ns": 1_000_000_000,
+    "ended_monotonic_ns": 3_250_000_000,
+}
 
 
 def _json(path: Path, value: dict) -> None:
@@ -28,92 +53,9 @@ def _json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
-def _csv(path: Path, rows: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-@pytest.fixture
-def session(tmp_path):
-    root = tmp_path / "data/raw/sessions/20261026T000000000000Z"
-    _json(
-        root / "session.json",
-        {
-            "artifact_schema_version": 2,
-            "session_id": root.name,
-            "protocol_hash": "test",
-            "status": "complete",
-            "started_at_utc": "2026-10-26T00:00:00+00:00",
-            "environment": {
-                "receiver_bindings": {"rx-1": {}, "rx-2": {}},
-                "nominal_rate_hz": 100,
-                "radio_inventory": {"transmitter": {"mac": _TX}},
-            },
-        },
-    )
-    _json(
-        root / "protocol.json",
-        {
-            "schema_version": 1,
-            "protocol_id": "test",
-            "title": "Test",
-            "defaults": {
-                "countdown_seconds": 1,
-                "action_seconds": 2,
-                "recovery_seconds": 1,
-            },
-            "blocks": [
-                {
-                    "id": "block",
-                    "title": "Block",
-                    "scenarios": [
-                        {
-                            "id": "sit",
-                            "activity_label": "sit",
-                            "title": "Sit",
-                            "instruction": "Sit down",
-                            "repetitions": 1,
-                        }
-                    ],
-                }
-            ],
-        },
-    )
-    attempt = root / "trials/001_sit/attempt_01"
-    _json(
-        attempt / "attempt.json",
-        {
-            "artifact_schema_version": 2,
-            "trial_ordinal": 1,
-            "activity_label": "sit",
-            "status": "accepted",
-            "action_confirmed": True,
-            "started_monotonic_ns": 1_000_000_000,
-            "ended_monotonic_ns": 3_250_000_000,
-        },
-    )
-    events = [
-        {"kind": "attempt_started", "monotonic_ns": 1_000_000_000},
-        {"kind": "phase_changed", "state": "countdown", "monotonic_ns": 1_000_000_000},
-        {"kind": "phase_changed", "state": "action", "monotonic_ns": 2_000_000_000},
-        {"kind": "action_confirmed", "monotonic_ns": 2_250_000_000},
-        {"kind": "phase_changed", "state": "recovery", "monotonic_ns": 2_250_000_000},
-        {
-            "kind": "trial_resolved",
-            "disposition": "accepted",
-            "monotonic_ns": 3_250_000_000,
-        },
-    ]
-    for event in events:
-        event.update(trial_ordinal=1, attempt=1)
-    (root / "events.jsonl").write_text(
-        "\n".join(map(json.dumps, events)), encoding="utf-8"
-    )
-    csi_rows, timing_rows = [], []
-    for sequence, tick, host in zip(
+def _frames():
+    frames = []
+    for sequence, tick, capture in zip(
         [10, 11, 13, 99],
         [2**32 - 10_000, 0, 20_000, 25_000],
         [1_500_000_000, 2_100_000_000, 2_500_000_000, 3_000_000_000],
@@ -121,36 +63,50 @@ def session(tmp_path):
         payload = [value for _ in HE20_COMPACT_SLOT_INDICES for value in (0, 20)]
         if sequence == 11:
             payload[5] = 2  # Physical subcarrier +2 falls below amplitude 4.
-        csi_rows.append(
+        frames.append(
             {
-                "id": sequence,
-                "mac": _TX if sequence != 99 else "foreign",
-                "sig_mode": 4,
-                "mcs": 0,
-                "bandwidth": 0,
-                "local_timestamp": tick,
-                "len": len(payload),
-                "stbc": 0,
-                "first_word": 0,
-                "data": json.dumps(payload),
-            }
-        )
-        timing_rows.append(
-            {
+                "receiver": RX1,
                 "sequence": sequence,
-                "rx_radio_timestamp_us": tick,
-                "host_receive_monotonic_ns": host,
+                "capture_ns": capture,
+                "payload": bytes(payload),
+                "sig_mode": 4,
+                "radio_us": tick,
+                "transmitter": TX if sequence != 99 else FOREIGN,
             }
         )
-    _csv(attempt / "receivers/rx-1/csi.csv", csi_rows)
-    _csv(attempt / "receivers/rx-1/radio_timing.csv", timing_rows)
-    return root
+    return frames
+
+
+def _build(tmp_path, frames=None, events=None, **options):
+    """Write a session directory; frames default to four rx-1 packets."""
+    return write_session(
+        tmp_path / "data/raw/sessions/20261026T000000000000Z",
+        attempts=options.pop("attempts", [dict(_ATTEMPT)]),
+        events=_EVENTS if events is None else events,
+        frames=_frames() if frames is None else frames,
+        extra_session={"started_at_utc": "2026-10-26T00:00:00+00:00"},
+        **options,
+    )
+
+
+def _load(root):
+    return load_analysis_session(root, root.parents[3] / "derived" / root.name)
+
+
+@pytest.fixture
+def session(tmp_path):
+    return _load(_build(tmp_path))
+
+
+def _root(session) -> Path:
+    return Path(session.manifest["source_directory"])
 
 
 def test_analyze_session_counts_loss_wraps_masking_and_phases(session):
+    root = _root(session)
     raw_before = {
         path: hashlib.sha256(path.read_bytes()).digest()
-        for path in session.rglob("*")
+        for path in root.rglob("*")
         if path.is_file()
     }
     report = analyze_session(session)
@@ -162,6 +118,7 @@ def test_analyze_session_counts_loss_wraps_masking_and_phases(session):
     assert receiver["effective_sampling_rate_hz"] == pytest.approx(2 / 0.03)
     assert receiver["timestamp_gap_intervals"] == 1
     assert receiver["mean_usable_subcarriers_per_packet"] == pytest.approx(242 - 1 / 3)
+    assert receiver["attempts_without_frames"] == 0
     assert report.receiver_attempts.iloc[0]["timestamp_wraps"] == 1
     assert report.receiver_issues["receiver_id"].tolist() == ["rx-2"]
     assert report.phase_issues.empty
@@ -170,6 +127,7 @@ def test_analyze_session_counts_loss_wraps_masking_and_phases(session):
     ].tolist() == [1, 1, 1]
     assert report.phase_attempts.iloc[0]["action_seconds"] == pytest.approx(0.25)
     assert report.attempt_counts.loc["sit", "accepted"] == 1
+    assert report.session_dir == root
     assert all(
         hashlib.sha256(path.read_bytes()).digest() == digest
         for path, digest in raw_before.items()
@@ -205,7 +163,7 @@ def test_phase_slot_mask_matches_canonical_decoder(slots, sig_mode, stbc, first_
     assert actual == expected
 
 
-def test_analyze_session_cache_hits_and_invalidates_changed_receiver(
+def test_analyze_session_cache_hits_and_invalidates_changed_frame_tables(
     session, tmp_path, monkeypatch
 ):
     cache = tmp_path / "cache"
@@ -214,7 +172,7 @@ def test_analyze_session_cache_hits_and_invalidates_changed_receiver(
     calls = []
 
     def tracked(*args, **kwargs):
-        calls.append(args[0])
+        calls.append(args[1:3])
         return original_scan(*args, **kwargs)
 
     monkeypatch.setattr(_receiver, "scan_receiver", tracked)
@@ -222,16 +180,14 @@ def test_analyze_session_cache_hits_and_invalidates_changed_receiver(
     assert not calls
     assert cached.overview.iloc[0]["cached_receiver_recordings"] == 2
     pd.testing.assert_frame_equal(initial.receiver_attempts, cached.receiver_attempts)
-    path = next(session.glob("trials/*/attempt_*/receivers/rx-1/csi.csv"))
-    with path.open(newline="") as stream:
-        rows = list(csv.DictReader(stream))
-    rows[0]["data"] = "[broken JSON]"
-    _csv(path, rows)
-    changed = analyze_session(session, cache_dir=cache)
-    assert len(calls) == 1
-    assert changed.overview.iloc[0]["cached_receiver_recordings"] == 1
-    assert changed.receivers.iloc[0]["phase_mask_unreadable_rows"] == 1
-    calls.clear()
+    for name in ("frames.parquet", "attempts.parquet", "phases.parquet"):
+        path = session.path / name
+        stat = path.stat()
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+        changed = analyze_session(session, cache_dir=cache)
+        assert changed.overview.iloc[0]["cached_receiver_recordings"] == 0
+        assert len(calls) == 2
+        calls.clear()
     analyze_session(session, cache_dir=cache, refresh=True)
     assert len(calls) == 2
 
@@ -239,81 +195,111 @@ def test_analyze_session_cache_hits_and_invalidates_changed_receiver(
 def test_analyze_session_cache_reconstructs_changed_events(session, tmp_path):
     cache = tmp_path / "cache"
     analyze_session(session, cache_dir=cache)
-    path = session / "events.jsonl"
-    events = [json.loads(line) for line in path.read_text().splitlines()]
+    root = _root(session)
+    events = [dict(event) for event in _EVENTS]
     events[2]["monotonic_ns"] = 2_200_000_000
-    path.write_text("\n".join(map(json.dumps, events)))
-    changed = analyze_session(session, cache_dir=cache)
+    (root / "events.jsonl").write_text("\n".join(map(json.dumps, events)))
+    changed = analyze_session(_load(root), cache_dir=cache)
     assert changed.overview.iloc[0]["cached_receiver_recordings"] == 0
     assert changed.phase_packet_counts.query("receiver_id == 'rx-1'")[
         "sensing_link_csi_rows"
     ].tolist() == [2, 0, 1]
 
 
-def test_analyze_session_partial_invalid_attempt_does_not_require_confirmation(session):
-    path = next(session.glob("trials/*/attempt_*/attempt.json"))
-    manifest = json.loads(path.read_text())
-    manifest.update(
-        status="invalid", action_confirmed=False, ended_monotonic_ns=2_400_000_000
-    )
-    _json(path, manifest)
-    events_path = session / "events.jsonl"
-    events = [json.loads(line) for line in events_path.read_text().splitlines()][:3]
-    events_path.write_text("\n".join(map(json.dumps, events)))
-    report = analyze_session(session)
+def test_analyze_session_partial_invalid_attempt_does_not_require_confirmation(
+    tmp_path,
+):
+    attempt = {
+        **_ATTEMPT,
+        "status": "invalid",
+        "action_confirmed": False,
+        "ended_monotonic_ns": 2_400_000_000,
+    }
+    root = _build(tmp_path, attempts=[attempt], events=_EVENTS[:3])
+    report = analyze_session(_load(root))
     assert report.phase_issues.empty
     assert report.phase_attempts.iloc[0]["phase_sequence"] == "countdown → action"
 
 
 def test_analyze_session_rejects_cache_in_raw_data(session):
     with pytest.raises(ValueError, match="outside raw"):
-        analyze_session(session, cache_dir=session.parent.parent / "cache")
+        analyze_session(session, cache_dir=_root(session).parent.parent / "cache")
 
 
-def test_analyze_session_header_only_missing_and_unmatched_timing(session):
-    csi = next(session.glob("trials/*/attempt_*/receivers/rx-1/csi.csv"))
-    csi.write_text(csi.read_text().splitlines()[0] + "\n")
+def test_analyze_session_reports_receivers_without_frames(tmp_path):
+    session = _load(_build(tmp_path, frames=[]))
     report = analyze_session(session)
-    assert report.receivers.iloc[0]["empty_csi_attempts"] == 1
-    assert report.receiver_attempts.iloc[0]["row_count_difference"] == -4
-    csi.unlink()
+    receivers = report.receivers.set_index("receiver_id")
+    assert receivers["attempts_without_frames"].tolist() == [1, 1]
+    assert receivers["raw_csi_rows"].tolist() == [0, 0]
+    assert not report.receiver_attempts["has_frames"].any()
+    assert report.receiver_issues["receiver_id"].tolist() == ["rx-1", "rx-2"]
+    assert report.receiver_attempts["sensing_link_rows"].tolist() == [0, 0]
+
+
+def test_analyze_session_flags_unsupported_payload_layouts(tmp_path):
+    frames = _frames()
+    frames[0]["payload"] = bytes([0, 20] * 3)  # no known layout has three pairs
+    session = _load(_build(tmp_path, frames=frames))
     report = analyze_session(session)
-    assert report.receivers.iloc[0]["csi_files_missing"] == 1
-    assert report.receiver_attempts.iloc[0]["timing_rows"] == 4
+    receiver = report.receivers.set_index("receiver_id").loc["rx-1"]
+    assert receiver["phase_mask_unsupported_rows"] == 1
+    assert receiver["phase_mask_supported_rows"] == 2
+    assert "rx-1" in report.receiver_issues["receiver_id"].tolist()
 
 
-def test_analyze_latest_session_uses_manifest_start_time(session):
-    earlier = session.parent / "zzzz-earlier"
-    shutil.copytree(session, earlier)
+def test_phase_counts_treat_odd_or_empty_payloads_as_unreadable():
+    table = pa.table(
+        {
+            "csi": pa.array([b"\x00\x14\x07", b"", b"\x00\x14" * 3], pa.binary()),
+            "stbc": pa.array([0, 0, 0], pa.uint8()),
+            "first_word_invalid": pa.array([False, False, False]),
+        }
+    )
+    counts = _receiver._phase_counts(table)
+    assert counts["phase_mask_unreadable_rows"] == 2
+    assert counts["phase_mask_unsupported_rows"] == 1
+    assert counts["phase_mask_supported_rows"] == 0
+
+
+def test_analyze_session_counts_sequence_disorder_in_delivery_order(tmp_path):
+    frames = _frames()
+    frames[1]["sequence"], frames[2]["sequence"] = 13, 11  # delivered out of order
+    report = analyze_session(_load(_build(tmp_path, frames=frames)))
+    row = report.receiver_attempts.query("receiver_id == 'rx-1'").iloc[0]
+    assert row["sequence_out_of_order"] == 1
+    assert "rx-1" in report.receiver_issues["receiver_id"].tolist()
+
+
+def test_analyze_latest_session_uses_manifest_start_time(session, tmp_path):
+    root = _root(session)
+    earlier = root.parent / "zzzz-earlier"
+    shutil.copytree(root, earlier)
     path = earlier / "session.json"
     manifest = json.loads(path.read_text())
     manifest["started_at_utc"] = "2026-01-01T00:00:00+00:00"
     _json(path, manifest)
-    assert analyze_latest_session(session.parent).session_dir == session
+    report = analyze_latest_session(root.parent, tmp_path / "frames")
+    assert report.session_dir == root
 
 
-def test_analyze_session_handles_no_attempts(session):
-    shutil.rmtree(session / "trials")
-    report = analyze_session(session)
+def test_analyze_session_handles_no_attempts(tmp_path):
+    root = _build(tmp_path)
+    shutil.rmtree(root / "trials")
+    report = analyze_session(_load(root))
     assert report.attempts.empty
     assert report.receiver_issues.empty
     assert report.phase_issues.empty
     assert report.trial_coverage.iloc[0]["planned_trials_never_started"] == 1
 
 
-def test_analyze_session_ignores_corrupt_cache_and_active_sessions(session, tmp_path):
+def test_analyze_session_ignores_corrupt_cache(session, tmp_path):
     cache = tmp_path / "cache"
     analyze_session(session, cache_dir=cache)
     for path in cache.glob("*.json"):
         path.write_text("broken")
     repaired = analyze_session(session, cache_dir=cache)
     assert repaired.overview.iloc[0]["cached_receiver_recordings"] == 0
-    path = session / "session.json"
-    manifest = json.loads(path.read_text())
-    manifest["status"] = "open"
-    _json(path, manifest)
-    active = analyze_session(session, cache_dir=cache)
-    assert active.overview.iloc[0]["cached_receiver_recordings"] == 0
 
 
 def test_analyze_session_parallel_scan_matches_serial(session):

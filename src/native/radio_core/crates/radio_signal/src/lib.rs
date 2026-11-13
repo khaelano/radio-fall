@@ -75,6 +75,182 @@ pub struct Phase {
     pub calibrated: Vec<f64>,
 }
 
+/// One LTF layout: block name, serialized signed subcarrier indices, valid tones.
+#[derive(Clone, Debug)]
+pub struct Layout {
+    pub name: &'static str,
+    pub indices: Vec<i32>,
+    pub valid: fn(i32) -> bool,
+}
+
+fn ht20_valid(index: i32) -> bool {
+    index != 0 && (-28..=28).contains(&index)
+}
+
+fn he20_valid(index: i32) -> bool {
+    index.abs() <= 122 && index.abs() > 1
+}
+
+fn ht20_indices() -> Vec<i32> {
+    (0..32).chain(-32..0).collect()
+}
+
+/// Supported Espressif 20 MHz LTF layouts of one CSI payload, in serialized order.
+///
+/// HE SU (`sig_mode` 4) uses a complete 256-slot FFT or the older compact
+/// 245-slot vector. Classic HT reports one or more 64-slot blocks. Unsupported
+/// layouts return no blocks; raw CSI remains available to callers.
+pub fn layouts(sig_mode: u32, bandwidth: u32, stbc: u32, pairs: usize) -> Vec<Layout> {
+    if bandwidth != 0 {
+        return Vec::new();
+    }
+    if sig_mode == 4 && stbc == 0 {
+        if pairs == 256 {
+            return vec![Layout {
+                name: "HE-LTF",
+                indices: (-128..128).collect(),
+                valid: he20_valid,
+            }];
+        }
+        if pairs == 245 {
+            return vec![Layout {
+                name: "HE-LTF",
+                indices: (0..123).chain(-122..0).collect(),
+                valid: he20_valid,
+            }];
+        }
+    }
+    if pairs % 64 != 0 {
+        return Vec::new();
+    }
+    let blocks = pairs / 64;
+    let names: &[&'static str] = match (sig_mode, stbc != 0, blocks) {
+        (1, false, 1 | 2) => &["LLTF", "HT-LTF"][..blocks],
+        (1, true, 3) => &["LLTF", "HT-LTF", "STBC-HT-LTF"],
+        (mode, _, 1) if mode != 1 => &["LLTF"],
+        _ => &[],
+    };
+    names
+        .iter()
+        .map(|name| Layout {
+            name,
+            indices: ht20_indices(),
+            valid: ht20_valid,
+        })
+        .collect()
+}
+
+/// Wrapped phase of usable tones; NaN for invalid, weak, non-finite or null tones.
+pub fn usable_phases(
+    re: &[f64],
+    im: &[f64],
+    amplitudes: &[f64],
+    indices: &[i32],
+    valid: &dyn Fn(i32) -> bool,
+    invalid: &[bool],
+    floor: f64,
+) -> Vec<f64> {
+    (0..indices.len())
+        .map(|j| {
+            let usable = !invalid.get(j).copied().unwrap_or(false)
+                && re[j].is_finite()
+                && im[j].is_finite()
+                && amplitudes[j] > 0.
+                && amplitudes[j] >= floor
+                && valid(indices[j]);
+            if usable { im[j].atan2(re[j]) } else { f64::NAN }
+        })
+        .collect()
+}
+
+/// Remove each packet's phase offset and frequency slope.
+///
+/// Usable (non-NaN) phases are unwrapped in ascending subcarrier order, then an
+/// amplitude-weighted line is fitted and removed. Fewer than three usable tones
+/// yield all-NaN output, as do unusable tones.
+pub fn calibrate(phases: &[f64], amplitudes: &[f64], indices: &[i32]) -> Vec<f64> {
+    let mut valid: Vec<usize> = (0..phases.len()).filter(|&j| !phases[j].is_nan()).collect();
+    valid.sort_unstable_by_key(|j| indices[*j]);
+    let mut calibrated = vec![f64::NAN; phases.len()];
+    if valid.len() < 3 {
+        return calibrated;
+    }
+    let mut unwrapped = Vec::with_capacity(valid.len());
+    let (mut previous, mut correction) = (phases[valid[0]], 0.);
+    for &j in &valid {
+        let current = phases[j];
+        let d = current - previous;
+        let mut wrapped = (d + PI).rem_euclid(TAU) - PI;
+        if wrapped == -PI && d > 0. {
+            wrapped = PI;
+        }
+        if d.abs() >= PI {
+            correction += wrapped - d;
+        }
+        unwrapped.push(current + correction);
+        previous = current;
+    }
+    // Centered weighted two-parameter least squares, avoiding an allocation
+    // and SVD per record. No fast-math or floating-point reassociation.
+    let weight: f64 = valid.iter().map(|j| amplitudes[*j]).sum();
+    let mx = valid
+        .iter()
+        .map(|j| amplitudes[*j] * indices[*j] as f64)
+        .sum::<f64>()
+        / weight;
+    let my = valid
+        .iter()
+        .zip(&unwrapped)
+        .map(|(j, y)| amplitudes[*j] * y)
+        .sum::<f64>()
+        / weight;
+    let xx = valid
+        .iter()
+        .map(|j| amplitudes[*j] * (indices[*j] as f64 - mx).powi(2))
+        .sum::<f64>();
+    let xy = valid
+        .iter()
+        .zip(&unwrapped)
+        .map(|(j, y)| amplitudes[*j] * (indices[*j] as f64 - mx) * (y - my))
+        .sum::<f64>();
+    let slope = xy / xx;
+    for (&j, y) in valid.iter().zip(unwrapped) {
+        calibrated[j] = (y - (slope * (indices[j] as f64 - mx) + my) + PI).rem_euclid(TAU) - PI;
+    }
+    calibrated
+}
+
+/// Amplitudes, usable wrapped phase and calibrated phase of one LTF block.
+pub fn block(
+    re: &[f64],
+    im: &[f64],
+    indices: &[i32],
+    valid: &dyn Fn(i32) -> bool,
+    invalid: &[bool],
+    floor: f64,
+) -> Phase {
+    let amplitudes: Vec<f64> = re
+        .iter()
+        .zip(im)
+        .map(|(r, i)| {
+            let value = r.hypot(*i);
+            if value.is_finite() { value } else { f64::NAN }
+        })
+        .collect();
+    let raw = usable_phases(re, im, &amplitudes, indices, valid, invalid, floor);
+    let calibrated = calibrate(&raw, &amplitudes, indices);
+    Phase {
+        indices: indices.to_vec(),
+        amplitudes,
+        raw,
+        calibrated,
+    }
+}
+
+/// HE20 phase of a live record from interleaved signed `(Q, I)` bytes.
+///
+/// Uses the record's exact integer amplitudes, so live preparation is
+/// independent of floating-point `hypot` rounding.
 pub fn phase(
     raw: &[u8],
     format: u8,
@@ -87,71 +263,22 @@ pub fn phase(
     if format != 4 || bandwidth != 0 || stbc != 0 || (n != 245 && n != 256) {
         return None;
     }
-    let indices: Vec<i32> = if n == 256 {
-        (-128..128).collect()
-    } else {
-        (0..123).chain(-122..0).collect()
-    };
-    let mut phases = vec![f64::NAN; n];
-    let mut valid = Vec::with_capacity(n);
-    for j in 0..n {
-        if (!invalid || j >= 2)
-            && indices[j].abs() <= 122
-            && indices[j].abs() > 1
-            && amplitudes[j] >= 4.
-        {
-            phases[j] = (raw[2 * j] as i8 as f64).atan2(raw[2 * j + 1] as i8 as f64);
-            valid.push(j);
-        }
-    }
-    valid.sort_unstable_by_key(|j| indices[*j]);
-    let mut calibrated = vec![f64::NAN; n];
-    if valid.len() >= 3 {
-        let mut unwrapped = Vec::with_capacity(valid.len());
-        let (mut previous, mut correction) = (phases[valid[0]], 0.);
-        for &j in &valid {
-            let current = phases[j];
-            let d = current - previous;
-            let mut wrapped = (d + PI).rem_euclid(TAU) - PI;
-            if wrapped == -PI && d > 0. {
-                wrapped = PI;
-            }
-            if d.abs() >= PI {
-                correction += wrapped - d;
-            }
-            unwrapped.push(current + correction);
-            previous = current;
-        }
-        // Centered weighted two-parameter least squares, avoiding an allocation
-        // and SVD per record. No fast-math or floating-point reassociation.
-        let weight: f64 = valid.iter().map(|j| amplitudes[*j]).sum();
-        let mx = valid
-            .iter()
-            .map(|j| amplitudes[*j] * indices[*j] as f64)
-            .sum::<f64>()
-            / weight;
-        let my = valid
-            .iter()
-            .zip(&unwrapped)
-            .map(|(j, y)| amplitudes[*j] * y)
-            .sum::<f64>()
-            / weight;
-        let xx = valid
-            .iter()
-            .map(|j| amplitudes[*j] * (indices[*j] as f64 - mx).powi(2))
-            .sum::<f64>();
-        let xy = valid
-            .iter()
-            .zip(&unwrapped)
-            .map(|(j, y)| amplitudes[*j] * (indices[*j] as f64 - mx) * (y - my))
-            .sum::<f64>();
-        let slope = xy / xx;
-        for (&j, y) in valid.iter().zip(unwrapped) {
-            calibrated[j] = (y - (slope * (indices[j] as f64 - mx) + my) + PI).rem_euclid(TAU) - PI;
-        }
-    }
+    let layout = layouts(4, 0, 0, n).pop()?;
+    let re: Vec<f64> = raw.chunks_exact(2).map(|p| p[1] as i8 as f64).collect();
+    let im: Vec<f64> = raw.chunks_exact(2).map(|p| p[0] as i8 as f64).collect();
+    let mask: Vec<bool> = (0..n).map(|j| invalid && j < 2).collect();
+    let phases = usable_phases(
+        &re,
+        &im,
+        &amplitudes,
+        &layout.indices,
+        &layout.valid,
+        &mask,
+        4.,
+    );
+    let calibrated = calibrate(&phases, &amplitudes, &layout.indices);
     Some(Phase {
-        indices,
+        indices: layout.indices,
         amplitudes,
         raw: phases,
         calibrated,
@@ -198,5 +325,35 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn layouts_follow_espressif_serialization() {
+        assert_eq!(layouts(4, 0, 0, 256)[0].indices.first(), Some(&-128));
+        assert_eq!(layouts(4, 0, 0, 245)[0].indices[123], -122);
+        let ht: Vec<_> = layouts(1, 0, 0, 128).iter().map(|l| l.name).collect();
+        assert_eq!(ht, ["LLTF", "HT-LTF"]);
+        assert_eq!(layouts(1, 0, 1, 192).len(), 3);
+        assert_eq!(layouts(0, 0, 0, 64)[0].name, "LLTF");
+        assert!(layouts(1, 1, 0, 128).is_empty());
+        assert!(layouts(1, 0, 0, 100).is_empty());
+        assert!(layouts(0, 0, 0, 128).is_empty());
+    }
+
+    #[test]
+    fn calibration_removes_offset_and_slope_and_needs_three_tones() {
+        let indices: Vec<i32> = (-5..=5).collect();
+        let phases: Vec<f64> = indices.iter().map(|&k| 0.3 + 0.2 * k as f64).collect();
+        let amplitudes = vec![10.0; indices.len()];
+        let calibrated = calibrate(&phases, &amplitudes, &indices);
+        assert!(calibrated.iter().all(|v| v.abs() < 1e-12));
+        let mut sparse = vec![f64::NAN; indices.len()];
+        sparse[0] = 0.1;
+        sparse[1] = 0.2;
+        assert!(
+            calibrate(&sparse, &amplitudes, &indices)
+                .iter()
+                .all(|v| v.is_nan())
+        );
     }
 }

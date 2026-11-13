@@ -1,294 +1,103 @@
 # Live four-receiver fall scoring
 
-`fall-detect` is a separate desktop program. It reads all four receivers through
-the existing gateway acquisition service, prepares model inputs in Rust, and
-runs an exported three-seed CNN ensemble in a separate CPU process. Bundles
-support the earlier normalized amplitude input or unscaled phase-change input.
-The default window is four seconds, advanced every 250 ms. The GUI shows the
-score, current coverage, receiver/transport health and a score history. Headless
-mode emits JSON. A score at or above 0.5 is displayed as a **fall candidate**.
-
-Both models come from the single-participant/session experiment. The earlier
-amplitude model's collection-order control matched its held-out balanced
-accuracy, and the operator reported confident standing false alarms and missed
-falls. The phase model is a separate retraining experiment, not a validated
-repair. Continuous detection accuracy, false alarms
-per hour and event latency have not been established. The program does not
-send notifications or treat unavailable data as a non-fall decision.
-
-## Install and run
-
-Run from the repository root. Installation requires Rust and builds the native
-extension; the detection extra includes CPU PyTorch 2.14.1 for both the fall
-scorer and notebook-trained phase models.
-Keep `--extra video` when also using the camera-enabled collector.
+The native sequence detector uses the existing nine ONNX exports and saved
+normalizers under `artifacts/model/`. It requires no training dataset. Rust owns
+acquisition, preprocessing, resident ONNX sessions, inference scheduling and
+logs; Python supplies controls and displays results.
 
 ```sh
-uv sync --inexact --extra radio --extra detection --extra analysis
+uv sync --extra radio --extra native-detection
+uv run fall-detect
 ```
 
-The unscaled phase-change bundle is `data/models/phase_random20_v1/`. Its
-historical training experiment materialized 20 random shifts plus the central
-window for every training attempt; the experiment notebook and generated
-artifacts have been removed from the repository. The model bundle is a local,
-Git-ignored artifact and is not included in a clean checkout. See the
-[historical pilot summary](reports/fall-model-pilots.md) for retained results
-and limitations. Exporting a new bundle still requires an external copy of the
-original experiment artifacts with `--export-model <new-directory>
---experiment <artifact-directory>`. The earlier amplitude bundle, when
-available, is `data/models/four_rx_v1/`.
-
-With the gateway connected and all boards powered:
+Connect the gateway and power the sensing radios. The default selection is
+CNN with four-second windows. Select models in the desktop controls,
+or run a bounded headless session:
 
 ```sh
-.venv/bin/fall-detect --model data/models/phase_random20_v1
+uv run fall-detect --headless --duration 30 --models cnn-4s
 ```
 
-To show the notebook-trained phase models alongside the existing fall score:
+## Replay without hardware
+
+`--replay-capture` streams recorded native captures through the same pipeline
+in real time instead of opening the gateway. Each capture directory needs
+`radio.cgcf` and its `transport/gateway/<run>/` journal; consecutive captures
+start new segments. `--replay-speed` changes the pace and `--replay-repeat`
+loops. Both the GUI and `--headless` work; headless exits when the replay
+finishes.
 
 ```sh
-.venv/bin/fall-detect --model data/models/phase_random20_v1 \
-  --phase-models data/experiments/phase_models_v1/20261104T081805521126Z
+uv run dvc pull data/experiments/detector/native-capture-20261112-c.dvc
+uv run fall-detect --replay-capture data/experiments/detector/native-capture-20261112-c
 ```
 
-When the default phase model directory exists, the GUI enables it automatically;
-use `--no-phase-models` to disable it or `--phase-models` to choose a different
-trusted directory. If the default directory is absent, the fall detector starts
-without the phase table.
+The GUI also shows a scrolling heatmap of the last ten seconds of raw CSI
+magnitudes from all four receivers, redrawn at about 30 frames per second as
+packets arrive. Below it, two heatmaps show the latest window of a selected
+model: its raw magnitudes and the normalized model input (`log1p` squared
+differences in standard units). Scores and window previews change once per hop.
+Transparent cells are missing samples. The backend keeps the raw stream and
+previews only for the GUI (`preview` in the native configuration).
 
-The optional phase table has one row per receiver, window length (2, 4, or
-6 seconds), and model (CNN, LSTM, GRU, random forest): 48 rows for four
-receivers. Each row reports preparation, action and resting probabilities and
-coverage. These are **collection-phase scores at the window center**, not
-fall probabilities. The window centers are respectively 1, 2, and 3 seconds
-before the displayed window end. An asterisk marks a model with absent training
-classes; hovering over its name shows the missing classes. In the earlier
-one-session evaluation, the six-second models had no preparation examples
-and predicted only action in the held-out evaluation.
-The scores are experimental and have not been validated for live use.
+Captures B and C replay; capture A lacks reference timing evidence. The
+`live_detect` binary in `radio_detection` runs the same backend from a JSON
+configuration without Python.
 
-The trusted model directory must contain each
-`<2|4|6>s/<cnn|lstm|gru>/model.pt`,
-and each `<2|4|6>s/random_forest/model.joblib`, plus
-`metrics.json` for its pooling configuration. The notebook's phase model
-checkpoints do not contain a verified radio identity; the existing fall bundle's
-radio validation still applies, but it does not authenticate the phase models'
-training setup or receiver placement. Joblib files must come from a trusted
-source because loading them executes pickle deserialization.
+## Runtime
 
-Legacy phase-model checkpoints require the PyTorch format.
+The backend defaults to WebGPU through ONNX Runtime 1.31.1, the separately
+packaged WebGPU provider 0.5.0, Dawn and Vulkan. Both libraries are found in
+the environment; `ORT_DYLIB_PATH` and `ORT_WEBGPU_PLUGIN`, or `--ort-library`
+and `--webgpu-plugin`, override discovery. The only AMD WebGPU adapter is
+selected automatically; `--adapter-id` picks one by PCI device ID. Warmup
+fails if a model's main operator does not run on WebGPU. `--backend cpu` selects
+CPU explicitly; GPU failures never fall back to CPU silently.
 
-Phase scores use the shared amplitude normalization, centered Hampel,
-80 Hz linear interpolation and mask-aware temporal pooling routines. Live
-normalization is fitted separately to each completed rolling window, whereas
-training normalized the entire recording. Filtering also has only the completed
-window's context. This is an approximation, not an exact reproduction of the
-offline inputs. Live sample grids are anchored to the monotonic clock rather
-than an attempt start, and native I/Q magnitudes can differ in floating-point
-rounding from the offline decoder. The existing 25 ms maximum interpolation gap and a 70% valid
-time/tone coverage gate apply per receiver; unavailable windows show no score.
-They do not use an anti-alias filter. A bounded background thread processes
-native records and all four models for each receiver/window. The default
-`--phase-hop-ms 2000` is independently configurable; a shorter interval can
-overload the worker. The GUI reports its queue and drop count. Queue overflow,
-radio interruption, boot/run changes and stale results invalidate phase scores.
-The fall model remains a separate worker with its own preprocessing and
-freshness rules.
-Each phase window admits only packets received by its end plus the configured
-delivery grace; later packets cannot revise that window.
+Preprocessing uses the documented settings of the current exports: 120 Hz,
+centered 0.5-second Hampel span, threshold 3, MAD scale 1.4826 and minimum five
+valid observations; consecutive squared difference, `log1p`, then each saved
+normalizer. Inputs contain 980 signals, 980 validity flags and four
+receiver-presence flags. On a replayed capture, every live input matched the
+offline Python chain bit for bit; see the
+[replay report](reports/native-replay-2026-11-12.md).
 
-Each fresh phase result is logged to `predictions.jsonl` as
-`phase_prediction`, with receiver, duration, model, center/end timestamps,
-coverage, class probabilities and generation. Headless status also includes
-phase worker state. Phase worker errors suppress its scores without reclassifying
-them as fall or non-fall decisions.
+Each model keeps one latest pending window; one worker runs inference. The hop
+defaults to 250 ms. A window is built once its future filter context (0.25 s)
+and delivery grace (0.9 s) have passed, so results arrive about 1.2 s after the
+window ends. Coverage below 70% for any receiver, stale input and runtime
+errors produce unknown. Scores of at least 0.5 display a fall candidate; models
+remain independent. Changing the selection restarts the backend. Outputs go to
+a fresh directory under `data/experiments/detector/`: `predictions.jsonl`,
+`detector.json`, and raw gateway journals in live mode.
 
-Headless operation, optionally bounded to a fixed duration:
+A new run, an all-receiver gap of at least one second, or a history overflow
+discards buffered samples and starts a new segment and generation; pending
+windows from the old segment are dropped. Live acquisition uses the shared
+transport session also used by the viewer and collector. After a recoverable
+radio failure it waits `restart_delay_ms` (2 s), increasing linearly up to
+30 s while the radio stays unavailable, and configures a fresh run; identity,
+configuration and storage failures stop the detector. See
+[automatic radio recovery](automatic-radio-recovery.md). The session is tested
+against a fake gateway; this recovery path has not been exercised on hardware.
 
-```sh
-.venv/bin/fall-detect --model data/models/phase_random20_v1 --headless --duration 60
-```
+On the Vega 7, `cnn-4s` inference took about 15 ms on WebGPU and 4 ms on the
+CPU during replay. Four-second LSTM and GRU calls took roughly 1.1–1.2 s, so
+recurrent models cannot sustain a 250 ms update rate with the serial worker.
+These are runtime measurements, not detection-accuracy results. See the
+[GPU report](reports/native-webgpu-smoke-2026-11-12.md) and
+[native acquisition report](reports/native-capture-2026-11-12.md).
 
-The program reads `configs/radio.json`, with the same `--config`,
-`--gateway-port`, `--port` and `--transmitter-link` overrides as the viewer.
-It checks the sensing-profile fingerprint, transmitter and ordered receiver
-identities against the bundle before acquisition starts. Physical receiver
-placement cannot be checked automatically and must match the recording setup.
-The model is loaded before radio startup. Failed startup and normal exit both
-close the acquisition, inference process and native preprocessing workers.
+Live gateway operation of the complete pipeline, sustained operation and
+detection usefulness still require validation.
 
-Do not open the collector/viewer on the same gateway simultaneously. This
-program owns the acquisition connection while it runs. No firmware changes or
-reprovisioning are required.
+## Retired Python detector
 
-## Timing and input contract
-
-- Each window is `[start, start + 4 s)` on mapped transmitter enqueue time.
-  USB arrival order does not determine bins. The scheduler preserves the exact
-  250 ms hop, including shifts that are not multiples of the 40 ms bin width.
-- The 900 ms default delivery grace must match radio settings. The first
-  scheduled window also reserves 150 ms of preceding context for the 100 ms lag
-  coverage check. The initial score therefore needs approximately 5.05 seconds
-  after the first input, plus model/radio startup and processing time. This is
-  a context requirement, not a measured fall-to-alarm latency.
-- Native preprocessing records when a packet reaches its feature worker.
-  Packets unavailable by a window's end plus grace cannot fill that window.
-  Completed windows are immutable. A replay of an offline training window uses
-  all saved packets, so its missingness can differ from a live deadline-limited
-  window. Gateway 50 Hz availability bins remain a separate unchanged contract.
-- The canonical Rust acquisition backend already validates/fragments/decodes
-  envelopes, prepares physical HE20 phase masks and dispatches signed I/Q
-  magnitudes through AVX2 where supported. The detector reuses those native
-  records rather than converting CSI into Python lists.
-- The detector filters sensing-link metadata, excludes nonzero driver receive
-  status, and uses the common raw/calibrated phase finite mask. It retains all
-  242 valid physical tones in ascending order. For amplitude inputs, log1p magnitudes are
-  computed once, followed by double-precision sums/counts in 25 Hz bins and the
-  original float32 cast before normalization. There is no interpolation.
-- Amplitude normalization uses the saved training mean/scale for each receiver and tone.
-  Missing normalized values become zero, with four explicit mask planes. The
-  CPU model input has shape `[1, 8, 100, 242]`: four amplitude channels followed
-  by their four masks. No live normalization fitting occurs.
-- The phase bundle uses signed calibrated phase differences to the packet at
-  or before 100 ms earlier, with actual lag at most 150 ms. Rust averages the
-  sine and cosine in each bin without smoothing or fitted normalization.
-  Input shape is `[1, 16, 100, 242]`: sin/cos for rx-1 through rx-4, followed
-  by eight corresponding masks. Finite values stay in [−1, 1]; missing values
-  become zero. Amplitude is used only by the existing phase validity floor.
-  Packet calibration is retained and is distinct from feature standardization.
-- New phase training and live inference both use integer nanoseconds for the
-  lag cutoff and bin assignment. The older Python analysis can reject an exact
-  150 ms lag after floating-point subtraction; the new experiment records this
-  difference and leaves the old checkpoints and analysis artifacts unchanged.
-- At least 70% finite phase-change time/tone support is required in every
-  receiver's current window. The coverage calculation reproduces the original
-  100–150 ms lag support using each tone's finite masks; the amplitude CNN does
-  not need the phase-change values themselves. Unlike the offline common-cohort
-  filter, live gating cannot inspect future offset windows.
-
-Run IDs and transmitter/receiver boot changes invalidate every receiver's
-history together. Link interruption clears pending decisions immediately.
-Old-generation results, low-coverage windows, unavailable radio health and
-stale scores are suppressed. An older in-flight score cannot replace a newer
-low-coverage decision. At the default hop/grace, a score older than 1.9 seconds
-relative to its capture-window end becomes unknown.
-
-## Native scheduling and bounds
-
-The record callback only validates context and queues an `Arc` reference.
-A dedicated Rust thread prepares packet features and schedules windows; two
-Rayon workers process receivers concurrently. AVX2 kernels accelerate masked
-bin accumulation and float32 normalization/mask construction. Scalar tails and
-a runtime scalar fallback preserve the same calculations. Scalar log1p and
-the existing phase preparation keep the training conventions; no fast-math or
-approximate logarithm is introduced.
-
-`--kernel scalar` disables the detector's vector kernels for comparison;
-`--kernel auto` selects AVX2 on the tested machine. `--workers 1` through `4`
-controls native receiver processing, and `--inference-threads 1` through `4`
-controls the isolated CPU scorer. The acquisition worker/USB guards remain
-unchanged.
-
-The native input queue holds at most 4,096 record references, each receiver
-retains at most 2,048 feature records, and the native output holds only the
-latest window. Input/history overflow increments diagnostics and invalidates
-the generation. The model process has one queued input and four output slots;
-the UI skips inference submissions when that input slot is occupied. The
-freshness rule prevents delayed results from becoming current decisions. The
-GUI retains at most 240 plotted scores.
-
-## Outputs and replay
-
-Default outputs go to a new timestamped directory under
-`data/experiments/detector/`. `--output-dir` selects a new empty directory.
-`detector.json` records the model contract, runtime parameters and radio
-snapshot; `predictions.jsonl` records valid scores, per-seed values, coverage,
-window/run generation and processing time, plus insufficient-data/error events.
-The acquisition service retains its original raw gateway journals there.
-These are not participant collection sessions. Shutdown does not promise
-power-loss durability or processing of every pending inference window.
-
-Replay one accepted attempt without opening hardware:
-
-```sh
-.venv/bin/fall-detect --model data/models/four_rx_v1 \
-  --replay-session data/raw/sessions/20261104T081805521126Z \
-  --attempt 192/01 --offset 0
-```
-
-Replay verifies CSI/sidecar row alignment, transmitter/receiver identities,
-profile, clock epochs and recording boundaries. It uses the production native
-builder and the exact ensemble. It reads raw inputs without changing them.
-
-## Verification and measured limits
-
-The simultaneous model path was exercised with
-`tools/processing/check_multi_phase_runtime.py --rate-hz 120` using synthetic native
-records and both the existing fall scorer and all 12 phase models. A fixed-deadline
-producer delivered 7,668 records in 16.0 s, about 119.80 records/s per receiver
-against a requested 120/s, with three missed producer rounds. All 48 phase rows
-were available, 44 fall predictions were produced, and both worker queues ended
-empty with no reported overflows. The phase queue peaked at 543 entries and
-combined callback p99 was 0.111 ms. An earlier producer that scheduled each
-round relative to the last actual call reached only 110.6/s. Neither short
-synthetic observation qualifies hardware acquisition, prolonged operation,
-model accuracy or latency.
-The phase table was also checked in an offscreen synthetic GUI. Shared
-resampling reproduced every saved array and provenance for four real recordings
-across all three durations.
-
-The full repository suite passes **588 tests**. Native tests check vector/scalar
-agreement, NaNs/infinities and tail elements, half-open windows, lag support,
-mask/channel order and rejection of late availability; strict Clippy passes.
-Python tests cover model hashes, radio order, isolated scoring, generation and
-freshness rules, quality gating, startup cleanup and CLI modes.
-
-The historical `tools/processing/benchmark_live_detector.py` run checked four accepted
-attempts at all five trained offsets, including the missed fall `192/01`: raw
-inputs matched saved arrays within 1e-6, normalized inputs within 1e-5,
-phase-change coverage within 1e-12, and ensemble scores within 1e-6. The replay
-score for `192/01` was 0.141641. The source experiment artifacts and saved
-arrays are no longer in the repository, so this parity run needs an external
-copy of that artifact directory.
-
-On this Ryzen 7 PRO 4750U, 15 repetitions of the same cached recorded window
-gave the following medians. Native-window times exclude one-time packet
-feature preparation. Replay-call times include rebuilding those features and
-the Python-to-Rust argument handoff, but exclude disk loading and CNN scoring.
-The NumPy comparison starts from cached packet log amplitudes and times only
-binning/normalization; it is not an end-to-end acquisition benchmark.
-
-| Implementation | Native window | Replay call |
-| --- | --- | --- |
-| Scalar, one worker | 2.94 ms | 10.95 ms |
-| AVX2, one worker | 2.36 ms | 10.56 ms |
-| AVX2, two workers | 1.38 ms | 9.51 ms |
-| Cached NumPy binning/normalization | 46.77 ms | — |
-
-The eight-second synthetic runtime check submitted 2,872 record references,
-produced 12 native windows and 11 scores, and observed zero overflows or
-skipped inference jobs. Native processing continued for two windows during a
-350 ms Python GIL hold. Median window construction was 1.44 ms and median
-three-model inference was 3.04 ms. The real GUI also completed an offscreen
-synthetic lifecycle check. These checks do not measure radio throughput or
-fall-detection accuracy. A subsequent real live test exposed confident false
-candidates and missed falls reported by the operator; see the
-[live-model diagnosis](reports/live-model-diagnosis-2026-11-04.md). Its input arithmetic
-matched offline replay, while receiver conditions shifted substantially.
-
-Local evidence, when present, is saved under
-`data/experiments/detector/parity-benchmark.json` and
-`data/experiments/detector/runtime-check/`. Run the parity benchmark with an
-external copy of the experiment artifacts; the synthetic runtime check needs
-no experiment directory:
-
-```sh
-.venv/bin/python tools/processing/benchmark_live_detector.py --experiment /path/to/four_rx_v1
-QT_QPA_PLATFORM=offscreen .venv/bin/python tools/processing/check_live_detector_runtime.py
-```
-
-Before interpreting candidates as alarms, evaluate independently annotated
-continuous recordings from new sessions, with ordinary non-fall activity.
-Select thresholds and any event persistence/cooldown policy on validation
-recordings, then measure missed events, false alarms per hour and detection
-delay on a separate evaluation set.
+The earlier Python detector (`--mode legacy`, the CPU PyTorch fall scorer,
+notebook-trained phase models, `--export-model` and `--replay-session`) was
+removed on 12 November 2026 together with its native `CnnPreprocessor` and the
+`check_live_detector_runtime.py`, `check_multi_phase_runtime.py` and
+`benchmark_live_detector.py` tools. Its historical measurements and artifacts
+remain under `data/experiments/detector/` and in the
+[model pilot summary](reports/fall-model-pilots.md); retrieve the code from Git
+history to reproduce them.

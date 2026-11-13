@@ -90,7 +90,7 @@ class CollectionPresenter:
     def refresh(self, *, now: float | None = None) -> SessionSnapshot:
         """Advance one display tick using current health and return its snapshot."""
         now = time.monotonic() if now is None else now
-        reader = self.radio.manager
+        reader = self.radio
         active = self.controller.state in (
             SessionState.COUNTDOWN,
             SessionState.ACTION,

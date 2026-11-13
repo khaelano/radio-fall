@@ -56,7 +56,7 @@ def test_commands_resolve_same_configuration_outside_repository(
     settings = resolve_settings(args)
     assert args.config == DEFAULT_CONFIG
     assert args.gateway_port.endswith("10:BD:A3:9E:CD:68-if00")
-    assert args.transmitter_link == "espnow_uart"
+    assert settings.connection["transmitter_link"] == "espnow_uart"
     assert settings.profile.nominal_rate_hz == 120
 
 
@@ -66,20 +66,14 @@ def test_connection_overrides_preserve_recording_fingerprints(tmp_path):
     value["connection"]["gateway_port"] = "different-laptop-port"
     config = tmp_path / "radio.json"
     config.write_text(json.dumps(value))
-    args = viewer_parser().parse_args(
-        [
-            "--config",
-            str(config),
-            "--transmitter-link",
-            "usb",
-            "--port",
-            "recovery-usb",
-        ]
-    )
+    args = viewer_parser().parse_args(["--config", str(config)])
     settings = resolve_settings(args)
     assert args.gateway_port == "different-laptop-port"
-    assert args.port == "recovery-usb"
-    assert args.transmitter_link == "usb"
+    override = viewer_parser().parse_args(
+        ["--config", str(config), "--gateway-port", "explicit-port"]
+    )
+    resolve_settings(override)
+    assert override.gateway_port == "explicit-port"
     assert settings.profile_fingerprint == original.profile_fingerprint
     assert settings.transport.fingerprint(settings.inventory, settings.profile) == (
         original.transport.fingerprint(original.inventory, original.profile)
@@ -108,6 +102,7 @@ def test_configuration_rejects_unknown_fields(tmp_path, section):
         {"transport": {"schema_version": 7, "queue_capacity": 97}},
         {"connection": {"transmitter_link": "typo"}},
         {"connection": {"transmitter_link": "ble"}},
+        {"connection": {"transmitter_link": "usb"}},
         {"connection": {"gateway_port": ""}},
     ],
 )

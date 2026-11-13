@@ -13,6 +13,9 @@ name = "_radio_native"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+radio-detection = { path = "crates/radio_detection" }
+radio-transport = { path = "crates/radio_transport" }
+radio-storage = { path = "crates/radio_storage" }
 radio-signal = { path = "crates/radio_signal" }
 radio-preprocessing = { path = "crates/radio_preprocessing" }
 pyo3 = { version = "0.29", features = ["abi3-py312", "num-complex"] }

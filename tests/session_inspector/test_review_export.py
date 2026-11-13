@@ -89,7 +89,7 @@ def test_curated_export_applies_review_and_keeps_raw_files_identical(
 ):
     root = session_factory(attempts=((1, 1, "accepted"),))
     session = load_session(root)
-    raw_source = next(root.glob("trials/*/attempt_*/receivers/rx-1/csi.csv"))
+    raw_source = next(root.glob("transport/gateway/*/envelopes.bin"))
     review = ReviewDocument.empty(session)
     review.revision = 3
     review.updated_at_utc = "2026-02-01T00:00:00+00:00"
@@ -123,6 +123,22 @@ def test_curated_export_applies_review_and_keeps_raw_files_identical(
 
     with pytest.raises(FileExistsError):
         export_curated_bundle(session, review, destination)
+
+
+def test_export_copies_whatever_the_session_contains(session_factory, tmp_path: Path):
+    root = session_factory(attempts=((1, 1, "accepted"),))
+    for journal in root.glob("transport/**/*"):
+        if journal.is_file():
+            journal.unlink()
+    session = load_session(root)
+
+    exported = export_curated_bundle(
+        session, ReviewDocument.empty(session), tmp_path / "bare"
+    )
+
+    assert (exported / "session.json").is_file()
+    assert (exported / "session_review.json").is_file()
+    assert not tuple(exported.glob("**/*.csv"))
 
 
 def test_cancelled_export_removes_partial_directory(session_factory, tmp_path: Path):

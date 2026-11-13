@@ -12,6 +12,8 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from inspector_sessions import FrameSpec, attempt_origin
+
 from fall_detection.session_inspector.models import load_session
 from fall_detection.session_inspector.video import VideoReader, load_video_timeline
 
@@ -24,11 +26,8 @@ def video_attempt(session_factory):
     root = session_factory(attempts=((1, 1, "accepted"),))
     path = next(root.glob("trials/*/attempt_01"))
     metadata = json.loads((path / "attempt.json").read_text())
-    origin = 1_000_000_000_000
-    metadata.update(
-        started_monotonic_ns=origin, ended_monotonic_ns=origin + 2_000_000_000
-    )
-    (path / "attempt.json").write_text(json.dumps(metadata))
+    origin = metadata["started_monotonic_ns"]
+    assert metadata["ended_monotonic_ns"] == origin + 2_000_000_000
     recorder = _AttemptVideo(path, origin, VideoConfig("/dev/video-test", 64, 48, 30))
     for i, offset in enumerate([50_000_000, 100_000_000, 450_000_000, 1_300_000_000]):
         frame = av.VideoFrame.from_ndarray(
@@ -90,47 +89,9 @@ def _wait(application, predicate):
     assert predicate()
 
 
-def _write_capture(attempt, *, corrupt=False):
-    from fall_detection.radio.acquisition.protocol import (
-        CSI_HEADER,
-        CsiRecord,
-        format_csi_record,
-    )
-
-    directory = attempt.path / "receivers/rx-1"
-    origin = attempt.metadata["started_monotonic_ns"]
-    records = [
-        CsiRecord(
-            i, "00:11:22:33:44:55", -50, -95, i * 1000, (complex(i, 2), complex(i, 3))
-        )
-        for i in [1, 2]
-    ]
-    (directory / "csi.csv").write_text(
-        CSI_HEADER
-        + "\n"
-        + "\n".join(format_csi_record(record) for record in records)
-        + "\n"
-    )
-    rows = [
-        {
-            "schema_version": 1,
-            "sequence": record.sequence,
-            "rx_radio_timestamp_us": record.timestamp_us,
-            "capture_host_monotonic_ns": origin + offset,
-        }
-        for record, offset in zip(records, [1_200_000_000, 200_000_000], strict=True)
-    ]
-    if corrupt:
-        rows[1]["sequence"] = 999
-    (directory / "gateway_timing.jsonl").write_text(
-        "\n".join(json.dumps(row) for row in rows) + "\n"
-    )
-
-
 def test_csi_plots_use_attempt_clock_and_sort_only_derived_views(video_attempt):
     from fall_detection.session_inspector.data import load_attempt_data
 
-    _write_capture(video_attempt)
     data = load_attempt_data(video_attempt, "rx-1", prepare_signals=True)
     assert data.signal_times == (1.2, 0.2)
     assert [record.sequence for record in data.records] == [1, 2]
@@ -140,14 +101,24 @@ def test_csi_plots_use_attempt_clock_and_sort_only_derived_views(video_attempt):
     assert "capture" in data.time_source
 
 
-def test_mismatched_csi_capture_clock_is_not_presented_as_synced(video_attempt):
+def test_frames_outside_the_attempt_window_are_not_plotted(session_factory):
     from fall_detection.session_inspector.data import load_attempt_data
 
-    _write_capture(video_attempt, corrupt=True)
-    data = load_attempt_data(video_attempt, "rx-1", prepare_signals=True)
-    assert data.signal_times is None
-    assert "not aligned" in data.time_source
-    assert any("identities" in warning for warning in data.warnings)
+    origin = attempt_origin(0)
+    root = session_factory(
+        attempts=((1, 1, "accepted"),),
+        frames=(
+            FrameSpec(1, origin + 200_000_000),
+            FrameSpec(2, origin + 2_500_000_000),
+            FrameSpec(3, origin - 100_000_000),
+        ),
+    )
+    data = load_attempt_data(
+        load_session(root).attempts[0], "rx-1", prepare_signals=True
+    )
+    assert data.signal_times == (0.2,)
+    assert data.csi.row_count == 1
+    assert "capture" in data.time_source
 
 
 def test_phase_heatmap_keeps_empty_time_cells_missing():
@@ -164,67 +135,11 @@ def test_phase_heatmap_keeps_empty_time_cells_missing():
 def test_missing_video_is_explicit_and_keeps_csi_available(video_attempt):
     from fall_detection.session_inspector.data import load_attempt_data
 
-    _write_capture(video_attempt)
     (video_attempt.path / "video.json").unlink()
     with pytest.raises(ValueError, match="No video recorded"):
         load_video_timeline(video_attempt)
     data = load_attempt_data(video_attempt, "rx-1", prepare_signals=True)
     assert data.record_count == 2 and data.signal_times is not None
-
-
-def test_usb_signal_clock_uses_host_affine_fit(video_attempt):
-    from fall_detection.session_inspector.data import load_attempt_data
-
-    _write_capture(video_attempt)
-    directory = video_attempt.path / "receivers/rx-1"
-    (directory / "gateway_timing.jsonl").unlink()
-    origin_us = video_attempt.metadata["started_monotonic_ns"] // 1000
-    with (directory / "radio_timing.csv").open("w", newline="") as stream:
-        writer = csv.writer(stream)
-        writer.writerow(
-            ["sequence", "rx_callback_timestamp_us", "host_receive_monotonic_ns"]
-        )
-        writer.writerows(
-            [
-                [1, origin_us + 100_500, (origin_us + 120_000) * 1000],
-                [2, origin_us + 200_500, (origin_us + 250_000) * 1000],
-            ]
-        )
-    with (directory / "usb_clock_sync.csv").open("w", newline="") as stream:
-        writer = csv.writer(stream)
-        writer.writerow(
-            [
-                "sync_id",
-                "sensing_sequence",
-                "receiver_boot_id",
-                "tx_t1_us",
-                "rx_t2_us",
-                "rx_t3_us",
-                "tx_t4_us",
-                "rx_radio_t2_us",
-                "tx_radio_t4_us",
-                "receiver_mac",
-                "host_receive_monotonic_ns",
-            ]
-        )
-        writer.writerow(
-            [
-                1,
-                1,
-                1,
-                origin_us,
-                origin_us + 600,
-                origin_us + 700,
-                origin_us + 300,
-                0,
-                0,
-                "00:11:22:33:44:55",
-                origin_us * 1000,
-            ]
-        )
-    data = load_attempt_data(video_attempt, "rx-1", prepare_signals=True)
-    np.testing.assert_allclose(data.prepared_frame.timestamps, [0.1, 0.2], atol=1e-9)
-    assert "USB callback" in data.time_source
 
 
 def test_video_and_all_signal_cursors_share_attempt_time(video_attempt):
@@ -235,7 +150,6 @@ def test_video_and_all_signal_cursors_share_attempt_time(video_attempt):
     from fall_detection.apps.session_inspector.app import SignalsPanel
     from fall_detection.session_inspector.data import load_attempt_data
 
-    _write_capture(video_attempt)
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     panel = SignalsPanel()
     try:

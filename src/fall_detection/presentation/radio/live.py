@@ -42,7 +42,7 @@ class LiveDashboard:
             radio.state,
             fps=fps,
             receivers=[binding.receiver_id for binding in radio.bindings],
-            can_render=lambda: radio.manager.preview_ready,
+            can_render=lambda: radio.preview_ready,
             dashboard_subcarriers=dashboard_subcarriers,
             inspect_subcarrier=inspect_subcarrier,
             window_seconds=window_seconds,
@@ -55,8 +55,7 @@ class LiveDashboard:
         self._selected: str | None = None
 
     def _gap_snapshot(self, seconds: float, now_ns: int) -> AvailabilitySnapshot | None:
-        grid = self.radio.manager.grid
-        return grid.snapshot(seconds=seconds, now_ns=now_ns) if grid else None
+        return self.radio.availability(seconds, now_ns)
 
     def refresh(self, *, now: float | None = None) -> TransportStatusText:
         """Draw new preview data and return the current receiver status text."""
@@ -68,7 +67,7 @@ class LiveDashboard:
             or selected != self._selected
         ):
             self._status = self.transport_panel.apply(
-                self.radio.manager.diagnostics(),
+                self.radio.diagnostics(),
                 selected_receiver_id=selected,
                 plot_refresh_fps=self.panel.measured_fps,
                 ui_fps=self.fps,

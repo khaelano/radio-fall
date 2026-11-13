@@ -81,13 +81,14 @@ unsafe fn magnitudes_avx2(i: &[u8], q: &[u8], out: &mut [f64]) {
     }
 }
 
-fn decode_magnitudes(
+/// Decode signed-int16 HE20 arrays to masked physical magnitudes in tone order.
+pub fn decode_magnitudes(
     i: &[u8],
     q: &[u8],
     offsets: &[usize],
     first_word: &[bool],
     driver_valid: &[bool],
-) -> PyResult<Vec<f64>> {
+) -> Result<Vec<f64>, String> {
     let rows = first_word.len();
     if rows == 0
         || driver_valid.len() != rows
@@ -100,7 +101,7 @@ fn decode_magnitudes(
             .windows(2)
             .any(|v| v[1] < v[0] || ![245, 256].contains(&(v[1] - v[0])))
     {
-        return Err(PyValueError::new_err("Invalid HE20 I/Q lengths or offsets"));
+        return Err("Invalid HE20 I/Q lengths or offsets".into());
     }
     let mut masked = vec![f64::NAN; rows * 245];
     masked
@@ -149,7 +150,9 @@ pub fn prepare_magnitude<'py>(
     first_word: Vec<bool>,
     driver_valid: Vec<bool>,
 ) -> PyResult<Bound<'py, PyBytes>> {
-    let masked = py.detach(|| decode_magnitudes(i, q, &offsets, &first_word, &driver_valid))?;
+    let masked = py
+        .detach(|| decode_magnitudes(i, q, &offsets, &first_word, &driver_valid))
+        .map_err(PyValueError::new_err)?;
     Ok(PyBytes::new(py, bytes(&masked)))
 }
 
@@ -166,7 +169,8 @@ pub fn prepare_amplitude<'py>(
 ) -> PyResult<Buffers<'py>> {
     let rows = first_word.len();
     let (masked, normalized, lower, upper) = py.detach(|| -> PyResult<_> {
-        let masked = decode_magnitudes(i, q, &offsets, &first_word, &driver_valid)?;
+        let masked = decode_magnitudes(i, q, &offsets, &first_word, &driver_valid)
+            .map_err(PyValueError::new_err)?;
         let mut normalized = vec![f64::NAN; masked.len()];
         let mut lower = vec![f64::NAN; 245];
         let mut upper = vec![f64::NAN; 245];

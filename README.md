@@ -1,8 +1,9 @@
 # Radio fall detection
 
-Live CSI processing uses a compiled Rust backend with native worker threads and
-runtime AVX2 acceleration. A Rust toolchain is required when installing from
-source; see [native processing](docs/rust-radio-pipeline.md).
+Rust owns live radio acquisition, CSI decoding, signal preprocessing and
+inference; Python provides the desktop applications, collection workflow and
+offline analysis. A Rust toolchain is required when installing from source; see
+[native processing](docs/rust-radio-pipeline.md).
 
 Wi-Fi channel-state-information (CSI) fall-detection research for a bachelor's
 thesis. This branch replaces live BLE with scheduled dual-band ESP-NOW uploads:
@@ -15,8 +16,8 @@ C5 transmitter -> 5 GHz sensing -> C5 receivers
 The default setup uses four C5 receivers, 120 sensing rounds/s, and 125 ms
 round-robin uploads on 2.4 GHz HT20 MCS3. A companion C6 carries transmitter
 control and timing over UART and encrypted ESP-NOW to the laptop's USB gateway.
-The sensing C5 keeps its radio dedicated to 5 GHz sensing. USB control remains
-available with `--transmitter-link usb`.
+The sensing C5 keeps its radio dedicated to 5 GHz sensing. The former USB
+transmitter link was retired with the Python acquisition path.
 
 All operational radio settings are in [`configs/radio.json`](configs/radio.json):
 verified identities, sensing profile, upload policy and stable USB paths.
@@ -30,7 +31,8 @@ recordings and research reports remain on disk.
 | Path | Contents |
 | --- | --- |
 | `src/firmware/radio/` | ESP-IDF transmitter, receiver, gateway and UART relay projects |
-| `src/fall_detection/` | Python package: acquisition, radio processing, collection, evaluation |
+| `src/native/radio_core/` | Rust workspace: gateway transport, signal kernels, live detection, PyO3 extension |
+| `src/fall_detection/` | Python package: applications, collection, provisioning, offline analysis |
 | `configs/` | One radio settings file, collection protocols and scenarios |
 | `tests/` | Unit tests mirroring the package modules |
 | [`docs/`](docs/README.md) | Current guides, engineering reports and presentations |
@@ -57,12 +59,11 @@ and radio settings:
 ```sh
 uv run csi-viewer
 uv run fall-collection
-uv run csi-gateway-benchmark
 uv run fall-session-inspector --sessions-dir data/raw/sessions
 ```
 
-Use `--config /path/to/radio.json` for another setup. USB path or reference-link
-overrides are available for recovery, for example `csi-viewer --transmitter-link usb`.
+Use `--config /path/to/radio.json` for another setup, or `--gateway-port` to
+override the gateway USB path.
 For new boards, follow the [gateway build and provisioning procedure](docs/espnow-gateway.md)
 and [relay pairing procedure](docs/uart-transmitter-relay.md).
 Use `uv run csi-radio discover` to inspect connected boards and
@@ -71,21 +72,20 @@ Use `uv run csi-radio discover` to inspect connected boards and
 Both live applications use `espnow_gateway`; receiver IDs and model channels
 remain stable regardless of USB arrival order. Firmware protocol 3 is required.
 
-The separate experimental detector uses Rust preprocessing and an isolated
-three-seed CPU CNN scorer. With an exported four-receiver model available
-locally, launch its GUI with:
+The separate experimental detector runs entirely in Rust: gateway acquisition,
+sequence preprocessing and resident ONNX Runtime sessions (WebGPU or CPU). With
+the current exports in `artifacts/model/` and native ONNX Runtime libraries
+installed, launch its GUI with:
 
 ```sh
-uv sync --extra radio --extra detection
-.venv/bin/fall-detect --model data/models/phase_random20_v1
+uv sync --extra radio --extra native-detection
+uv run fall-detect
 ```
 
-Add `--headless` for JSON output. The [live detector guide](docs/live-fall-detection.md)
-covers model export, read-only replay, timing, quality gating and benchmarks.
-The current default uses phase change without fitted normalization, trained on
-20 random shifts plus the central window per training attempt. See the
-[historical model pilot summary](docs/reports/fall-model-pilots.md).
-Live accuracy remains unqualified; the earlier amplitude bundle is preserved.
+Add `--headless` for JSON output or `--replay-capture <dir>` to stream a recorded
+native capture without hardware. The [live detector guide](docs/live-fall-detection.md)
+covers model selection, replay, timing and quality gating. Live accuracy remains
+unqualified; see the [historical model pilot summary](docs/reports/fall-model-pilots.md).
 
 Optional synchronized phone video is available through a DroidCam USB virtual
 webcam. Install with `uv sync --extra radio --extra video` and add
@@ -113,12 +113,13 @@ reference and gateway freshness. Configured sensing Hz, delivered records/s,
 plot refresh FPS and UI FPS are labeled separately. Tooltips retain counters
 and explain their limits; sequence gaps alone do not identify a cause.
 
-The separate session inspector scans recorded manifests, then loads CSI and
-timing files only when an attempt is selected. It provides searchable session
+The separate session inspector scans recorded manifests in session directories
+and version-3 archives (read in place, never extracted up front), then loads CSI
+frames only when an attempt is selected. It provides searchable session
 and trial views, interactive signal plots, exact CSV tables, and reviewed
 labels, inclusion, quality, and notes. Review edits are saved to
-`session_review.json`; acquisition manifests and raw CSV files remain
-unchanged. The inspector can also create a portable curated copy that retains
+`data/annotations/<session-id>/session_review.json` (`--annotations-dir`);
+acquisition manifests and raw CSV files remain unchanged. The inspector can also create a portable curated copy that retains
 and flags excluded attempts.
 On the **Signals** tab, recorded video plays beside the plots with a shared
 attempt-time cursor, scrubbing and frame stepping. Install the `video` extra for

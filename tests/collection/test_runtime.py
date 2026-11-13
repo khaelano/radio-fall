@@ -61,11 +61,11 @@ def test_presenter_checks_health_each_tick_without_reprobing_storage(
     clock = FakeClock()
     controller = make_controller(tmp_path, clock)
     controller.start_session(SessionMetadata("p01"))
-    reader = SimpleNamespace(
-        clock_sync_ready=True, all_live=True, any_recent_record=True
-    )
     radio = SimpleNamespace(
-        manager=reader, state=SimpleNamespace(get_status=lambda: ("ready", True))
+        clock_sync_ready=True,
+        all_live=True,
+        any_recent_record=True,
+        state=SimpleNamespace(get_status=lambda: ("ready", True)),
     )
     frames = []
     text = TransportStatusText("ready", "settings", "metrics", "detail")
@@ -96,13 +96,13 @@ def test_presenter_checks_health_each_tick_without_reprobing_storage(
     assert previews[-1] == ("new image", {"ready": True, "detail": "video ready"})
     controller.dispatch(OperatorCommand.START_TRIAL)
     # Planned upload gaps must not interrupt an active attempt.
-    reader.all_live = reader.any_recent_record = False
+    radio.all_live = radio.any_recent_record = False
     for frame in range(1, 24):
         snapshot = presenter.refresh(now=frame / 24)
         assert snapshot.health.ready
     assert len(probes) == 1
     # Reference health loss must still abort on the next tick, inside the cache period.
-    reader.clock_sync_ready = False
+    radio.clock_sync_ready = False
     snapshot = presenter.refresh(now=0.99)
     assert snapshot.state is SessionState.REVIEW
     assert snapshot.attempt_status == "invalid"
@@ -114,7 +114,7 @@ def test_presenter_checks_health_each_tick_without_reprobing_storage(
 
     # Recovery may finish while GUI refreshes are paused. Reconcile health from
     # the controller rather than relying on the presenter's last displayed value.
-    reader.clock_sync_ready = reader.all_live = reader.any_recent_record = True
+    radio.clock_sync_ready = radio.all_live = radio.any_recent_record = True
     presenter.refresh(now=2)
     controller.interrupt_radio("another restart while the GUI was paused")
     assert not controller.health.radio_live

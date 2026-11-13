@@ -1,11 +1,15 @@
 """Check score semantics, phase-boundary guards, and derived cache invalidation."""
 
-import json
+import os
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import pytest
+
+pytest.importorskip("pyarrow")
+
+from journal_builder import RX1, TX, write_session
 
 from fall_detection.analysis import phase_motion
 from fall_detection.analysis.phase_motion import (
@@ -13,6 +17,8 @@ from fall_detection.analysis.phase_motion import (
     phase_change_matrix,
     phase_motion_score,
 )
+from fall_detection.analysis.session_frames import load_analysis_session
+from fall_detection.radio.preprocessing.phase import HE20_COMPACT_SLOT_INDICES
 
 
 def test_phase_change_matrix_keeps_localized_signed_motion_separate():
@@ -82,15 +88,29 @@ def test_phase_motion_score_does_not_invent_values_for_missing_tones_or_endpoint
 
 @pytest.fixture
 def motion_source(tmp_path, monkeypatch):
-    root = tmp_path / "data/raw/sessions/session"
-    receiver = root / "trials/001_fall/attempt_01/receivers/rx-1"
-    receiver.mkdir(parents=True)
-    (root / "session.json").write_text(json.dumps({"status": "complete"}))
-    (receiver.parent.parent / "attempt.json").write_text(
-        json.dumps({"trial_ordinal": 1})
+    root = write_session(
+        tmp_path / "data/raw/sessions/session",
+        attempts=[
+            {
+                "trial_ordinal": 1,
+                "activity_label": "sit",
+                "status": "accepted",
+                "started_monotonic_ns": 0,
+                "ended_monotonic_ns": 3_000_000_000,
+            }
+        ],
+        frames=[
+            {
+                "receiver": RX1,
+                "sequence": index,
+                "capture_ns": 1_000_000 * index,
+                "transmitter": TX,
+                "sig_mode": 4,
+            }
+            for index in range(3)
+        ],
     )
-    for name in ("csi.csv", "radio_timing.csv", "usb_clock_sync.csv"):
-        (receiver / name).write_text("fixture")
+    session = load_analysis_session(root, tmp_path / "derived")
     seconds = np.arange(300) / 100
     values = np.tile((0.02 * seconds)[:, None], (1, 6))
     signal = SimpleNamespace(
@@ -115,13 +135,14 @@ def motion_source(tmp_path, monkeypatch):
             "phase_end_monotonic_ns": [1_000_000_000, 2_000_000_000, 3_000_000_000],
         }
     )
-    return root, receiver, signal, calls, intervals
+    return session, signal, calls, intervals
 
 
 def test_load_phase_motion_samples_marks_cross_boundary_lags(motion_source):
-    root, _, _, _, intervals = motion_source
-    result = load_phase_motion_samples(root, ["001/01"], ["rx-1"], intervals)
+    session, _, calls, intervals = motion_source
+    result = load_phase_motion_samples(session, ["001/01"], ["rx-1"], intervals)
     frame = result.samples
+    assert calls[0][:3] == (session, "001/01", "rx-1")
     assert frame.groupby("phase").size().to_dict() == {
         "action": 100,
         "countdown": 100,
@@ -134,56 +155,125 @@ def test_load_phase_motion_samples_marks_cross_boundary_lags(motion_source):
 
 
 def test_load_phase_motion_samples_keeps_failed_recordings_visible(motion_source):
-    root, _, signal, _, intervals = motion_source
+    session, signal, _, intervals = motion_source
     signal.calibrated_phase[:100, :4] = np.nan
-    result = load_phase_motion_samples(root, ["001/01"], ["rx-1"], intervals)
+    result = load_phase_motion_samples(session, ["001/01"], ["rx-1"], intervals)
     assert result.samples.empty
     assert "baseline tones" in result.recordings.iloc[0]["read_error"]
 
 
-def test_load_phase_motion_samples_invalidates_sync_parameters_and_phase_changes(
+def test_load_phase_motion_samples_invalidates_frame_tables_and_parameters(
     motion_source, tmp_path
 ):
-    root, receiver, _, calls, intervals = motion_source
+    session, _, calls, intervals = motion_source
     cache = tmp_path / "derived-cache"
     initial = load_phase_motion_samples(
-        root, ["001/01"], ["rx-1"], intervals, cache_dir=cache
+        session, ["001/01"], ["rx-1"], intervals, cache_dir=cache
     )
     cached = load_phase_motion_samples(
-        root, ["001/01"], ["rx-1"], intervals, cache_dir=cache
+        session, ["001/01"], ["rx-1"], intervals, cache_dir=cache
     )
     assert len(calls) == 1
     assert cached.recordings.iloc[0]["cache_hit"]
     pd.testing.assert_frame_equal(initial.samples, cached.samples)
-    (receiver / "usb_clock_sync.csv").write_text("changed clock samples")
-    load_phase_motion_samples(root, ["001/01"], ["rx-1"], intervals, cache_dir=cache)
-    assert len(calls) == 2
+    for count, name in enumerate(
+        ("frames.parquet", "attempts.parquet", "phases.parquet", "conversion.json"),
+        start=2,
+    ):
+        path = session.path / name
+        stat = path.stat()
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+        load_phase_motion_samples(
+            session, ["001/01"], ["rx-1"], intervals, cache_dir=cache
+        )
+        assert len(calls) == count
     changed = intervals.copy()
     changed.loc[0, "phase_end_monotonic_ns"] = 900_000_000
     changed.loc[1, "phase_start_monotonic_ns"] = 900_000_000
-    load_phase_motion_samples(root, ["001/01"], ["rx-1"], changed, cache_dir=cache)
-    assert len(calls) == 3
+    load_phase_motion_samples(session, ["001/01"], ["rx-1"], changed, cache_dir=cache)
+    assert len(calls) == 6
     load_phase_motion_samples(
-        root, ["001/01"], ["rx-1"], changed, lag_seconds=0.2, cache_dir=cache
+        session, ["001/01"], ["rx-1"], changed, lag_seconds=0.2, cache_dir=cache
     )
-    assert len(calls) == 4
+    assert len(calls) == 7
 
 
 def test_load_phase_motion_samples_rejects_cache_inside_raw_data(motion_source):
-    root, _, _, _, intervals = motion_source
+    session, _, _, intervals = motion_source
+    root = session.manifest["source_directory"]
     with pytest.raises(ValueError, match="outside raw"):
         load_phase_motion_samples(
-            root, ["001/01"], ["rx-1"], intervals, cache_dir=root / "cache"
+            session, ["001/01"], ["rx-1"], intervals, cache_dir=f"{root}/cache"
         )
 
 
 def test_load_phase_motion_samples_recovers_corrupt_cache(motion_source, tmp_path):
-    root, _, _, calls, intervals = motion_source
+    session, _, calls, intervals = motion_source
     cache = tmp_path / "derived-cache"
-    load_phase_motion_samples(root, ["001/01"], ["rx-1"], intervals, cache_dir=cache)
+    load_phase_motion_samples(session, ["001/01"], ["rx-1"], intervals, cache_dir=cache)
     next(cache.glob("*.npz")).write_bytes(b"broken")
     result = load_phase_motion_samples(
-        root, ["001/01"], ["rx-1"], intervals, cache_dir=cache
+        session, ["001/01"], ["rx-1"], intervals, cache_dir=cache
     )
     assert len(calls) == 2
     assert not result.recordings.iloc[0]["cache_hit"]
+
+
+def test_load_phase_motion_samples_decodes_journaled_csi_in_worker_processes(
+    tmp_path,
+):
+    slots = np.asarray(HE20_COMPACT_SLOT_INDICES)
+    values = 40 * np.exp(1j * (0.02 * slots + 0.3))
+    pairs = np.column_stack((np.rint(values.imag), np.rint(values.real)))
+    payload = bytes(int(value) & 0xFF for value in pairs.astype(int).ravel())
+    root = write_session(
+        tmp_path / "data/raw/sessions/real",
+        attempts=[
+            {
+                "trial_ordinal": 1,
+                "activity_label": "sit",
+                "status": "accepted",
+                "started_monotonic_ns": 0,
+                "ended_monotonic_ns": 3_000_000_000,
+            }
+        ],
+        frames=[
+            {
+                "receiver": RX1,
+                "sequence": index,
+                "capture_ns": index * 10_000_000,
+                "payload": payload,
+                "transmitter": TX,
+                "sig_mode": 4,
+            }
+            for index in range(300)
+        ],
+    )
+    session = load_analysis_session(root, tmp_path / "derived")
+    intervals = pd.DataFrame(
+        {
+            "attempt_id": ["001/01"] * 3,
+            "phase": ["countdown", "action", "recovery"],
+            "phase_start_monotonic_ns": [0, 1_000_000_000, 2_000_000_000],
+            "phase_end_monotonic_ns": [1_000_000_000, 2_000_000_000, 3_000_000_000],
+        }
+    )
+    serial = load_phase_motion_samples(session, ["001/01"], ["rx-1"], intervals)
+    parallel = load_phase_motion_samples(
+        session, ["001/01", "001/01"], ["rx-1", "rx-2"], intervals, workers=2
+    )
+    assert serial.recordings.iloc[0]["read_error"] == ""
+    assert len(serial.samples) == 300
+    assert serial.samples["phase"].value_counts().to_dict() == dict.fromkeys(
+        ("countdown", "action", "recovery"), 100
+    )
+    # A constant-phase channel has zero circular change wherever a lag exists.
+    assert serial.samples["calibrated_score"].dropna().abs().max() < 1e-9
+    assert parallel.recordings["read_error"].iloc[0] == ""
+    assert "rx-2" in parallel.recordings["read_error"].iloc[1]
+    pd.testing.assert_frame_equal(
+        serial.samples,
+        parallel.samples.loc[parallel.samples.receiver_id.eq("rx-1")].reset_index(
+            drop=True
+        ),
+    )

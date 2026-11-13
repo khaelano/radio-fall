@@ -2,13 +2,13 @@
 
 from .exporter import ExportCancelled, export_curated_bundle, session_size
 from .models import (
-    AttemptFiles,
     RecordedAttempt,
     RecordedTrial,
     SessionBundle,
     SessionReadError,
     load_session,
     scan_sessions,
+    session_frames_directory,
 )
 from .review import (
     AttemptReview,
@@ -19,7 +19,6 @@ from .review import (
 )
 
 __all__ = [
-    "AttemptFiles",
     "AttemptReview",
     "ExportCancelled",
     "RecordedAttempt",
@@ -33,5 +32,6 @@ __all__ = [
     "export_curated_bundle",
     "load_session",
     "scan_sessions",
+    "session_frames_directory",
     "session_size",
 ]

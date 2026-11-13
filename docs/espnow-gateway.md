@@ -2,8 +2,8 @@
 
 The default [UART transmitter relay](uart-transmitter-relay.md) adds a dedicated
 C6 between the sensing C5 and this USB gateway. Its encrypted ESP-NOW reference
-preserves the receiver upload protocol and the C5 sensing channel. Select
-`--transmitter-link usb` for USB reference recovery.
+preserves the receiver upload protocol and the C5 sensing channel. The USB
+reference link was retired with the Python acquisition path.
 
 The live transport on `codex/espnow-gateway` uses an ESP32-C5 transmitter and
 C5 receivers for 5 GHz HE20 sensing. Each receiver temporarily switches to
@@ -316,8 +316,15 @@ single-receiver probe alone does not establish that ceiling.
 uv sync --extra radio
 uv run csi-viewer
 uv run fall-collection
-uv run csi-gateway-benchmark
 ```
+
+Live acquisition now runs in the Rust transport session. The Python
+`csi-gateway-benchmark` command and its `qualification.json` evaluator were
+retired with the Python acquisition path on 12 November 2026; the evaluator
+read Python-format journals and has not been ported to the native journals. The
+`capture_probe` binary in `radio_detection` records bounded native journals
+without scores. The criteria below remain the reference for any re-implemented
+qualification; the historical procedure was:
 
 Start with `--mode probe --warmup 5 --seconds 30` and a verified one-receiver
 inventory to measure switching and byte integrity. Verify recovery within the

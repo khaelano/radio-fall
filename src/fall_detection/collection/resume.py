@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..storage.compressed import read_text
+from .._radio_native import storage_read_file
 from ..contracts import ARTIFACT_SCHEMA_VERSION
 from .capture import SessionMetadata
 from .protocol import CollectionProtocol, load_protocol
@@ -54,7 +54,7 @@ def load_session_resume(root: Path) -> SessionResume:
         raise ValueError("saved session has no participant identity")
     numbers: dict[int, int] = {}
     resolved: dict[int, str] = {}
-    for line in read_text(root / "events.jsonl").splitlines():
+    for line in storage_read_file(root / "events.jsonl").decode("utf-8").splitlines():
         e = json.loads(line)
         if e.get("kind") not in {"attempt_started", "trial_resolved"}:
             continue

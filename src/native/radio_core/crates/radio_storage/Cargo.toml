@@ -1,0 +1,24 @@
+[package]
+name = "radio-storage"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "Lossless session journals to typed Parquet tables, with verification"
+
+[dependencies]
+arrow-arith = "60.1.0"
+arrow-array = { version = "60.1.0", features = ["ffi"] }
+arrow-buffer = "60.1.0"
+arrow-ord = "60.1.0"
+arrow-schema = "60.1.0"
+arrow-select = "60.1.0"
+memchr = "2.8.3"
+parquet = { version = "60.1.0", default-features = false, features = ["arrow", "zstd"] }
+radio-transport = { path = "../radio_transport" }
+serde_json = "1"
+sha2 = "=0.10.9"
+zip = { version = "9.5.1", default-features = false, features = ["deflate", "zstd"] }
+zstd = "0.14"
+
+[dev-dependencies]
+crc32fast = "1.5.5"

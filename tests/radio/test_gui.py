@@ -23,20 +23,23 @@ def test_gui_uses_constant_sixteen_or_twenty_four_fps():
 
 
 def test_gui_parser_uses_physical_subcarrier_controls():
-    args = _parser().parse_args(["--port", "/dev/ttyUSB1"])
+    args = _parser().parse_args(["--gateway-port", "/dev/ttyACM1"])
 
     assert args.dashboard_subcarriers == 12
     assert args.inspect_subcarrier == 2
 
 
-@pytest.mark.parametrize("transport", ["serial", "espnow", "udp"])
-def test_gui_parser_rejects_legacy_transports(transport):
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--transport", "serial"],
+        ["--port", "/dev/ttyUSB1"],
+        ["--transmitter-link", "usb"],
+    ],
+)
+def test_gui_parser_rejects_retired_acquisition_options(arguments):
     with pytest.raises(SystemExit):
-        _parser().parse_args(["--transport", transport])
-
-
-def test_gui_defaults_to_gateway():
-    assert _parser().parse_args([]).transport == "espnow_gateway"
+        _parser().parse_args(arguments)
 
 
 def test_gui_parser_accepts_gateway_receiver_selection():
@@ -68,4 +71,4 @@ def test_live_state_switches_between_configured_receiver_buffers():
 
 def test_gui_parser_rejects_removed_range_flags():
     with pytest.raises(SystemExit):
-        _parser().parse_args(["--port", "/dev/ttyUSB1", "--start", "0"])
+        _parser().parse_args(["--start", "0"])

@@ -1,34 +1,51 @@
-"""Bounded-memory CSV scans and vectorized CSI quality measurements."""
+"""Per-recording CSI quality measurements computed from the frame tables."""
 
-import json
-from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd
+import pyarrow as pa
+import pyarrow.compute as pc
 
 from ..radio.preprocessing.phase import DEFAULT_PHASE_AMPLITUDE_FLOOR, phase_slot_mask
 from ._timeline import PHASES
+from .session_frames import AnalysisSession
 
-_CSI_COLUMNS = (
-    "id",
-    "mac",
+_COLUMNS = (
+    "sequence",
+    "rx_radio_us",
+    "transmitter_mac",
     "sig_mode",
     "mcs",
     "bandwidth",
-    "local_timestamp",
-    "len",
     "stbc",
-    "first_word",
-    "data",
+    "first_word_invalid",
+    "csi",
+    "capture_time_ns",
 )
-_TIMING_COLUMNS = ("sequence", "rx_radio_timestamp_us", "host_receive_monotonic_ns")
 _MODULUS = 2**32
 _HALF_RANGE = 2**31
 _CHUNK_ROWS = 2048
+_READ_ERRORS = (
+    OSError,
+    ValueError,
+    KeyError,
+    IndexError,
+    RuntimeError,
+    pa.ArrowException,
+)
 
 
-def _phase_counts(frame: pd.DataFrame) -> dict[str, int]:
+def _phase_counts(sensing: pa.Table) -> dict[str, int]:
+    """Count rows by phase-mask support and usable subcarriers.
+
+    Args:
+        sensing: Sensing-link frames with ``csi``, ``stbc`` and
+            ``first_word_invalid`` columns.
+
+    Returns:
+        Totals of supported, unreadable and unsupported rows plus the usable
+        and maximum subcarrier sums of the supported rows.
+    """
     totals = {
         "phase_mask_supported_rows": 0,
         "phase_mask_unreadable_rows": 0,
@@ -36,66 +53,46 @@ def _phase_counts(frame: pd.DataFrame) -> dict[str, int]:
         "phase_usable_subcarriers_sum": 0,
         "phase_max_subcarriers_sum": 0,
     }
-    # Each group shares one immutable physical-slot mask. Only the amplitudes
-    # differ across packets, so evaluate the complete group with NumPy.
-    for key, group in frame.groupby(["len", "stbc", "first_word"], dropna=False):
-        if any(pd.isna(value) or value != int(value) for value in key):
-            totals["phase_mask_unreadable_rows"] += len(group)
-            continue
-        declared, stbc, first_word = map(int, key)
-        if declared < 0 or declared % 2:
-            totals["phase_mask_unreadable_rows"] += len(group)
-            continue
-        decoded = []
-        for payload in group["data"]:
-            try:
-                values = json.loads(payload)
-                if not isinstance(values, list) or len(values) != declared:
-                    raise ValueError("CSI length mismatch")
-                decoded.append(values)
-            except (TypeError, ValueError):
-                totals["phase_mask_unreadable_rows"] += 1
-        if not decoded:
-            continue
-        try:
-            matrix = np.asarray(decoded, dtype=np.float64)
-            if matrix.shape != (len(decoded), declared):
-                raise ValueError("CSI is not a flat numeric vector")
-        except (TypeError, ValueError):
-            valid_rows = []
-            for row in decoded:
-                try:
-                    values = np.asarray(row, dtype=np.float64)
-                    if values.shape != (declared,):
-                        raise ValueError("CSI is not a flat numeric vector")
-                    valid_rows.append(values)
-                except (TypeError, ValueError):
-                    totals["phase_mask_unreadable_rows"] += 1
-            if not valid_rows:
+    for offset in range(0, sensing.num_rows, _CHUNK_ROWS):
+        chunk = sensing.slice(offset, _CHUNK_ROWS)
+        csi = chunk.column("csi").combine_chunks()
+        keys = np.column_stack(
+            (
+                pc.binary_length(csi).to_numpy(zero_copy_only=False),
+                chunk.column("stbc").to_numpy(zero_copy_only=False),
+                chunk.column("first_word_invalid").to_numpy(zero_copy_only=False),
+            )
+        ).astype(np.int64)
+        groups, inverse = np.unique(keys, axis=0, return_inverse=True)
+        inverse = inverse.reshape(-1)
+        # Each group shares one immutable physical-slot mask. Only the
+        # amplitudes differ across packets, so evaluate a group with NumPy.
+        for group, (declared, stbc, first_word) in enumerate(groups):
+            rows = np.flatnonzero(inverse == group)
+            if declared <= 0 or declared % 2:
+                totals["phase_mask_unreadable_rows"] += len(rows)
                 continue
-            matrix = np.stack(valid_rows)
-        mask = phase_slot_mask(
-            sig_mode=4,
-            bandwidth=0,
-            stbc=stbc,
-            pair_count=declared // 2,
-            first_word_invalid=bool(first_word),
-        )
-        if not mask:
-            totals["phase_mask_unsupported_rows"] += len(matrix)
-            continue
-        imaginary, real = matrix[:, 0::2], matrix[:, 1::2]
-        amplitude = np.hypot(real, imaginary)
-        usable = (
-            np.asarray(mask)[None, :]
-            & np.isfinite(real)
-            & np.isfinite(imaginary)
-            & np.isfinite(amplitude)
-            & (amplitude >= DEFAULT_PHASE_AMPLITUDE_FLOOR)
-        )
-        totals["phase_mask_supported_rows"] += len(matrix)
-        totals["phase_usable_subcarriers_sum"] += int(usable.sum())
-        totals["phase_max_subcarriers_sum"] += int(sum(mask) * len(matrix))
+            payload = b"".join(csi.take(pa.array(rows)).to_pylist())
+            matrix = np.frombuffer(payload, dtype=np.int8).reshape(len(rows), declared)
+            mask = phase_slot_mask(
+                sig_mode=4,
+                bandwidth=0,
+                stbc=int(stbc),
+                pair_count=int(declared) // 2,
+                first_word_invalid=bool(first_word),
+            )
+            if not mask:
+                totals["phase_mask_unsupported_rows"] += len(matrix)
+                continue
+            imaginary = matrix[:, 0::2].astype(np.float64)
+            real = matrix[:, 1::2].astype(np.float64)
+            amplitude = np.hypot(real, imaginary)
+            usable = np.asarray(mask)[None, :] & (
+                amplitude >= DEFAULT_PHASE_AMPLITUDE_FLOOR
+            )
+            totals["phase_mask_supported_rows"] += len(matrix)
+            totals["phase_usable_subcarriers_sum"] += int(usable.sum())
+            totals["phase_max_subcarriers_sum"] += int(sum(mask) * len(matrix))
     return totals
 
 
@@ -134,21 +131,47 @@ def _interval_metrics(
     }
 
 
+def _recording_frames(
+    session: AnalysisSession, attempt_key: str, receiver_id: str
+) -> pa.Table | None:
+    """Read the frames of one recording in journal (delivery) order.
+
+    Returns ``None`` when the frame tables hold no window for the attempt.
+    """
+    index = session.attempt_indices.get(attempt_key)
+    if index is None:
+        return None
+    return pa.table(session.frames.attempt_frames(index, receiver_id, list(_COLUMNS)))
+
+
 def scan_receiver(
-    directory: Path, transmitter_mac: str, rate: float, intervals: dict
+    session: AnalysisSession,
+    attempt_key: str,
+    receiver_id: str,
+    rate: float,
+    intervals: dict,
 ) -> dict[str, Any]:
-    """Scan one receiver recording without retaining CSI payloads in the result."""
-    csi_path, timing_path = directory / "csi.csv", directory / "radio_timing.csv"
-    metrics = {
-        "receiver_dir_exists": directory.is_dir(),
-        "csi_file_exists": csi_path.is_file(),
-        "timing_file_exists": timing_path.is_file(),
+    """Measure one receiver recording without retaining CSI payloads.
+
+    Frames are read in journal order, which is delivery order, so sequence
+    ordering metrics describe the transport. Phase packet counts assign sensing
+    frames to phases by capture time, the same clock as the analysis packets.
+
+    Args:
+        session: Analysis session holding the frame tables.
+        attempt_key: Attempt identifier from ``session.attempts``.
+        receiver_id: Receiver identifier such as ``"rx-1"``.
+        rate: Nominal sampling rate in hertz.
+        intervals: Phase name to ``(start_ns, stop_ns)`` host-clock intervals.
+
+    Returns:
+        A JSON-serializable mapping with ``metrics`` and ``phase_counts``.
+        Read failures are reported in ``metrics["read_error"]``.
+    """
+    metrics: dict[str, Any] = {
+        "has_frames": False,
         "raw_csi_rows": 0,
-        "timing_rows": 0,
         "sensing_link_rows": 0,
-        "csi_timing_sequence_mismatches": 0,
-        "csi_timing_timestamp_mismatches": 0,
-        "malformed_sensing_metadata_rows": 0,
         "phase_mask_supported_rows": 0,
         "phase_mask_unreadable_rows": 0,
         "phase_mask_unsupported_rows": 0,
@@ -158,92 +181,41 @@ def scan_receiver(
         "read_error": "",
     }
     phase_counts = dict.fromkeys(PHASES, 0)
-    timing = pd.DataFrame(columns=_TIMING_COLUMNS)
-    errors = []
-    if timing_path.is_file():
-        try:
-            timing = pd.read_csv(
-                timing_path,
-                usecols=list(_TIMING_COLUMNS),
-                dtype={"host_receive_monotonic_ns": "Int64"},
+    sequences = timestamps = np.array([], dtype=np.int64)
+    try:
+        table = _recording_frames(session, attempt_key, receiver_id)
+        rows = 0 if table is None else table.num_rows
+        metrics["raw_csi_rows"] = rows
+        metrics["has_frames"] = rows > 0
+        if table is not None and rows:
+            selected = pc.and_(
+                pc.and_(
+                    pc.equal(table.column("transmitter_mac"), session.transmitter_mac),
+                    pc.equal(table.column("sig_mode"), 4),
+                ),
+                pc.and_(
+                    pc.equal(table.column("mcs"), 0),
+                    pc.equal(table.column("bandwidth"), 0),
+                ),
             )
-            for name in _TIMING_COLUMNS[:2]:
-                timing[name] = pd.to_numeric(timing[name], errors="coerce")
-        except (OSError, ValueError, pd.errors.ParserError) as exc:
-            errors.append(f"radio_timing.csv: {exc}")
-    metrics["timing_rows"] = len(timing)
-    sequences, timestamps = [], []
-    if csi_path.is_file():
-        try:
-            with pd.read_csv(
-                csi_path,
-                usecols=list(_CSI_COLUMNS),
-                chunksize=_CHUNK_ROWS,
-                dtype={"mac": str, "data": str},
-                keep_default_na=False,
-            ) as chunks:
-                for chunk in chunks:
-                    offset = metrics["raw_csi_rows"]
-                    metrics["raw_csi_rows"] += len(chunk)
-                    for name in _CSI_COLUMNS:
-                        if name not in ("mac", "data"):
-                            chunk[name] = pd.to_numeric(chunk[name], errors="coerce")
-                    sensing = (
-                        chunk["mac"].str.strip().str.lower().eq(transmitter_mac)
-                        & chunk["sig_mode"].eq(4)
-                        & chunk["mcs"].eq(0)
-                        & chunk["bandwidth"].eq(0)
-                    ).to_numpy()
-                    filtered = chunk.loc[sensing]
-                    metrics["sensing_link_rows"] += len(filtered)
-                    ids = filtered["id"].to_numpy(dtype=np.float64)
-                    ticks = filtered["local_timestamp"].to_numpy(dtype=np.float64)
-                    valid = np.isfinite(ids) & np.isfinite(ticks)
-                    valid &= (ids == np.floor(ids)) & (ticks == np.floor(ticks))
-                    metrics["malformed_sensing_metadata_rows"] += int((~valid).sum())
-                    sequences.append(ids[valid].astype(np.int64) % _MODULUS)
-                    timestamps.append(ticks[valid].astype(np.int64) % _MODULUS)
-                    for name, value in _phase_counts(filtered).items():
-                        metrics[name] += value
-
-                    paired = timing.iloc[offset : offset + len(chunk)]
-                    count = len(paired)
-                    if count:
-                        id_match = (
-                            chunk["id"].iloc[:count].to_numpy()
-                            == paired["sequence"].to_numpy()
-                        )
-                        tick_match = (
-                            chunk["local_timestamp"].iloc[:count].to_numpy()
-                            == paired["rx_radio_timestamp_us"].to_numpy()
-                        )
-                        metrics["csi_timing_sequence_mismatches"] += int(
-                            (~id_match).sum()
-                        )
-                        metrics["csi_timing_timestamp_mismatches"] += int(
-                            (~tick_match).sum()
-                        )
-                        host = paired["host_receive_monotonic_ns"].to_numpy(
-                            dtype=np.int64, na_value=-1
-                        )
-                        host = host[
-                            sensing[:count] & id_match & tick_match & (host >= 0)
-                        ]
-                        for phase, (start, stop) in intervals.items():
-                            if (
-                                phase in phase_counts
-                                and stop is not None
-                                and stop >= start
-                            ):
-                                phase_counts[phase] += int(
-                                    ((host >= start) & (host < stop)).sum()
-                                )
-        except (OSError, ValueError, pd.errors.ParserError) as exc:
-            errors.append(f"csi.csv: {exc}")
-    seq = np.concatenate(sequences) if sequences else np.array([], dtype=np.int64)
-    ticks = np.concatenate(timestamps) if timestamps else np.array([], dtype=np.int64)
-    metrics.update(_interval_metrics(seq, ticks, rate))
-    metrics["row_count_difference"] = metrics["raw_csi_rows"] - metrics["timing_rows"]
+            sensing = table.filter(selected)
+            metrics["sensing_link_rows"] = sensing.num_rows
+            sequences = (
+                sensing.column("sequence").to_numpy().astype(np.int64) % _MODULUS
+            )
+            timestamps = (
+                sensing.column("rx_radio_us").to_numpy().astype(np.int64) % _MODULUS
+            )
+            metrics.update(_phase_counts(sensing))
+            capture = sensing.column("capture_time_ns").to_numpy()
+            for phase, (start, stop) in intervals.items():
+                if phase in phase_counts and stop is not None and stop >= start:
+                    phase_counts[phase] += int(
+                        ((capture >= start) & (capture < stop)).sum()
+                    )
+    except _READ_ERRORS as exc:
+        metrics["read_error"] = f"frames: {exc}"
+    metrics.update(_interval_metrics(sequences, timestamps, rate))
     metrics["unassigned_phase_rows"] = metrics["sensing_link_rows"] - sum(
         phase_counts.values()
     )
@@ -255,5 +227,4 @@ def scan_receiver(
     metrics["phase_usable_fraction"] = (
         metrics["phase_usable_subcarriers_sum"] / maximum if maximum else None
     )
-    metrics["read_error"] = "; ".join(errors)
     return {"metrics": metrics, "phase_counts": phase_counts}

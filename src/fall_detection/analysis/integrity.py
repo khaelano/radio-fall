@@ -1,12 +1,12 @@
 """Read-only dataset integrity analysis with optional derived-result caching."""
 
-from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 import json
 import multiprocessing
 import os
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from time import perf_counter
@@ -15,9 +15,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from ..collection.protocol import load_protocol
+from .._radio_native import storage_read as read_session_file
+from ..collection.protocol import protocol_from_mapping
 from ..radio.preprocessing import phase as phase_module
-from . import _receiver, _timeline
+from . import _frame_cache, _receiver, _timeline, session_frames
+from .session_frames import AnalysisSession, load_analysis_session
 
 
 @dataclass(frozen=True)
@@ -26,8 +28,9 @@ class SessionIntegrity:
 
     ``receivers`` contains pooled receiver totals. ``receiver_attempts`` and
     ``phase_attempts`` retain attempt-level detail for investigation. Sequence
-    loss covers only gaps between received packets within each attempt. Phase
-    packet counts use host receipt times and include transport latency.
+    loss covers only gaps between received packets within each attempt, in
+    delivery (journal) order. Phase packet counts assign sensing frames to
+    phases by capture time on the host clock, the clock of the analysis packets.
     """
 
     session_dir: Path
@@ -51,27 +54,21 @@ class SessionIntegrity:
 
     @property
     def receiver_issues(self) -> pd.DataFrame:
-        """Return missing, empty, malformed, misaligned, or reset recordings."""
+        """Return empty, unreadable, unsupported, or reset recordings."""
         frame = self.receiver_attempts
         if frame.empty:
             return frame
         bad = (
-            ~frame["receiver_dir_exists"]
-            | ~frame["csi_file_exists"]
-            | ~frame["timing_file_exists"]
+            ~frame["has_frames"]
             | frame["sensing_link_rows"].eq(0)
-            | frame["row_count_difference"].ne(0)
             | frame["read_error"].ne("")
         )
         for name in (
-            "csi_timing_sequence_mismatches",
-            "csi_timing_timestamp_mismatches",
             "timestamp_resets",
             "sequence_out_of_order",
             "sequence_duplicates",
             "phase_mask_unreadable_rows",
             "phase_mask_unsupported_rows",
-            "malformed_sensing_metadata_rows",
         ):
             bad |= frame[name].ne(0)
         return frame.loc[bad]
@@ -136,6 +133,7 @@ class SessionIntegrity:
 
 def analyze_latest_session(
     sessions_dir: str | Path,
+    frames_root: str | Path,
     *,
     cache_dir: str | Path | None = None,
     refresh: bool = False,
@@ -145,6 +143,8 @@ def analyze_latest_session(
 
     Args:
         sessions_dir: Directory containing schema-2 session bundles.
+        frames_root: Directory outside raw data that receives (or already holds)
+            the converted frame tables, one subdirectory per session.
         cache_dir: Optional directory for derived JSON summaries, outside raw data.
         refresh: Recompute summaries even if unchanged source files are cached.
         workers: Number of processes for uncached receiver recordings.
@@ -163,21 +163,22 @@ def analyze_latest_session(
     def start_time(path: Path) -> tuple[datetime, str]:
         value = _read_json(path).get("started_at_utc")
         if value:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value)
         else:
             parsed = datetime.strptime(path.parent.name, "%Y%m%dT%H%M%S%fZ")
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc), path.parent.name
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC), path.parent.name
 
     latest = max(manifests, key=start_time).parent
+    session = load_analysis_session(latest, Path(frames_root) / latest.name)
     return analyze_session(
-        latest, cache_dir=cache_dir, refresh=refresh, workers=workers
+        session, cache_dir=cache_dir, refresh=refresh, workers=workers
     )
 
 
 def analyze_session(
-    session_dir: str | Path,
+    session: AnalysisSession,
     *,
     cache_dir: str | Path | None = None,
     refresh: bool = False,
@@ -185,13 +186,13 @@ def analyze_session(
 ) -> SessionIntegrity:
     """Measure collection integrity without modifying the session bundle.
 
-    CSI is processed in bounded batches. Optional caches retain only receiver
-    summaries and phase counts, never raw CSI. Cache entries depend on source
-    paths, size/mtime/ctime, analysis code, radio settings, and phase intervals.
-    Active sessions bypass caching. Set ``refresh=True`` to force a full scan.
+    Frames are read one recording at a time. Optional caches retain only
+    receiver summaries and phase counts, never raw CSI. Cache entries depend on
+    the frame table files, analysis code, radio settings, and phase intervals.
+    Set ``refresh=True`` to force a full scan.
 
     Args:
-        session_dir: One schema-2 session directory.
+        session: Closed analysis session (see ``load_analysis_session``).
         cache_dir: Optional derived-artifact directory outside raw data; ``None``
             disables caching.
         refresh: Ignore existing cache entries and rebuild them.
@@ -202,119 +203,86 @@ def analyze_session(
         Session, attempt, receiver, and reconstructed-phase integrity tables.
 
     Raises:
-        ValueError: Schema/radio metadata is invalid or cache location is in raw data.
-        OSError: Required manifests cannot be read or a cache cannot be written.
+        ValueError: Radio metadata is invalid or the cache location is in raw data.
+        OSError: A cache cannot be written.
+        RuntimeError: Session manifests or events cannot be read.
     """
     started = perf_counter()
     if not isinstance(workers, int) or isinstance(workers, bool) or workers < 1:
         raise ValueError("workers must be a positive integer")
-    root = Path(session_dir).resolve()
-    manifest = _read_json(root / "session.json")
-    if manifest.get("artifact_schema_version") != 2:
-        raise ValueError(f"Only schema-2 sessions are supported: {root}")
+    source = Path(str(session.manifest["source_directory"]))
+    manifest = session.manifest["source_manifest"]
     cache = Path(cache_dir).resolve() if cache_dir is not None else None
-    raw_root = (
-        root.parent.parent
-        if root.parent.name == "sessions" and root.parent.parent.name == "raw"
-        else root
+    if cache is not None and cache.is_relative_to(_frame_cache.raw_root_of(session)):
+        raise ValueError("Place integrity caches outside raw data")
+    protocol = protocol_from_mapping(
+        json.loads(read_session_file(source, "protocol.json"))
     )
-    if cache is not None and cache.is_relative_to(raw_root):
-        raise ValueError("Place integrity caches outside raw session data")
-    protocol = load_protocol(root / "protocol.json")
     trials = {trial.ordinal: trial for trial in protocol.trials}
     environment = manifest.get("environment", {})
-    transmitter = (
-        environment.get("radio_inventory", {})
-        .get("transmitter", {})
-        .get("mac", "")
-        .strip()
-        .lower()
-    )
+    transmitter = session.transmitter_mac.strip().lower()
     if not transmitter:
         raise ValueError("Session radio inventory must specify a transmitter MAC")
-    rate = environment.get("nominal_rate_hz") or environment.get(
-        "radio_profile", {}
-    ).get("nominal_rate_hz")
-    if rate is None or not np.isfinite(float(rate)) or float(rate) <= 0:
+    rate = session.nominal_rate_hz
+    if not np.isfinite(rate) or rate <= 0:
         raise ValueError("Session must specify a positive nominal sampling rate")
-    rate = float(rate)
     events = [
         json.loads(line)
-        for line in (root / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in read_session_file(source, "events.jsonl")
+        .decode("utf-8")
+        .splitlines()
         if line.strip()
     ]
-    review = (
-        _read_json(root / "session_review.json")
-        if (root / "session_review.json").exists()
-        else {}
-    )
-    if review and (
-        review.get("session_id") != manifest.get("session_id")
-        or review.get("protocol_hash") != manifest.get("protocol_hash")
-    ):
-        raise ValueError("Review sidecar does not match the session identity/protocol")
     records = []
-    for path in sorted(root.glob("trials/*/attempt_*/attempt.json")):
-        attempt = _read_json(path)
-        ordinal = int(attempt["trial_ordinal"])
-        number = int(path.parent.name.removeprefix("attempt_"))
-        override = review.get("attempts", {}).get(
-            path.parent.relative_to(root).as_posix(), {}
+    for row in session.attempts.itertuples(index=False):
+        attempt = json.loads(
+            read_session_file(source, f"{row.attempt_key}/attempt.json")
         )
         records.append(
             {
-                "key": (ordinal, number),
-                "attempt_id": f"{ordinal:03d}/{number:02d}",
-                "trial_ordinal": ordinal,
-                "attempt_number": number,
+                "key": (int(row.trial_ordinal), int(row.attempt)),
+                "attempt_key": row.attempt_key,
+                "attempt_id": row.attempt_id,
+                "trial_ordinal": int(row.trial_ordinal),
+                "attempt_number": int(row.attempt),
                 "activity_label": attempt.get("reference_truth_label")
-                or override.get("activity_label")
-                or attempt.get("activity_label"),
-                "planned_activity_label": attempt.get("activity_label"),
-                "status": attempt.get("status", "unknown"),
-                "directory": path.parent,
+                or row.activity_label,
+                "planned_activity_label": row.original_activity_label,
+                "status": row.status,
+                "receiver_ids": list(row.receiver_ids),
                 "manifest": attempt,
             }
         )
     expected = set(environment.get("receiver_bindings", {})) or set(
         environment.get("receiver_ids", {}).values()
     )
-    actual = {
-        path.name
-        for record in records
-        for path in (record["directory"] / "receivers").glob("*")
-        if path.is_dir()
-    }
+    actual = {name for record in records for name in record["receiver_ids"]}
     receiver_ids = sorted(expected | actual)
     phases, phase_attempts, intervals = _timeline.reconstruct_phases(
         records, events, trials
     )
-    code_hash = hashlib.sha256(
-        b"".join(
-            Path(module.__file__).read_bytes()
-            for module in (phase_module, _receiver, _timeline)
-        )
-        + Path(__file__).read_bytes()
-    ).hexdigest()
-    active = manifest.get("status") == "open" or any(
-        record["status"] == "recording" for record in records
+    code_hash = _frame_cache.code_hash(
+        (phase_module, _receiver, _timeline, session_frames), __file__
     )
-    jobs = [
-        (record, receiver_id, record["directory"] / "receivers" / receiver_id)
-        for record in records
-        for receiver_id in receiver_ids
-    ]
+    signature = _frame_cache.frame_signature(session)
+    jobs = [(record, receiver_id) for record in records for receiver_id in receiver_ids]
     requests = [
-        (directory, transmitter, rate, intervals[record["key"]])
-        for record, _, directory in jobs
+        (
+            session,
+            record["attempt_key"],
+            receiver_id,
+            rate,
+            intervals[record["key"]],
+        )
+        for record, receiver_id in jobs
     ]
     entries = [
-        _cache_entry(*request, cache if not active else None, code_hash)
+        _cache_entry(request, transmitter, cache, code_hash, signature)
         for request in requests
     ]
     results = [
         _load_cached(path, fingerprint) if not refresh else None
-        for _, fingerprint, path in entries
+        for fingerprint, path in entries
     ]
     pending = [index for index, result in enumerate(results) if result is None]
     hits = len(results) - len(pending)
@@ -333,11 +301,12 @@ def analyze_session(
         for index in pending:
             results[index] = _receiver.scan_receiver(*requests[index])
     for index in pending:
-        source, fingerprint, path = entries[index]
-        if path is not None and source == _source_signature(jobs[index][2]):
+        fingerprint, path = entries[index]
+        # Only store results if the tables did not change while scanning.
+        if path is not None and signature == _frame_cache.frame_signature(session):
             _store_cached(path, fingerprint, results[index])
     receiver_rows, packet_rows = [], []
-    for (record, receiver_id, _), result in zip(jobs, results):
+    for (record, receiver_id), result in zip(jobs, results):
         identity = {
             name: record[name]
             for name in (
@@ -360,7 +329,7 @@ def analyze_session(
     overview = pd.DataFrame(
         [
             {
-                "session_id": manifest.get("session_id", root.name),
+                "session_id": manifest.get("session_id", source.name),
                 "started_at_utc": manifest.get("started_at_utc"),
                 "session_status": manifest.get("status"),
                 "planned_trials": len(trials),
@@ -378,9 +347,15 @@ def analyze_session(
     attempts = pd.DataFrame(
         [
             {
-                key: value
-                for key, value in record.items()
-                if key not in ("key", "directory", "manifest")
+                key: record[key]
+                for key in (
+                    "attempt_id",
+                    "trial_ordinal",
+                    "attempt_number",
+                    "activity_label",
+                    "planned_activity_label",
+                    "status",
+                )
             }
             for record in records
         ],
@@ -404,7 +379,7 @@ def analyze_session(
         ]
     )
     return SessionIntegrity(
-        root,
+        source,
         overview,
         attempts,
         coverage,
@@ -419,32 +394,21 @@ def analyze_session(
 def _read_json(path: Path) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
-        raise ValueError(f"Expected a JSON object: {path}")
+        raise TypeError(f"Expected a JSON object: {path}")
     return value
 
 
-def _source_signature(directory: Path) -> list:
-    values = [directory.is_dir()]
-    for name in ("csi.csv", "radio_timing.csv"):
-        path = directory / name
-        if path.is_file():
-            stat = path.stat()
-            values.append([name, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns])
-        else:
-            values.append([name, None])
-    return values
-
-
-def _cache_entry(directory, transmitter, rate, intervals, cache, code_hash):
-    source = _source_signature(directory)
+def _cache_entry(request, transmitter, cache, code_hash, signature):
+    session, attempt_key, receiver_id, rate, intervals = request
     fingerprint = hashlib.sha256(
         json.dumps(
-            [code_hash, source, transmitter, rate, intervals], sort_keys=True
+            [code_hash, signature, transmitter, rate, intervals], sort_keys=True
         ).encode()
     ).hexdigest()
-    name = hashlib.sha256(str(directory).encode()).hexdigest()
-    path = cache / f"{name}.json" if cache is not None else None
-    return source, fingerprint, path
+    name = hashlib.sha256(
+        f"{session.path}/{attempt_key}/{receiver_id}".encode()
+    ).hexdigest()
+    return fingerprint, cache / f"{name}.json" if cache is not None else None
 
 
 def _load_cached(path, fingerprint):
@@ -498,14 +462,7 @@ def _receiver_summary(frame: pd.DataFrame) -> pd.DataFrame:
         rows.append(
             {
                 "receiver_id": receiver_id,
-                "attempt_receiver_dirs_missing": int(
-                    (~group["receiver_dir_exists"]).sum()
-                ),
-                "csi_files_missing": int((~group["csi_file_exists"]).sum()),
-                "timing_files_missing": int((~group["timing_file_exists"]).sum()),
-                "empty_csi_attempts": int(
-                    (group["csi_file_exists"] & group["raw_csi_rows"].eq(0)).sum()
-                ),
+                "attempts_without_frames": int((~group["has_frames"]).sum()),
                 "raw_csi_rows": int(group["raw_csi_rows"].sum()),
                 "sensing_link_csi_rows": sensing,
                 "sequence_gap_missing_frames": missing,
@@ -538,15 +495,6 @@ def _receiver_summary(frame: pd.DataFrame) -> pd.DataFrame:
                 "usable_phase_subcarrier_fraction": usable / maximum
                 if maximum
                 else np.nan,
-                "csi_timing_sequence_mismatches": int(
-                    group["csi_timing_sequence_mismatches"].sum()
-                ),
-                "csi_timing_timestamp_mismatches": int(
-                    group["csi_timing_timestamp_mismatches"].sum()
-                ),
-                "attempts_with_csi_timing_row_count_difference": int(
-                    group["row_count_difference"].ne(0).sum()
-                ),
                 "unassigned_phase_rows": int(group["unassigned_phase_rows"].sum()),
                 "recordings_with_read_errors": int(group["read_error"].ne("").sum()),
             }

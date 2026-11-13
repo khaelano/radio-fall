@@ -1,9 +1,9 @@
 """Bounded, columnar amplitude preprocessing from Parquet to atomic NPZ files."""
 
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from time import perf_counter
@@ -11,9 +11,9 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import numpy as np
 import polars as pl
-import pyarrow.parquet as pq
 
 from .amplitude import hampel_subcarriers
+from .session_frames import AnalysisSession, load_analysis_session
 
 COLUMNS = [
     "attempt_key",
@@ -38,70 +38,48 @@ COLUMNS = [
 
 @dataclass(frozen=True)
 class AmplitudeSession:
-    """Validated shared export with Polars selection tables."""
+    """Validated session tables with Polars selection tables.
+
+    Attributes:
+        path: Directory of the converted frame tables.
+        manifest: Source identity; ``source_fingerprint`` joins raw data, review
+            decisions, and analysis semantics to derived exports.
+        attempts: One row per attempt.
+        analysis: The pandas-based analysis session that serves packets.
+    """
 
     path: Path
     manifest: dict
     attempts: pl.DataFrame
+    analysis: AnalysisSession | None = None
 
 
 def load_amplitude_session(
-    raw_dir: str | Path,
-    parquet_dir: str | Path,
+    source: str | Path,
+    frames_dir: str | Path,
     *,
+    annotations_dir: str | Path | None = None,
     progress=print,
 ) -> AmplitudeSession:
-    """Validate/reuse the shared export and load the preprocessing table in Polars."""
-    from .session_parquet import (
-        SCHEMA_VERSION,
-        _source_fingerprint,
-        load_parquet_session,
-    )
-    from ..session_inspector.models import load_session
+    """Open a session for preprocessing, converting its journals when needed.
 
-    raw_dir, parquet_dir = Path(raw_dir), Path(parquet_dir).resolve()
-    if raw_dir.is_file():
-        manifest = load_parquet_session(
-            raw_dir, parquet_dir, progress=progress
-        ).manifest
-        return AmplitudeSession(
-            parquet_dir, manifest, pl.read_parquet(parquet_dir / "attempts.parquet")
-        )
-    raw_session = load_session(raw_dir)
-    raw_root = (
-        raw_session.path.parent.parent
-        if raw_session.path.parent.name == "sessions"
-        else raw_session.path
+    Args:
+        source: Raw session archive or directory containing journals.
+        frames_dir: Derived directory for the typed frame tables, outside raw data.
+        annotations_dir: Directory of reviews; see ``load_analysis_session``.
+        progress: Optional status callback.
+
+    Returns:
+        The session with its attempt table loaded in Polars.
+    """
+    analysis = load_analysis_session(
+        source, frames_dir, annotations_dir=annotations_dir, progress=progress
     )
-    if parquet_dir.is_relative_to(raw_root):
-        raise ValueError("Place Parquet exports outside raw session data")
-    if raw_session.active:
-        raise ValueError("Parquet export requires a closed session")
-    try:
-        manifest = json.loads((parquet_dir / "session.json").read_text())
-    except (OSError, ValueError):
-        manifest = {}
-    if not (
-        manifest.get("schema_version") == SCHEMA_VERSION
-        and manifest.get("source_fingerprint") == _source_fingerprint(raw_session)
-        and all(
-            (parquet_dir / name).is_file()
-            for name in (
-                "attempts.parquet",
-                "phases.parquet",
-                "packets.parquet",
-            )
-        )
-    ):
-        # Keep the shared raw CSV exporter as the only cache writer. Existing
-        # valid exports take the Polars path without materializing pandas tables.
-        manifest = load_parquet_session(
-            raw_dir, parquet_dir, progress=progress
-        ).manifest
     return AmplitudeSession(
-        parquet_dir,
-        manifest,
-        pl.read_parquet(parquet_dir / "attempts.parquet"),
+        analysis.path,
+        analysis.manifest,
+        pl.from_pandas(analysis.attempts, nan_to_null=True),
+        analysis,
     )
 
 
@@ -127,47 +105,28 @@ class AmplitudeRecording:
 
 
 class AmplitudePacketReader:
-    """Reuse Parquet metadata and read only candidate row groups and columns."""
+    """Read one attempt/receiver recording at a time from converted frames."""
 
-    def __init__(self, path: str | Path, *, columns: list[str] | None = None):
+    def __init__(
+        self,
+        session: AmplitudeSession | AnalysisSession,
+        *,
+        columns: list[str] | None = None,
+    ):
+        # Accept an AmplitudeSession or anything exposing ``packets``.
+        analysis = getattr(session, "analysis", session)
+        if analysis is None or not hasattr(analysis, "packets"):
+            raise ValueError("Session has no analysis tables to read packets from")
         self.columns = COLUMNS if columns is None else columns
-        self.path = Path(path)
-        self.file = pq.ParquetFile(self.path)
-        names = self.file.schema.names
-        self.groups = {}
-        self.unknown = []
-        for index in range(self.file.num_row_groups):
-            group = self.file.metadata.row_group(index)
-            key = []
-            for name in ("attempt_key", "receiver_id"):
-                stats = group.column(names.index(name)).statistics
-                if (
-                    stats is None
-                    or not stats.has_min_max
-                    or stats.min != stats.max
-                    or stats.null_count
-                ):
-                    break
-                key.append(stats.min)
-            if len(key) == 2:
-                self.groups.setdefault(tuple(key), []).append(index)
-            else:
-                self.unknown.append(index)
+        self.session = analysis
 
     def read(self, attempt_key: str, receiver_id: str) -> pl.DataFrame:
-        """Read one recording, also supporting mixed/unknown row-group statistics."""
-        groups = sorted(self.groups.get((attempt_key, receiver_id), []) + self.unknown)
-        table = self.file.read_row_groups(
-            groups, columns=self.columns, use_threads=False
-        )
-        return pl.from_arrow(table).filter(
-            (pl.col("attempt_key") == attempt_key)
-            & (pl.col("receiver_id") == receiver_id)
-        )
+        """Read one recording with the requested columns, sorted by capture time."""
+        table = self.session.packets(attempt_key, receiver_id, self.columns)
+        return pl.from_arrow(table)
 
     def close(self) -> None:
-        """Close the reusable Parquet file."""
-        self.file.close()
+        """Release resources; the frame tables are opened per read."""
 
 
 def prepare_recording(
@@ -176,7 +135,7 @@ def prepare_recording(
     """Decode, physically align, mask and normalize a recording in Rust.
 
     Args:
-        packets: Polars rows from the enriched session Parquet contract.
+        packets: Polars rows of one recording from the analysis packet contract.
         magnitude_only: Skip normalization; normalized is None and extrema empty.
 
     Returns:
@@ -296,7 +255,7 @@ def preprocess_dataset(
     """Stream projected Polars recordings through Rust and overlap one NPZ save.
 
     Args:
-        session: Validated ParquetSession; raw recordings are only read.
+        session: Validated amplitude session; raw recordings are only read.
         recordings: Selected attempt rows with scalar receiver_ids, in output order.
         output_dir: Derived output directory, outside the raw session.
         window_seconds: Centered Hampel duration.
@@ -315,7 +274,7 @@ def preprocess_dataset(
         raise ValueError("Preprocessing outputs must be outside raw data")
     if not 0 <= compression_level <= 9:
         raise ValueError("compression_level must be between 0 and 9")
-    reader = AmplitudePacketReader(session.path / "packets.parquet")
+    reader = AmplitudePacketReader(session)
     summary = []
     pending = None
     # A single bounded writer overlaps compression with the next read/native
@@ -362,20 +321,23 @@ def preprocess_dataset(
                     "hampel_min_periods": min_periods,
                     "hampel_threshold_scaled_mad": threshold,
                 }
-                arrays = dict(
-                    amplitude=filtered.astype(np.float32),
-                    valid=valid,
-                    hampel_replaced=replaced,
-                    time_seconds=recording.time_seconds,
-                    capture_time_ns=metadata["capture_time_ns"]
+                arrays = {
+                    "amplitude": filtered.astype(np.float32),
+                    "valid": valid,
+                    "hampel_replaced": replaced,
+                    "time_seconds": recording.time_seconds,
+                    "capture_time_ns": metadata["capture_time_ns"]
                     .to_numpy()
                     .astype(np.int64),
-                    phase=metadata["phase"].fill_null("unknown").to_numpy().astype(str),
-                    subcarriers=recording.subcarriers,
-                    scale_min=recording.lower,
-                    scale_max=recording.upper,
-                    provenance_json=np.asarray(json.dumps(provenance)),
-                )
+                    "phase": metadata["phase"]
+                    .fill_null("unknown")
+                    .to_numpy()
+                    .astype(str),
+                    "subcarriers": recording.subcarriers,
+                    "scale_min": recording.lower,
+                    "scale_max": recording.upper,
+                    "provenance_json": np.asarray(json.dumps(provenance)),
+                }
                 if pending is not None:
                     pending.result()
                 path = output_dir / relative
@@ -383,18 +345,18 @@ def preprocess_dataset(
                     save_recording, path, arrays, compression_level=compression_level
                 )
                 summary.append(
-                    dict(
-                        attempt=metadata["attempt_id"][0],
-                        receiver=receiver,
-                        packets=len(metadata),
-                        subcarriers=245,
-                        valid_values=int(valid.sum()),
-                        hampel_replaced=int(replaced.sum()),
-                        output=str(path),
-                        read_seconds=loaded - started,
-                        prepare_seconds=prepared - loaded,
-                        hampel_seconds=filtered_at - prepared,
-                    )
+                    {
+                        "attempt": metadata["attempt_id"][0],
+                        "receiver": receiver,
+                        "packets": len(metadata),
+                        "subcarriers": 245,
+                        "valid_values": int(valid.sum()),
+                        "hampel_replaced": int(replaced.sum()),
+                        "output": str(path),
+                        "read_seconds": loaded - started,
+                        "prepare_seconds": prepared - loaded,
+                        "hampel_seconds": filtered_at - prepared,
+                    }
                 )
                 if progress and (
                     len(summary) % 20 == 0 or len(summary) == len(recordings)

@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-import hashlib
-import json
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
+from .._radio_native import storage_annotations_for
 from .models import SessionBundle
-
 
 REVIEW_SCHEMA_VERSION = 1
 INCLUSION_VALUES = ("unreviewed", "include", "exclude")
@@ -253,24 +253,44 @@ def _changes(
 
 
 class ReviewStore:
-    """Read and atomically update one session's review sidecar."""
+    """Read and atomically update one session's review sidecar.
 
-    def __init__(self, session: SessionBundle) -> None:
+    Reviews are saved to ``path``. When ``path`` is given and does not exist yet,
+    a ``session_review.json`` inside the session directory is read instead, so
+    reviews made before ``data/annotations`` existed move there on the next save.
+
+    Args:
+        session: The session being reviewed.
+        path: Where to save the review. Defaults to the session directory, or
+            to the annotations directory implied by an archive's location.
+    """
+
+    def __init__(self, session: SessionBundle, path: Path | None = None) -> None:
         self.session = session
-        self.path = session.path / "session_review.json"
+        embedded = session.path / "session_review.json"
+        if path is None and session.path.is_file():
+            # An archive cannot hold edits: use the annotations directory its
+            # location implies (data/annotations beside data/raw/sessions).
+            implied = storage_annotations_for(str(session.path))
+            if implied is not None:
+                path = Path(implied) / session.session_id / "session_review.json"
+        self.path = embedded if path is None else Path(path)
+        self._readable = self.path if self.path.exists() or path is None else embedded
 
     def load(self) -> LoadedReview:
         """Load the current sidecar or return a new empty document."""
 
-        if not self.path.exists():
+        if not self._readable.exists():
             return LoadedReview(ReviewDocument.empty(self.session), None)
         try:
-            raw = self.path.read_bytes()
+            raw = self._readable.read_bytes()
             value = json.loads(raw.decode("utf-8"))
         except OSError as exc:
-            raise ReviewError(f"unable to read {self.path}: {exc}") from exc
+            raise ReviewError(f"unable to read {self._readable}: {exc}") from exc
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ReviewError(f"invalid review sidecar {self.path}: {exc}") from exc
+            raise ReviewError(
+                f"invalid review sidecar {self._readable}: {exc}"
+            ) from exc
         if not isinstance(value, dict):
             raise ReviewError("review sidecar must contain an object")
         return LoadedReview(
@@ -320,6 +340,7 @@ class ReviewStore:
         payload = _serialized(saved.to_mapping())
         temporary = self.path.with_suffix(self.path.suffix + ".tmp")
         try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
             temporary.write_bytes(payload)
             temporary.replace(self.path)
         except OSError as exc:
@@ -328,4 +349,5 @@ class ReviewStore:
             except OSError:
                 pass
             raise ReviewError(f"unable to save {self.path}: {exc}") from exc
+        self._readable = self.path
         return LoadedReview(saved, _token(payload))

@@ -1,15 +1,15 @@
 # Live viewer and collection code
 
 The viewer and collector share radio setup, buffer selection, plotting and
-transport diagnostics. Their entry points compose those modules. Collection
-activities, artifact writing and trial timing remain in the existing collection
-controller and capture modules.
+transport diagnostics. Rust owns the radio session; Python moves accepted
+records to recording sinks and display buffers. Collection activities, artifact
+writing and trial timing remain in the collection controller and capture modules.
 
 | Module | Responsibility |
 | --- | --- |
-| `radio/live.py` | Resolve settings, validate and bind acquisition, share receiver buffers, snapshot session settings, stop acquisition |
-| `radio/acquisition/recovery.py` | Classify recoverable interruptions, verify gateway identity and request a fresh idle relay epoch |
-| `src/native/radio_core/`, `radio/acquisition/native.py` | Native USB drain, ordered parallel decode, SIMD statistics/phase and bounded Python handoff |
+| `radio/live.py` | Resolve settings, start `NativeAcquisition`, deliver accepted records to sinks and receiver buffers, map native health to status, diagnostics and telemetry |
+| `radio_transport::session` (`src/native/radio_core/`) | Gateway preparation and relay recovery, startup, journal-before-ACK acceptance, capture mapping, availability bins, restarts |
+| `radio_transport::quality`, `radio/acquisition/native.py` | Duplicate-capture removal and delivery counters; Python record adapter with lazy array views |
 | `radio/acquisition/recording_io.py` | Native bounded recording worker; periodic batched disk writes |
 | `presentation/radio/live.py` | Compose the dashboard and transport panel; limit diagnostics to four updates per second |
 | `presentation/radio/pacing.py` | Shared display rates and timer intervals |
@@ -28,14 +28,13 @@ outer resource scope closes the camera. Cleanup continues if an earlier cleanup
 raises. Canceling setup also releases an initialized camera. Closing the operator
 console exits collection even while performer guidance is open.
 
-During an interrupted live link, `LiveRadio` retires the failed manager before
-creating a new radio run. It replaces clock estimators and receiver buffers,
-preserving selected receiver identity. Its failure callback invalidates an
-active collection attempt immediately, without depending on a display tick.
-The presenter reconciles current controller health after a paused GUI resumes;
-telemetry reads the current manager rather than a method bound to an ended run.
-See [automatic radio recovery](automatic-radio-recovery.md) for retry policy,
-transport journal links and controlled hardware checks.
+During an interrupted live link, the native session ends the failed run and
+starts a new run with a fresh identity, journal and clock fit. `LiveRadio`
+keeps the receiver buffers and selected receiver. Its interruption callback
+fires once per failed run, so an active collection attempt is invalidated
+without depending on a display tick. Telemetry counters are cumulative across
+runs. See [automatic radio recovery](automatic-radio-recovery.md) for retry
+policy and transport journal links.
 
 The collector's presenter checks current radio/video health every display tick.
 Scheduled upload gaps retain their existing readiness semantics. Unchanged
@@ -51,13 +50,11 @@ when display controls change without new CSI. Receiver, window, phase-mode or
 buffer-content changes invalidate the appropriate cache. Cold LTF preparation is
 spread across ticks (at most 16 records / about 8 ms per tick), so receiver
 switches do not prepare a whole window at once. Old receiver traces are cleared
-while the next window prepares. Optional plotting yields to USB input older than
-25 ms or queues over eight chunks; the separate 200 ms acquisition limit remains.
-See the [live backlog investigation](reports/gateway-preview-backlog-2026-11-03.md).
-The live POSIX path now prepares CSI in Rust and measures the 200 ms deadline
-there, with separate completed-frame wait diagnostics. See the
-[native processing design](rust-radio-pipeline.md) for thread ownership,
-build instructions and timing semantics.
+while the next window prepares. Optional plotting pauses while more than 512
+accepted records await Python delivery; acquisition, journaling and ACKs do not
+wait for Python. See the [live backlog investigation](reports/gateway-preview-backlog-2026-11-03.md)
+for the earlier USB-queue policy and the
+[native processing design](rust-radio-pipeline.md) for thread ownership.
 Buffer receive counts
 identify changes even when sequence IDs repeat or restart. Raw recording,
 calibration, timestamp mapping, missing values and recorded CSI are independent
@@ -71,7 +68,7 @@ relative to the current host monotonic time. The window control selects one to
 ten seconds of history. The receiver selector still selects the phase/amplitude
 stream; the gap tab always compares all receivers.
 
-The heatmap reads the existing acquisition availability grid. Its bin width and
+The heatmap reads the availability grid of the current native run. Its bin width and
 delivery allowance come from `transport.bin_hz` and `transport.delivery_grace_ms`
 in `configs/radio.json`: the current settings use 20 ms bins and a deadline
 900 ms after each bin ends. Colors distinguish:
@@ -87,19 +84,24 @@ scheduled off-channel upload pauses and late delivery; they do not identify a
 physical cause. A record arriving after the deadline does not recolor a red bin,
 matching the immutable causal availability journal.
 
-The grid retains a bounded ten-second count history. The UI copies counts
-without advancing the grid, changing recording or calculating phase. It updates
-only the active gap tab, at most four times per second, and respects the existing
-USB backlog pause. Time advances during receiver silence while preview is
-allowed. Automatic recovery switches to the new run's grid and clears the old
-history. Software tests cover deadlines, late packets, silence, bounded history,
-receiver rows, backlog pauses and recovery; live hardware load remains unmeasured.
+The Rust grid retains a bounded ten-second count history and journals each
+finalized bin to `availability.jsonl`. The UI copies counts without advancing
+the grid, changing recording or calculating phase. It updates only the active
+gap tab, at most four times per second, and respects the preview pause. Time
+advances during receiver silence while preview is allowed. A restarted run
+publishes a new grid. Rust unit tests cover deadlines, late packets and bounded
+history; Python tests cover display classification, backlog pauses and grid
+replacement. Live hardware load remains unmeasured.
 
 ## Verification and performance scope
 
-Tests exercise the shared radio interface with an offline manager, complete Qt
+Tests exercise `LiveRadio` with a scripted native acquisition, complete Qt
 entry points with real offscreen windows, partial startup and shutdown failures,
-receiver selection, cache invalidation and immediate health-loss handling. The
+receiver selection, cache invalidation and immediate health-loss handling.
+`tests/radio/test_native_session.py` runs the real Rust session against a fake
+gateway on a pseudo-terminal: startup, journal-before-ACK, rounds, availability,
+duplicate removal, restart after lost gateway status and fatal identity mismatch.
+These tests do not exercise radio timing, USB behavior or firmware. The
 collector entry point decreased from 1,076 to approximately 200 lines; the
 extracted views retain their existing behavior tests.
 

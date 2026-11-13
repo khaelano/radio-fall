@@ -16,8 +16,8 @@ traffic. This traffic shares gateway airtime with receiver uploads, so throughpu
 and clock uncertainty must still be measured. Receiver firmware, record encoding,
 slot ownership, and return confirmation are unchanged.
 
-The current setup selects this reference in `configs/radio.json`. USB control
-remains available with `--transmitter-link usb`. The older direct-C5 BLE
+The current setup selects this reference in `configs/radio.json`; it is the
+only reference link the native acquisition supports. The older direct-C5 BLE
 experiment remains deferred; see [the BLE reference notes](wireless-transmitter.md).
 
 ## Wiring and firmware
@@ -72,17 +72,18 @@ channel must match the receiver backhaul policy; a conflicting gateway
 configuration is rejected. The transmitter's logical sensing MAC is verified
 through the complete relay after pairing.
 
-Only the gateway requires laptop USB data during operation. The viewer,
-collector and benchmark load the same configuration automatically:
+Only the gateway requires laptop USB data during operation. The viewer and
+collector load the same configuration automatically:
 
 ```sh
 uv run csi-viewer
 uv run fall-collection
-uv run csi-gateway-benchmark
 ```
 
-The benchmark defaults to 30 s warm-up, 300 s measurement and an 80-record/s
-per-receiver target. Use `--config <file>` for another setup. Power the C5 and
+The five-minute qualification below used the retired Python
+`csi-gateway-benchmark` (30 s warm-up, 300 s measurement, 80 records/s per
+receiver); see the [gateway guide](espnow-gateway.md#run-and-qualify). Use
+`--config <file>` for another setup. Power the C5 and
 companion independently after setup. `csi-radio transmitter provision` also
 loads the same sensing profile; it is rejected while sensing runs. See the
 [configuration guide](radio-configuration.md) before changing a channel or roster.

@@ -1,14 +1,11 @@
-"""Small Python adapters for the Rust acquisition/processing backend."""
+"""Small Python adapters for records produced by the Rust radio backend."""
 
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
-from typing import Any, TYPE_CHECKING
-import numpy as np
+from typing import Any
 
-if TYPE_CHECKING:
-    from .gateway_protocol import GatewayBatch
+import numpy as np
 
 try:
     from ... import _radio_native as core
@@ -38,7 +35,7 @@ def backend_info() -> dict[str, Any]:
 class NativeRecord:
     """Immutable native CSI with cheap Python context and lazy array views."""
 
-    __slots__ = ("_native", "_context", "_block", "_views")
+    __slots__ = ("_block", "_context", "_native", "_views")
 
     def __init__(self, record: Any, context: dict[str, Any] | None = None) -> None:
         self._native = record
@@ -102,52 +99,3 @@ class NativeRecord:
     imaginary = property(lambda self: self._view(1))
     amplitudes = property(lambda self: self._view(2))
     phases = property(lambda self: self._view(3))
-
-
-def gateway_batch(
-    native: Any, processed_ns: int | None = None, encoded: bytes | None = None
-) -> GatewayBatch:
-    """Wrap native-validated data without re-decoding or reconstructing CSI."""
-    from .gateway_protocol import GatewayBatch
-    from .wire import DecodedCsiPacket, DecodedCsiDatagram, ReceiverStats
-
-    packet = DecodedCsiPacket(
-        records=tuple(
-            DecodedCsiDatagram(
-                NativeRecord(r, {"native_processed_ns": processed_ns}),
-                r.receiver_mac,
-                r.transport_sequence,
-            )
-            for r in native.records
-        ),
-        boot_id=native.receiver_boot_id,
-        batch_sequence=native.batch_id,
-        receiver_stats=ReceiverStats(*native.receiver_stats),
-    )
-    batch = GatewayBatch(
-        native.run_id,
-        native.transmitter_boot_id,
-        native.receiver_boot_id,
-        native.batch_id,
-        native.receiver_mac,
-        native.payload,
-    )
-    object.__setattr__(batch, "_decoded_packet", packet)
-    object.__setattr__(batch, "_encoded", encoded)
-    return batch
-
-
-class PipelineStats:
-    """Expose native stage and application handoff diagnostics independently."""
-
-    def __init__(self, pipeline: Any) -> None:
-        self.pipeline = pipeline
-        self.capacity_bytes = 256 * 1024
-        self.capacity_chunks = 256
-        self.maximum_age_ns = 200_000_000
-
-    def stats(self) -> dict[str, Any]:
-        return json.loads(self.pipeline.stats_json())
-
-    def close(self) -> None:
-        pass  # Native pipeline shutdown is owned by its acquisition manager.

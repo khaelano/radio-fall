@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from ..storage import create_archive
+from .._radio_native import storage_archive_session
 
 
 def finalize_recording(root: Path) -> Path:
@@ -17,5 +17,5 @@ def finalize_recording(root: Path) -> Path:
     while destination.exists():
         destination = root.parent / f"{root.name}.revision-{revision:03d}.zip"
         revision += 1
-    create_archive(root, destination)
+    storage_archive_session(root, destination)
     return destination

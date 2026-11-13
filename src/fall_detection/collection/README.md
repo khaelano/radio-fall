@@ -45,7 +45,7 @@ receiver tables. Finalization may take several minutes for large sessions;
 wait for `Saved raw recording` before treating it as complete. The working
 directory is retained for recovery and resume. A resumed session saves a new
 numbered archive revision. See the [raw archive contract](../../../docs/session-archive-pilot.md)
-and `fall_detection.storage.Recording` for reading and verified extraction.
+and `fall_detection._radio_native.storage_extract_archive` for verified extraction.
 
 An interrupted radio link reconnects automatically while the collector remains
 open. Sensing resumes with a fresh run and timing reference; an active attempt

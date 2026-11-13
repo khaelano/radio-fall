@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import shutil
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
+from .._radio_native import storage_extract_archive
 from .models import SessionBundle
 from .review import ReviewDocument
 
@@ -22,8 +24,13 @@ CancellationCallback = Callable[[], bool]
 
 
 def session_size(session: SessionBundle) -> int:
-    """Return the total size in bytes of regular files in ``session``."""
+    """Return the total size in bytes of regular files in ``session``.
 
+    For an archived session this is the archive's size on disk.
+    """
+
+    if session.path.is_file():
+        return session.path.stat().st_size
     return sum(
         path.stat().st_size for path in session.path.rglob("*") if path.is_file()
     )
@@ -70,6 +77,19 @@ def export_curated_bundle(
         raise FileNotFoundError(f"export parent does not exist: {target.parent}")
 
     temporary = target.parent / f".{target.name}.partial-{uuid4().hex}"
+    scratch: Path | None = None
+    if source.is_file():
+        # An archived session is verified and unpacked beside the target first;
+        # the archive itself is never modified.
+        scratch = Path(
+            tempfile.mkdtemp(prefix=f".{target.name}.extract-", dir=target.parent)
+        )
+        try:
+            storage_extract_archive(str(source), str(scratch / "session"))
+        except BaseException:
+            shutil.rmtree(scratch, ignore_errors=True)
+            raise
+        source = scratch / "session"
     files = tuple(path for path in source.rglob("*") if path.is_file())
     total = sum(path.stat().st_size for path in files)
     copied = 0
@@ -127,3 +147,6 @@ def export_curated_bundle(
     except BaseException:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
+    finally:
+        if scratch is not None:
+            shutil.rmtree(scratch, ignore_errors=True)

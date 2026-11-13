@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import json
 from bisect import bisect_right
 from dataclasses import dataclass
-import csv
 from fractions import Fraction
-import json
 from pathlib import Path
 from threading import Condition, Thread
 
 from .models import RecordedAttempt
+from .source import SessionSource
 
 
 @dataclass(frozen=True)
@@ -43,10 +45,11 @@ class VideoTimeline:
 
 def load_video_timeline(attempt: RecordedAttempt) -> VideoTimeline:
     """Validate saved video timing without assuming a constant frame rate."""
-    path = attempt.path
-    if not (path / "video.json").is_file():
+    source = SessionSource(attempt.session_path)
+    base = attempt.key
+    if not source.exists(f"{base}/video.json"):
         raise ValueError("No video recorded for this attempt")
-    metadata = json.loads((path / "video.json").read_text())
+    metadata = json.loads(source.read_text(f"{base}/video.json"))
     if attempt.active or metadata.get("status") == "recording":
         raise ValueError("Video is still recording; refresh after finalization")
     if metadata.get("schema_version") != 1:
@@ -65,27 +68,29 @@ def load_video_timeline(attempt: RecordedAttempt) -> VideoTimeline:
     if attempt.metadata.get("started_monotonic_ns", origin) != origin:
         raise ValueError("Video and attempt start clocks differ")
     observations, presentation = [], []
-    with (path / "camera_frames.csv").open(newline="") as stream:
-        for index, row in enumerate(csv.DictReader(stream)):
-            observed = int(row["host_read_completed_monotonic_ns"])
-            pts = int(row["presentation_pts"]) * Fraction(
-                int(row["time_base_num"]), int(row["time_base_den"])
+    if not source.exists(f"{base}/camera_frames.csv"):
+        raise ValueError("Video has no readable frames or media file")
+    timing = io.StringIO(source.read_text(f"{base}/camera_frames.csv"), newline="")
+    for index, row in enumerate(csv.DictReader(timing)):
+        observed = int(row["host_read_completed_monotonic_ns"])
+        pts = int(row["presentation_pts"]) * Fraction(
+            int(row["time_base_num"]), int(row["time_base_den"])
+        )
+        if (
+            int(row["frame_index"]) != index
+            or observed < origin
+            or int(row["host_read_started_monotonic_ns"]) > observed
+            or abs(pts - Fraction(observed - origin, 1_000_000_000))
+            >= Fraction(1, 1_000_000)
+            or (
+                observations
+                and (observed <= observations[-1] or pts <= presentation[-1])
             )
-            if (
-                int(row["frame_index"]) != index
-                or observed < origin
-                or int(row["host_read_started_monotonic_ns"]) > observed
-                or abs(pts - Fraction(observed - origin, 1_000_000_000))
-                >= Fraction(1, 1_000_000)
-                or (
-                    observations
-                    and (observed <= observations[-1] or pts <= presentation[-1])
-                )
-            ):
-                raise ValueError("Invalid or nonmonotonic video frame timing")
-            observations.append(observed)
-            presentation.append(pts)
-    if not observations or not (path / "camera.mp4").is_file():
+        ):
+            raise ValueError("Invalid or nonmonotonic video frame timing")
+        observations.append(observed)
+        presentation.append(pts)
+    if not observations or not source.exists(f"{base}/camera.mp4"):
         raise ValueError("Video has no readable frames or media file")
     if metadata.get("frames") != len(observations):
         raise ValueError("Video frame count differs from timing sidecar")
@@ -95,8 +100,12 @@ def load_video_timeline(attempt: RecordedAttempt) -> VideoTimeline:
     )
     if not isinstance(end, int) or end < observations[-1]:
         raise ValueError("Video end precedes recorded frames")
+    # Only an archived session extracts anything, and only this one clip.
+    cache = (
+        attempt.frames_path.parent.parent / "inspector_media" / attempt.frames_path.name
+    )
     return VideoTimeline(
-        path / "camera.mp4",
+        source.materialize(f"{base}/camera.mp4", cache),
         origin,
         end,
         tuple(observations),

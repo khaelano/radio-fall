@@ -9,10 +9,10 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 pytest.importorskip("pyqtgraph")
+from fake_acquisition import FakeAcquisition
 from PySide6 import QtCore, QtWidgets
 
 from fall_detection.collection.capture import SessionMetadata
-from fall_detection.radio.acquisition.gateway_reader import GatewayReceiverManager
 from fall_detection.radio.live import LiveRadio
 
 
@@ -47,25 +47,22 @@ def test_complete_application_closes_inputs_and_windows(
         )
     managers = []
 
-    class OfflineManager(GatewayReceiverManager):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.stop_calls = 0
+    class OfflineAcquisition(FakeAcquisition):
+        def __init__(self, config_json):
+            super().__init__(config_json)
             managers.append(self)
 
         def start(self):
             if fail_start:
                 raise RuntimeError("partial startup failed")
-
-        def stop(self):
-            self.stop_calls += 1
+            super().start()
 
     monkeypatch.setattr(
         command,
         "LiveRadio",
         lambda args, **kwargs: LiveRadio(
             args,
-            manager_factory=OfflineManager,
+            acquisition_factory=OfflineAcquisition,
             **kwargs,
         ),
     )
@@ -100,7 +97,7 @@ def test_complete_application_closes_inputs_and_windows(
         else:
             assert command.main(["--output-dir", str(tmp_path)]) == 0
             assert closed and not timed_out
-        assert managers[0].stop_calls == 1
+        assert managers[0].stopped == 1
         assert not any(widget.isVisible() for widget in application.topLevelWidgets())
         if application_name == "collector":
             manifests = list(tmp_path.glob("*/session.json"))

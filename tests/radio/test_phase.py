@@ -2,6 +2,7 @@ import warnings
 from math import isclose, isnan
 
 import numpy as np
+import pytest
 
 from fall_detection.radio.preprocessing.phase import (
     HE20_COMPACT_SLOT_INDICES,
@@ -190,6 +191,7 @@ def test_ltf_phase_preparation_avoids_per_tone_numpy_scalar_calls(monkeypatch):
 def test_ltf_vector_views_match_scalar_reference_for_masked_and_nonfinite_samples():
     from cmath import phase
     from math import isfinite
+
     from fall_detection.radio.preprocessing.phase import LtfBlock
 
     csi = (
@@ -231,3 +233,58 @@ def test_empty_ltf_views_remain_empty():
 
     block = LtfBlock("empty", (), (), frozenset())
     assert block.amplitudes == block.raw_phases == block.calibrated_phases == ()
+
+
+@pytest.mark.parametrize(
+    ("sig_mode", "stbc", "pairs"),
+    [(4, 0, 256), (4, 0, 245), (1, 0, 64), (1, 0, 128), (1, 1, 192), (0, 0, 64)],
+)
+@pytest.mark.parametrize("first_word_invalid", [False, True])
+def test_rust_ltf_blocks_match_independent_numpy_reference(
+    sig_mode, stbc, pairs, first_word_invalid
+):
+    import numpy as np
+    import phase_reference
+
+    from fall_detection.radio.preprocessing import phase as rust
+
+    rng = np.random.default_rng(pairs + 7 * sig_mode + stbc)
+    values = rng.integers(-60, 61, pairs) + 1j * rng.integers(-60, 61, pairs)
+    values[rng.random(pairs) < 0.1] = 1 + 1j  # Weak tones below the floor.
+    options = {
+        "sig_mode": sig_mode,
+        "bandwidth": 0,
+        "stbc": stbc,
+        "first_word_invalid": first_word_invalid,
+    }
+    expected = phase_reference.decode_ltf_blocks(values, **options)
+    actual = rust.decode_ltf_blocks(values, **options)
+    assert [b.name for b in actual] == [b.name for b in expected]
+    assert rust.phase_slot_mask(
+        sig_mode=sig_mode,
+        bandwidth=0,
+        stbc=stbc,
+        pair_count=pairs,
+        first_word_invalid=first_word_invalid,
+    ) == phase_reference.phase_slot_mask(
+        sig_mode=sig_mode,
+        bandwidth=0,
+        stbc=stbc,
+        pair_count=pairs,
+        first_word_invalid=first_word_invalid,
+    )
+    for a, b in zip(actual, expected, strict=True):
+        assert a.subcarrier_indices == b.subcarrier_indices
+        assert a.valid_subcarriers == b.valid_subcarriers
+        # libm hypot and NumPy's absolute value may differ by one ulp.
+        np.testing.assert_allclose(a.amplitudes, b.amplitudes, rtol=1e-14, atol=0)
+        np.testing.assert_allclose(
+            a.raw_phases, b.raw_phases, rtol=1e-14, atol=1e-15, equal_nan=True
+        )
+        error = np.angle(
+            np.exp(1j * (np.array(a.calibrated_phases) - b.calibrated_phases))
+        )
+        assert np.array_equal(
+            np.isnan(a.calibrated_phases), np.isnan(b.calibrated_phases)
+        )
+        assert np.nanmax(np.abs(error)) < 1e-10

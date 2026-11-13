@@ -1,0 +1,6 @@
+outs:
+- md5: 1d495d1f5ff77f625f23def979d18d9e.dir
+  size: 3997723
+  nfiles: 6
+  hash: md5
+  path: native-capture-20261112-b

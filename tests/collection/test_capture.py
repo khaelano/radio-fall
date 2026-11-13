@@ -5,11 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from fall_detection.collection.capture import TrialCapture
-from fall_detection.radio.acquisition.clock_sync import (
-    ClockSyncEstimate,
-    ClockSyncSample,
-)
+from fall_detection.collection.capture import CLOCK_SYNC_HEADER, TrialCapture
 from fall_detection.radio.acquisition.protocol import CSI_HEADER, CsiRecord
 
 
@@ -28,18 +24,6 @@ def record(receiver_mac: str = "AA:BB:CC:DD:EE:FF") -> CsiRecord:
     )
 
 
-def clock_estimate() -> ClockSyncEstimate:
-    return ClockSyncEstimate(
-        receiver_boot_id=1,
-        reference_transmitter_us=2_000_000,
-        receiver_minus_transmitter_us=10.0,
-        drift_ppm=2.5,
-        uncertainty_us=15.0,
-        sample_count=3,
-        minimum_round_trip_us=900,
-    )
-
-
 def test_trial_capture_writes_receiver_split_schema_two(tmp_path: Path):
     capture = TrialCapture(
         tmp_path / "attempt_01",
@@ -48,22 +32,6 @@ def test_trial_capture_writes_receiver_split_schema_two(tmp_path: Path):
     )
 
     capture.write_radio(record(), host_receive_monotonic_ns=10)
-    capture.write_clock_sync(
-        ClockSyncSample(
-            sync_id=1,
-            sensing_sequence=7,
-            receiver_boot_id=1,
-            tx_t1_us=1_000,
-            rx_t2_us=2_000,
-            rx_t3_us=2_100,
-            tx_t4_us=1_200,
-            rx_radio_t2_us=2_000,
-            tx_radio_t4_us=1_200,
-            receiver_mac="aa:bb:cc:dd:ee:ff",
-        ),
-        clock_estimate(),
-        host_receive_monotonic_ns=11,
-    )
     metadata = capture.finish("accepted", ended_monotonic_ns=12)
 
     attempt = tmp_path / "attempt_01"
@@ -84,7 +52,7 @@ def test_trial_capture_writes_receiver_split_schema_two(tmp_path: Path):
     assert csi_lines[1].startswith("CSI_DATA,7,1a:00:00:00:00:00")
     assert timing_lines[1].split(",")[0] == "7"
     assert timing_lines[1].split(",")[-1] == "10"
-    assert clock_lines[1].split(",")[0] == "11"
+    assert clock_lines == [CLOCK_SYNC_HEADER]
 
     manifest = json.loads((attempt / "attempt.json").read_text(encoding="utf-8"))
     assert manifest["artifact_schema_version"] == 2

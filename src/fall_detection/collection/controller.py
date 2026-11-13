@@ -509,7 +509,7 @@ class SessionController:
                     self._capture.path, self._capture_start_ns
                 )
                 self._capture.update_status("recording", video=video)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — any video failure invalidates the attempt
                 self._capture.finish(
                     "invalid",
                     ended_monotonic_ns=self._monotonic_ns(),
@@ -760,7 +760,7 @@ class SessionController:
         if self._video is not None:
             try:
                 self._video.end_attempt(capture.path, ended_ns)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — any video failure invalidates the attempt
                 status = "invalid"
                 updates["interruption_reason"] = f"video end failed: {exc}"
         deferred = self._environment.get("transport") in {"ble", "espnow_gateway"}

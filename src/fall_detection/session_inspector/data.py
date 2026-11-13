@@ -8,6 +8,8 @@ inspector are synthesized from those frames, so the table layout is unchanged.
 from __future__ import annotations
 
 import csv
+import threading
+from collections import OrderedDict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from math import atan2, hypot
@@ -16,7 +18,7 @@ from typing import Any
 import numpy as np
 import pyarrow as pa
 
-from .._radio_native import FrameStore
+from .._radio_native import FrameStore, StorageError
 from ..radio.buffer import BufferSnapshot
 from ..radio.preprocessing.phase import (
     DEFAULT_PHASE_AMPLITUDE_FLOOR,
@@ -31,6 +33,9 @@ from ..radio.records import CSI_HEADER, CsiRecord, format_csi_record
 from .models import RecordedAttempt, attempt_indices
 
 CancellationCallback = Callable[[], bool]
+_FRAME_CACHE_SIZE = 4
+_FRAME_CACHE: OrderedDict[tuple[str, str, int, int, str], pa.Table] = OrderedDict()
+_FRAME_CACHE_LOCK = threading.Lock()
 MAX_PLOT_RECORDS = 800
 CAPTURE_TIME_SOURCE = "capture → host clock; seconds from attempt start"
 UNALIGNED_TIME_SOURCE = "receiver elapsed; not aligned to video"
@@ -143,6 +148,8 @@ class AttemptData:
     time_source: str = UNALIGNED_TIME_SOURCE
     attempt: RecordedAttempt | None = None
     """Source attempt; lets a compact UI load rebuild one record on demand."""
+    frames_fingerprint: str | None = None
+    """Source fingerprint of the frame tables this load read; pins row identity."""
 
     @property
     def record_count(self) -> int:
@@ -499,6 +506,7 @@ def load_attempt_data(
         signal_times=times,
         time_source=CAPTURE_TIME_SOURCE if times is not None else UNALIGNED_TIME_SOURCE,
         attempt=attempt,
+        frames_fingerprint=session.source_fingerprint,
     )
     return (
         prepare_attempt_signals(result, cancelled=cancelled)
@@ -538,7 +546,9 @@ def csi_record_for_table_row(
 
     Rows are in frame order, so ``source_row`` indexes the receiver's frames in
     the attempt. Compact UI loads carry no records; the row's frame is then read
-    again from the frame tables.
+    from the frame tables the load used (opened read-only, never converted, and
+    cached per attempt and receiver). ``None`` is returned if those tables have
+    since changed.
     """
 
     if not 0 <= source_row < len(data.csi.rows):
@@ -549,21 +559,55 @@ def csi_record_for_table_row(
         except ValueError:
             return None
         return data.records[record_index]
-    attempt = data.attempt
-    if attempt is None:
-        return None
-    session = FrameStore.ensure(str(attempt.session_path), str(attempt.frames_path))
-    index = attempt_indices(session).get(
-        (attempt.trial_ordinal, attempt.attempt_number)
-    )
-    if index is None:
-        return None
-    frames = pa.table(
-        session.attempt_frames(index, data.receiver_id, columns=_FRAME_COLUMNS)
-    )
-    if source_row >= frames.num_rows:
+    frames = _receiver_frames(data)
+    if frames is None or source_row >= frames.num_rows:
         return None
     return _frame_record(frames.slice(source_row, 1).to_pydict(), 0)
+
+
+def _receiver_frames(data: AttemptData) -> pa.Table | None:
+    """Return the receiver's attempt frames for a compact load, cached.
+
+    The tables are opened read-only and never converted, so this is safe on the
+    GUI thread. The cache key includes the source fingerprint recorded by the
+    load, and a table whose fingerprint differs (re-converted since the load)
+    yields ``None`` rather than rows that no longer match the displayed table.
+    """
+
+    attempt = data.attempt
+    if attempt is None or data.frames_fingerprint is None:
+        return None
+    key = (
+        str(attempt.frames_path),
+        data.frames_fingerprint,
+        attempt.trial_ordinal,
+        attempt.attempt_number,
+        data.receiver_id,
+    )
+    with _FRAME_CACHE_LOCK:
+        cached = _FRAME_CACHE.get(key)
+        if cached is not None:
+            _FRAME_CACHE.move_to_end(key)
+            return cached
+    try:
+        session = FrameStore.open(str(attempt.frames_path))
+        if session.source_fingerprint != data.frames_fingerprint:
+            return None
+        index = attempt_indices(session).get(
+            (attempt.trial_ordinal, attempt.attempt_number)
+        )
+        if index is None:
+            return None
+        frames = pa.table(
+            session.attempt_frames(index, data.receiver_id, columns=_FRAME_COLUMNS)
+        )
+    except StorageError:
+        return None
+    with _FRAME_CACHE_LOCK:
+        _FRAME_CACHE[key] = frames
+        while len(_FRAME_CACHE) > _FRAME_CACHE_SIZE:
+            _FRAME_CACHE.popitem(last=False)
+    return frames
 
 
 def prepare_attempt_signals(

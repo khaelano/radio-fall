@@ -45,7 +45,7 @@ def test_live_acquisition_is_owned_by_rust():
         *(PACKAGE / "presentation").rglob("*.py"),
     ]
     retired = {
-        f"fall_detection.radio.acquisition.{name}"
+        f"fall_detection.radio.{name}"
         for name in (
             "gateway_reader",
             "transmitter_reference",
@@ -59,7 +59,9 @@ def test_live_acquisition_is_owned_by_rust():
     }
     assert not (PACKAGE / "radio" / "acquisition").exists()
     for name in retired:
-        assert not (PACKAGE / Path(*name.split(".")[1:])).with_suffix(".py").exists()
+        module = PACKAGE / Path(*name.split(".")[1:])
+        assert not module.with_suffix(".py").exists(), module
+        assert not module.exists(), module
     violations = []
     for path in live_paths:
         relative = path.relative_to(PACKAGE)
@@ -70,7 +72,8 @@ def test_live_acquisition_is_owned_by_rust():
                 names = [alias.name for alias in node.names]
             elif isinstance(node, ast.ImportFrom):
                 name = "." * node.level + (node.module or "")
-                names = [resolve_name(name, package) if node.level else name]
+                base = resolve_name(name, package) if node.level else name
+                names = [base, *(f"{base}.{alias.name}" for alias in node.names)]
             if any(
                 n == "serial" or n.startswith("serial.") or n in retired for n in names
             ):

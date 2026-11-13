@@ -322,6 +322,8 @@ class SessionArtifactStore:
                     raise ValueError(f"cannot resume with changed {key}")
             if bool(old.get("video")) != bool(environment.get("video")):
                 raise ValueError("resume must retain the session's enabled video mode")
+            if bool(old.get("csv_sidecars", True)) != bool(csv_sidecars):
+                raise ValueError("resume must retain the session's CSV sidecar mode")
             store = cls.__new__(cls)
             store.root, store.protocol, store.metadata = (
                 saved.root,

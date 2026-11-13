@@ -118,6 +118,35 @@ def test_resume_rejects_radio_identity_changes_without_mutating_files(tmp_path):
     assert all(p.read_bytes() == data for p, data in before.items())
 
 
+@pytest.mark.parametrize("saved_sidecars", [True, False])
+def test_resume_rejects_csv_sidecar_mode_change_without_mutating_files(
+    tmp_path, saved_sidecars
+):
+    clock = FakeClock()
+
+    def make(sidecars):
+        source = protocol()
+        return SessionController(
+            protocol_from_mapping(source),
+            tmp_path,
+            clock=clock,
+            monotonic_ns=lambda: int(clock.value * 1e9),
+            session_id_factory=lambda: "session",
+            environment={**ENV, "csv_sidecars": sidecars},
+            csv_sidecars=sidecars,
+        )
+
+    old = make(saved_sidecars)
+    old.start_session(SessionMetadata("p01"))
+    old.dispatch(OperatorCommand.END_SESSION)
+    root = tmp_path / "session"
+    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="CSV sidecar mode"):
+        make(not saved_sidecars).resume_session(root)
+    assert all(p.read_bytes() == data for p, data in before.items())
+    make(saved_sidecars).resume_session(root)
+
+
 def test_resume_invalidates_crash_orphan_without_reopening_its_streams(tmp_path):
     clock = FakeClock()
     old = controller(tmp_path, clock)

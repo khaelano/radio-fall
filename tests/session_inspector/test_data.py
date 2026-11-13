@@ -90,6 +90,53 @@ def test_attempt_data_synthesizes_csv_rows_and_marks_invalid_first_word(
     assert csi_record_for_table_row(compact, 2) is None
 
 
+def test_compact_row_selection_never_reconverts_and_caches_the_window(
+    session_factory, monkeypatch
+):
+    from fall_detection.session_inspector import data as data_module
+
+    root = session_factory(attempts=((1, 1, "accepted"),))
+    compact = load_attempt_data_for_ui(load_session(root).attempts[0], "rx-1")
+    data_module._FRAME_CACHE.clear()
+    calls = {"ensure": 0, "open": 0}
+    real = data_module.FrameStore
+
+    class Spy:
+        @staticmethod
+        def ensure(*args, **kwargs):
+            calls["ensure"] += 1
+            return real.ensure(*args, **kwargs)
+
+        @staticmethod
+        def open(*args, **kwargs):
+            calls["open"] += 1
+            return real.open(*args, **kwargs)
+
+    monkeypatch.setattr(data_module, "FrameStore", Spy)
+
+    first = csi_record_for_table_row(compact, 0)
+    second = csi_record_for_table_row(compact, 1)
+    again = csi_record_for_table_row(compact, 0)
+
+    assert calls == {"ensure": 0, "open": 1}
+    assert first is not None and second is not None and again == first
+    assert first.sequence == 1 and second.sequence == 2
+
+
+def test_compact_row_selection_rejects_changed_frame_tables(session_factory):
+    from dataclasses import replace
+
+    from fall_detection.session_inspector import data as data_module
+
+    root = session_factory(attempts=((1, 1, "accepted"),))
+    compact = load_attempt_data_for_ui(load_session(root).attempts[0], "rx-1")
+    data_module._FRAME_CACHE.clear()
+    stale = replace(compact, frames_fingerprint="not-the-loaded-fingerprint")
+
+    assert csi_record_for_table_row(stale, 0) is None
+    assert csi_record_for_table_row(compact, 0) is not None
+
+
 def test_attempt_data_keeps_delivery_order_and_capture_time_axis(session_factory):
     root = session_factory(attempts=((1, 1, "accepted"),))
     session = load_session(root)

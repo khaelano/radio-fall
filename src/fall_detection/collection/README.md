@@ -44,7 +44,13 @@ per-receiver `csi.csv`, `radio_timing.csv`, `usb_clock_sync.csv` and
 Rust-era hardware session has been verified with
 `tools/processing/check_storage_equivalence.py`; they will then be removed.
 Pass `--no-csv-sidecars` to skip them (the session manifest records
-`environment.csv_sidecars`). The CSI viewer keeps no recording of its own.
+`environment.csv_sidecars`; resuming a session with a different sidecar mode is
+rejected). With sidecars off there are no attempt streams to close, so Accept no
+longer waits for the `drain_ms` window; late frames reach the attempt only
+through the transport journal, which assigns them by capture time during
+conversion. The journal writes and flushes each envelope to the operating system
+before the gateway ACK (no fsync), so a process crash loses no accepted frame.
+The CSI viewer keeps no recording of its own.
 
 On application exit the collector drains and closes acquisition and video,
 then saves a verified `<session-id>.zip` raw recording beside its working

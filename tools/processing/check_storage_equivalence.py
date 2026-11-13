@@ -160,6 +160,19 @@ def _open_bundle(source: Path) -> Any:
     return _DirectoryBundle(source) if source.is_dir() else zipfile.ZipFile(source)
 
 
+def _reject_sidecar_free_session(bundle: Any) -> None:
+    """Fail when the session manifest says CSV sidecars were not written."""
+    name = "original/session.json"
+    if name not in bundle.namelist():
+        return
+    environment = json.loads(bundle.read(name).decode()).get("environment") or {}
+    if environment.get("csv_sidecars") is False:
+        raise ValueError(
+            "session.json records csv_sidecars: false; there are no CSV files "
+            "to compare against, so equivalence is unverified"
+        )
+
+
 def check(
     archive: Path, frames: Path, limit: int | None = None, offset: int = 0
 ) -> dict[str, int]:
@@ -175,12 +188,17 @@ def check(
     Returns:
         Counters named after each comparison; ``mismatches`` is the total of
         failed comparisons.
+
+    Raises:
+        ValueError: If the session recorded ``csv_sidecars: false`` or no CSV
+            rows were compared, because an empty comparison proves nothing.
     """
     table = pq.read_table(frames)
     index, columns = _frame_index(table)
     counts: Counter[str] = Counter()
     seen: set[int] = set()
     with _open_bundle(archive) as bundle:
+        _reject_sidecar_free_session(bundle)
         files = sorted(
             n
             for n in bundle.namelist()
@@ -259,6 +277,12 @@ def check(
                         counts["uncertainty_mismatch"] += 1
                 elif not np.isclose(actual, expected, rtol=1e-6, atol=1e-3):
                     counts["uncertainty_mismatch"] += 1
+    if not counts["rows"] + counts["fallback_rows"]:
+        raise ValueError(
+            "no CSV rows were compared; the session has no CSV sidecars (or "
+            "--limit/--offset selected no receiver files), so equivalence is "
+            "unverified"
+        )
     counts["frames_total"] = table.num_rows
     counts["frames_outside_attempts"] = table.num_rows - len(seen)
     counts["mismatches"] = sum(
@@ -282,7 +306,11 @@ def main(argv: list[str] | None = None) -> int:
         "--offset", type=int, default=0, help="receiver files to skip first"
     )
     args = parser.parse_args(argv)
-    result = check(args.archive, args.frames, args.limit, args.offset)
+    try:
+        result = check(args.archive, args.frames, args.limit, args.offset)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     print(json.dumps(result, indent=2, sort_keys=True))
     return 1 if result["mismatches"] or result.get("row_count_mismatch_files") else 0
 

@@ -22,7 +22,9 @@ writing and trial timing remain in the collection controller and capture modules
 | `collection/controller.py`, `capture.py` | Collection state transitions and immutable recording artifacts |
 
 The viewer writes no CSV: Rust journals every accepted record, and the viewer's
-`--output-dir` only selects where the journal (`transport/gateway/<run>`) goes.
+`--output-dir` only selects where the journal (`transport/gateway/<run>`) goes;
+it defaults to `data/experiments/viewer/`, outside the DVC-tracked `data/raw/`,
+and Git ignores that folder.
 The collector journals into its session directory.
 
 `LiveRadio` binds configured identities without opening hardware. Its `start`

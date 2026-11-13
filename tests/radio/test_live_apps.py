@@ -209,3 +209,13 @@ def test_scenario_file_selection_recovers_from_invalid_json(tmp_path, monkeypatc
     assert len(protocol.trials) == 232
     assert len(warnings) == 1 and "invalid JSON" in warnings[0]
     application.processEvents()
+
+
+def test_viewer_journals_outside_dvc_tracked_raw_data():
+    from pathlib import Path
+
+    from fall_detection.apps.csi_viewer.app import _parser
+
+    output = _parser().parse_args([]).output_dir
+    assert output == Path("data/experiments/viewer")
+    assert not output.is_relative_to("data/raw")

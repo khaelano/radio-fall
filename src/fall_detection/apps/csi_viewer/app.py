@@ -37,10 +37,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("data/raw"),
+        default=Path("data/experiments/viewer"),
         help=(
             "directory receiving the native transport journal "
-            "(transport/gateway/<run>); the viewer writes no other recording"
+            "(transport/gateway/<run>); the viewer writes no other recording. "
+            "The default keeps diagnostic journals out of the DVC-tracked data/raw"
         ),
     )
     add_fps_argument(parser)

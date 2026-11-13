@@ -1,8 +1,8 @@
 """Exercise the actual relay state machine and UART framing on a native compiler."""
 
-from pathlib import Path
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -311,7 +311,7 @@ def test_pairing_verifies_both_usb_identities_before_storing_keys(
 
     import serial
 
-    from fall_detection.radio.acquisition.serial_framing import (
+    from fall_detection.radio.provisioning import (
         decode_serial_frame,
         encode_serial_frame,
     )

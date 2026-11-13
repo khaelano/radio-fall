@@ -1,12 +1,12 @@
 """Recording producers batch I/O without waiting for storage."""
 
-import os
 import ctypes
+import os
 import time
 
 import pytest
 
-from fall_detection.radio.acquisition.recording_io import RecordingIO
+from fall_detection.radio.recording_io import RecordingIO
 
 
 def test_records_stay_in_memory_until_flush_and_preserve_order(tmp_path):

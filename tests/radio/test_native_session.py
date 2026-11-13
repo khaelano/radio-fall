@@ -16,17 +16,17 @@ import zlib
 import pytest
 from envelope_reference import Envelope
 from test_gateway import inventory, profile
-
-from fall_detection import _radio_native as core
-from fall_detection.radio.acquisition.protocol import CsiRecord
-from fall_detection.radio.acquisition.serial_framing import encode_serial_frame
-from fall_detection.radio.acquisition.wire import (
+from transport_config import transport_config
+from wire_encoder import (
     DecodedCsiDatagram,
     ReceiverStats,
     encode_csi_batch,
 )
-from fall_detection.radio.espnow_config import EspnowTransportConfig
+
+from fall_detection import _radio_native as core
 from fall_detection.radio.profile import profile_fingerprint
+from fall_detection.radio.provisioning import encode_serial_frame
+from fall_detection.radio.records import CsiRecord
 
 pytestmark = pytest.mark.skipif(
     not hasattr(core, "NativeAcquisition"), reason="native acquisition is Linux-only"
@@ -255,7 +255,7 @@ def pty_gateway():
 
 
 def acquisition(path, journal_root, **policy):
-    config = EspnowTransportConfig().encode(123, inventory(), profile())
+    config = transport_config().encode(123, inventory(), profile())
     return core.NativeAcquisition(
         json.dumps(
             {

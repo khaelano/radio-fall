@@ -6,13 +6,13 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from transport_config import transport_config
 
-from fall_detection.radio.espnow_config import EspnowTransportConfig
 from fall_detection.radio.profile import RadioInventory, RadioProfile
 
 
 def tuning_policy():
-    return EspnowTransportConfig(
+    return transport_config(
         schema_version=7,
         outstanding_batches=8,
         minimum_revisit_ms=150,
@@ -49,7 +49,7 @@ def identities():
     )
     profile = RadioProfile.from_mapping(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "profile_id": "test",
             "country_code": "ID",
             "band": "5ghz",

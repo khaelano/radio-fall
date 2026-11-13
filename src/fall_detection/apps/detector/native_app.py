@@ -120,7 +120,7 @@ def build_config(args: Any, models: list[str] | None = None) -> dict:
 
 
 def _new_backend(config: dict):
-    from fall_detection.radio.acquisition.native import require_native
+    from fall_detection.radio.native import require_native
 
     native = require_native()
     if not hasattr(native, "NativeDetector"):

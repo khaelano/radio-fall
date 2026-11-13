@@ -7,7 +7,7 @@ from fall_detection.apps.csi_viewer.app import (
     _parser,
     frame_interval_ms,
 )
-from fall_detection.radio.acquisition.buffer import RollingCsiBuffer
+from fall_detection.radio.buffer import RollingCsiBuffer
 from fall_detection.radio.state import LiveState
 
 

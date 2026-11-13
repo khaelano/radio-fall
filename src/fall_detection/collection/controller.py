@@ -12,9 +12,9 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Protocol
 
-from ..radio.acquisition.protocol import CsiRecord
-from ..radio.acquisition.recording_io import RecordingIO
-from ..radio.acquisition.telemetry import (
+from ..radio.recording_io import RecordingIO
+from ..radio.records import AnyCsiRecord
+from ..radio.telemetry import (
     BackhaulTelemetrySnapshot,
     telemetry_delta,
 )
@@ -100,7 +100,7 @@ class CaptureSink(Protocol):
     """Callback seam used by the radio adapter."""
 
     def write_radio(
-        self, record: CsiRecord, host_receive_monotonic_ns: int
+        self, record: AnyCsiRecord, host_receive_monotonic_ns: int
     ) -> None: ...
 
 
@@ -135,6 +135,7 @@ class SessionController:
         manual_confirmation_required: bool = False,
         video_recorder: AttemptVideoRecorder | None = None,
         recording_io: RecordingIO | None = None,
+        csv_sidecars: bool = True,
     ) -> None:
         self.protocol = protocol
         self.output_dir = output_dir
@@ -146,6 +147,7 @@ class SessionController:
         self._manual_confirmation_required = manual_confirmation_required
         self._video = video_recorder
         self._recording_io = recording_io
+        self._csv_sidecars = csv_sidecars
         self._lock = RLock()
         self._subscribers: list[Callable[[SessionSnapshot], None]] = []
         self._store: SessionArtifactStore | None = None
@@ -255,6 +257,7 @@ class SessionController:
                         session_id,
                         self._environment,
                         recording_io=self._recording_io,
+                        csv_sidecars=self._csv_sidecars,
                     )
                     break
                 except FileExistsError:
@@ -295,7 +298,7 @@ class SessionController:
             if self._state is not SessionState.SETUP:
                 raise RuntimeError("session has already started")
             store, saved = SessionArtifactStore.reopen(
-                root, self._environment, self._recording_io
+                root, self._environment, self._recording_io, self._csv_sidecars
             )
             try:
                 if self.protocol.source_hash != saved.protocol.source_hash:
@@ -435,7 +438,7 @@ class SessionController:
             return "clock synchronization is not ready"
         return "unknown readiness failure"
 
-    def write_radio(self, record: CsiRecord, host_receive_monotonic_ns: int) -> None:
+    def write_radio(self, record: AnyCsiRecord, host_receive_monotonic_ns: int) -> None:
         """Receive radio data from an adapter and write it if a trial is active."""
 
         with self._lock:

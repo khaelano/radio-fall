@@ -1,9 +1,10 @@
-from fall_detection.radio.acquisition.buffer import RollingCsiBuffer
-from fall_detection.radio.acquisition.protocol import parse_csi_line
+from csi_line import record_from_csi_line
+
+from fall_detection.radio.buffer import RollingCsiBuffer
 
 
 def record(sequence: int):
-    return parse_csi_line(
+    return record_from_csi_line(
         f'CSI_DATA,{sequence},aa:bb:cc:dd:ee:ff,-40,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,{sequence * 1000},0,36,0,4,0,"[3,4,0,5]"'
     )
 

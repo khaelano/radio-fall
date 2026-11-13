@@ -9,11 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from fall_detection.radio.acquisition.serial_framing import (
+from fall_detection.radio.provisioning import (
     decode_serial_frame,
     encode_serial_frame,
 )
-from fall_detection.radio.acquisition.wireless_reference import WirelessReferenceSerial
+from fall_detection.radio.wireless_control import WirelessReferenceSerial
 
 # Authoritative CGRD transmitter round log, as emitted by firmware.
 ROUND = struct.Struct("!4sQIIQQIII3B")
@@ -33,7 +33,7 @@ def test_wireless_serial_demultiplexes_and_bounds_queue():
     response = port.read(port.in_waiting)
     assert decode_serial_frame(response[1:-1]).payload == b"ok"
     port.feed(b"\x00\x15\x00\x02ok\x17\x00\x04CGST")
-    from fall_detection.radio.acquisition.serial_framing import SerialFrameStreamDecoder
+    from fall_detection.radio.provisioning import SerialFrameStreamDecoder
 
     frames = SerialFrameStreamDecoder().feed(port.read(port.in_waiting))
     assert [(f.type, f.payload) for f in frames] == [(21, b"ok"), (23, b"CGST")]

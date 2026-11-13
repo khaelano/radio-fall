@@ -29,6 +29,19 @@ def test_default_configuration_preserves_provisioned_sensing_contract():
     settings.transport.validate(settings.inventory, settings.profile)
 
 
+def test_transport_values_come_from_the_settings_file_only(tmp_path):
+    from fall_detection.radio.espnow_config import EspnowTransportConfig
+
+    with pytest.raises(TypeError):
+        EspnowTransportConfig()
+    value = json.loads(DEFAULT_CONFIG.read_text())
+    del value["transport"]["slot_ms"]
+    path = tmp_path / "radio.json"
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="missing transport fields: slot_ms"):
+        RadioSettings.load(path)
+
+
 @pytest.mark.parametrize("section", ["inventory", "sensing"])
 def test_operational_configuration_rejects_retired_profile_schema(tmp_path, section):
     value = json.loads(DEFAULT_CONFIG.read_text())
@@ -41,10 +54,10 @@ def test_operational_configuration_rejects_retired_profile_schema(tmp_path, sect
 
 @pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6])
 def test_retired_gateway_policy_versions_are_rejected(version):
-    from fall_detection.radio.espnow_config import EspnowTransportConfig
+    from transport_config import transport_config
 
     with pytest.raises(ValueError, match="policy/PHY"):
-        EspnowTransportConfig(schema_version=version)
+        transport_config(schema_version=version)
 
 
 @pytest.mark.parametrize("parser", [viewer_parser, collection_parser])

@@ -1,4 +1,4 @@
-"""Reference encoder for the binary CSI1/CSIB wire format.
+"""Reference encoder for the binary CSI1/CSIB wire format (test fixtures only).
 
 Host decoding is implemented in Rust (``radio_transport::wire``). This encoder
 builds deterministic fixtures for firmware contract and Rust parity tests.
@@ -10,7 +10,8 @@ import re
 import struct
 from dataclasses import astuple, dataclass
 
-from .protocol import CsiRecord
+from fall_detection.radio.records import CsiRecord
+from fall_detection.radio.telemetry import ReceiverStats
 
 MAGIC = b"CSI1"
 VERSION = 3
@@ -43,22 +44,6 @@ class DecodedCsiDatagram:
     record: CsiRecord
     receiver_mac: str
     transport_sequence: int
-
-
-@dataclass(frozen=True)
-class ReceiverStats:
-    """Cumulative receiver counters carried by a batched packet."""
-
-    accepted_records: int
-    sensing_missing: int
-    sensing_reordered: int
-    sensing_restarts: int
-    queue_drops: int
-    unavailable_ip_drops: int
-    batches_built: int
-    batches_sent: int
-    records_sent: int
-    send_errors: int
 
 
 @dataclass(frozen=True)

@@ -1,4 +1,15 @@
-"""Parsing for the Espressif-compatible ESP32 CSI CSV stream."""
+"""CSI record types and the Espressif-compatible CSV row serialization.
+
+Two classes implement the same read-only record surface:
+
+* ``NativeRecord`` wraps a record accepted by the Rust session. Live code and
+  the collector use it; array views and phase blocks come from Rust lazily.
+* ``CsiRecord`` is a pure-Python value. The session inspector rebuilds it from
+  the typed frame tables and tests construct it directly. Rust records have no
+  Python constructor, so the two cannot be merged without a Rust change.
+
+``AnyCsiRecord`` names either type in annotations.
+"""
 
 from __future__ import annotations
 
@@ -6,11 +17,12 @@ import cmath
 import json
 from dataclasses import dataclass, field
 from math import fsum, isfinite, nan
-import re
-from typing import Iterable, Optional
+from types import SimpleNamespace
+from typing import Any
 
-from ..preprocessing.phase import LtfBlock, decode_ltf_blocks
+import numpy as np
 
+from .preprocessing.phase import LtfBlock, decode_ltf_blocks
 
 CSI_HEADER = (
     "type,id,mac,rssi,rate,sig_mode,mcs,bandwidth,smoothing,not_sounding,"
@@ -29,7 +41,6 @@ class CsiRecord:
     noise_floor: int
     timestamp_us: int
     csi: tuple[complex, ...]
-    raw_line: str = ""
     receiver_mac: str = ""
     transport_sequence: int = 0
     run_id: int | None = None
@@ -62,15 +73,13 @@ class CsiRecord:
     transport: str = ""
     _mean_i: float = field(init=False, repr=False, compare=False)
     _mean_q: float = field(init=False, repr=False, compare=False)
-    _derived_views_cache: Optional[
+    _derived_views_cache: (
         tuple[
-            tuple[float, ...],
-            tuple[float, ...],
-            tuple[float, ...],
-            tuple[float, ...],
+            tuple[float, ...], tuple[float, ...], tuple[float, ...], tuple[float, ...]
         ]
-    ] = field(init=False, default=None, repr=False, compare=False)
-    _ltf_blocks_cache: Optional[tuple[LtfBlock, ...]] = field(
+        | None
+    ) = field(init=False, default=None, repr=False, compare=False)
+    _ltf_blocks_cache: tuple[LtfBlock, ...] | None = field(
         init=False, default=None, repr=False, compare=False
     )
 
@@ -214,121 +223,6 @@ class CsiRecord:
         )
 
 
-def _integer(fields: list[str], index: int, name: str) -> int:
-    try:
-        return int(fields[index])
-    except (IndexError, TypeError, ValueError) as exc:
-        raise ValueError(f"invalid {name}") from exc
-
-
-def parse_csi_line(line: str) -> CsiRecord:
-    """Parse and validate one CSI_DATA line.
-
-    The layout follows Espressif's classic ESP32 CSI output. CSI values are
-    interleaved imaginary, real pairs, so pair [i, r] becomes complex(r, i).
-    """
-
-    text = line.strip()
-    if not text.startswith("CSI_DATA,"):
-        raise ValueError("line is not CSI_DATA")
-
-    # Only the final CSI array contains commas. Splitting the fixed prefix is
-    # substantially cheaper than constructing a CSV parser for every packet.
-    fields = text.split(",", 24)
-    if len(fields) != 25 or fields[0] != "CSI_DATA":
-        raise ValueError(f"expected 25 CSI fields, got {len(fields)}")
-
-    sequence = _integer(fields, 1, "sequence")
-    mac = fields[2].strip().lower()
-    if re.fullmatch(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}", mac) is None:
-        raise ValueError("invalid source MAC")
-
-    rssi = _integer(fields, 3, "RSSI")
-    rate = _integer(fields, 4, "rate")
-    noise_floor = _integer(fields, 14, "noise floor")
-    sig_mode = _integer(fields, 5, "signal mode")
-    mcs = _integer(fields, 6, "MCS")
-    bandwidth = _integer(fields, 7, "bandwidth")
-    smoothing = _integer(fields, 8, "smoothing")
-    not_sounding = _integer(fields, 9, "not sounding")
-    aggregation = _integer(fields, 10, "aggregation")
-    secondary_channel = _integer(fields, 17, "secondary channel")
-    stbc = _integer(fields, 11, "STBC")
-    fec_coding = _integer(fields, 12, "FEC coding")
-    sgi = _integer(fields, 13, "SGI")
-    ampdu_count = _integer(fields, 15, "AMPDU count")
-    channel = _integer(fields, 16, "channel")
-    timestamp_us = _integer(fields, 18, "timestamp")
-    antenna = _integer(fields, 19, "antenna")
-    sig_len = _integer(fields, 20, "signal length")
-    rx_state = _integer(fields, 21, "RX state")
-    declared_length = _integer(fields, 22, "CSI length")
-    first_word_invalid = _integer(fields, 23, "first_word_invalid")
-    if first_word_invalid not in (0, 1):
-        raise ValueError("first_word_invalid must be 0 or 1")
-    if not 0 <= timestamp_us <= 0xFFFFFFFF:
-        raise ValueError("timestamp outside uint32 range")
-
-    data_field = fields[24]
-    if len(data_field) < 2 or data_field[0] != '"' or data_field[-1] != '"':
-        raise ValueError("CSI array must be a quoted CSV field")
-    try:
-        values = json.loads(data_field[1:-1])
-    except json.JSONDecodeError as exc:
-        raise ValueError("CSI array is not valid JSON") from exc
-
-    if not isinstance(values, list) or not all(
-        isinstance(value, int) for value in values
-    ):
-        raise ValueError("CSI data must be an integer array")
-    if declared_length != len(values):
-        raise ValueError(
-            f"CSI length mismatch: declared {declared_length}, received {len(values)}"
-        )
-    if declared_length == 0 or declared_length % 2:
-        raise ValueError("CSI data must contain non-empty imaginary/real pairs")
-
-    raw_csi_values = tuple(
-        complex(values[index + 1], values[index])
-        for index in range(0, declared_length, 2)
-    )
-    csi_values = list(raw_csi_values)
-    # ESP-IDF marks the first four CSI bytes (two imaginary/real pairs) as
-    # invalid when this flag is set. Keep their positions for subcarrier
-    # alignment, but make them non-plottable values.
-    if first_word_invalid:
-        for index in range(min(2, len(csi_values))):
-            csi_values[index] = complex(nan, nan)
-    return CsiRecord(
-        sequence=sequence,
-        mac=mac,
-        rssi=rssi,
-        noise_floor=noise_floor,
-        timestamp_us=timestamp_us,
-        csi=tuple(csi_values),
-        raw_line=text,
-        rate=rate,
-        first_word_invalid=bool(first_word_invalid),
-        sig_mode=sig_mode,
-        mcs=mcs,
-        bandwidth=bandwidth,
-        smoothing=smoothing,
-        not_sounding=not_sounding,
-        aggregation=aggregation,
-        secondary_channel=secondary_channel,
-        stbc=stbc,
-        fec_coding=fec_coding,
-        sgi=sgi,
-        ampdu_count=ampdu_count,
-        channel=channel,
-        antenna=antenna,
-        sig_len=sig_len,
-        rx_state=rx_state,
-        csi_length=declared_length,
-        raw_csi=raw_csi_values,
-    )
-
-
 def format_csi_record(record: CsiRecord) -> str:
     """Serialize a record using the existing Espressif CSV schema."""
 
@@ -352,12 +246,73 @@ def format_csi_record(record: CsiRecord) -> str:
     )
 
 
-def iter_csi_lines(lines: Iterable[str]) -> Iterable[CsiRecord]:
-    """Yield valid records from a stream, ignoring non-CSI and bad lines."""
+class NativeRecord:
+    """Immutable native CSI with cheap Python context and lazy array views."""
 
-    for line in lines:
-        if line.lstrip().startswith("CSI_DATA,"):
-            try:
-                yield parse_csi_line(line)
-            except ValueError:
-                continue
+    __slots__ = ("_block", "_context", "_native", "_views")
+
+    def __init__(self, record: Any, context: dict[str, Any] | None = None) -> None:
+        self._native = record
+        self._context = context or {}
+        self._block = ...
+        self._views = None
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self._context:
+            return self._context[name]
+        if name in {
+            "run_id",
+            "transmitter_boot_id",
+            "receiver_boot_id",
+            "capture_host_monotonic_ns",
+            "capture_clock_uncertainty_us",
+        }:
+            return None
+        if name == "transport":
+            return ""
+        return getattr(self._native, name)
+
+    def with_context(self, updates: dict[str, Any]) -> NativeRecord:
+        """Share native samples and prepared phase while adding session metadata."""
+        return NativeRecord(self._native, {**self._context, **updates})
+
+    @property
+    def phase_views_ready(self) -> bool:
+        return True  # The native processing worker prepared supported LTFs.
+
+    @property
+    def channel_estimate_block(self) -> SimpleNamespace | None:
+        if self._block is ...:
+            values = self._native.phase_bytes()
+            if values is None:
+                self._block = None
+            else:
+                indices, amplitude, raw, calibrated = values
+                self._block = SimpleNamespace(
+                    name="HE-LTF",
+                    subcarrier_indices=tuple(indices),
+                    amplitudes=np.frombuffer(amplitude, dtype="=f8"),
+                    raw_phases=np.frombuffer(raw, dtype="=f8"),
+                    calibrated_phases=np.frombuffer(calibrated, dtype="=f8"),
+                )
+        return self._block
+
+    @property
+    def ltf_blocks(self) -> tuple[SimpleNamespace, ...]:
+        block = self.channel_estimate_block
+        return (block,) if block is not None else ()
+
+    def _view(self, index):
+        if self._views is None:
+            self._views = tuple(
+                np.frombuffer(b, dtype="=f8") for b in self._native.views_bytes()
+            )
+        return self._views[index]
+
+    real = property(lambda self: self._view(0))
+    imaginary = property(lambda self: self._view(1))
+    amplitudes = property(lambda self: self._view(2))
+    phases = property(lambda self: self._view(3))
+
+
+AnyCsiRecord = CsiRecord | NativeRecord

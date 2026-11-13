@@ -9,8 +9,8 @@ writing and trial timing remain in the collection controller and capture modules
 | --- | --- |
 | `radio/live.py` | Resolve settings, start `NativeAcquisition`, deliver accepted records to sinks and receiver buffers, map native health to status, diagnostics and telemetry |
 | `radio_transport::session` (`src/native/radio_core/`) | Gateway preparation and relay recovery, startup, journal-before-ACK acceptance, capture mapping, availability bins, restarts |
-| `radio_transport::quality`, `radio/acquisition/native.py` | Duplicate-capture removal and delivery counters; Python record adapter with lazy array views |
-| `radio/acquisition/recording_io.py` | Native bounded recording worker; periodic batched disk writes |
+| `radio_transport::quality`, `radio/records.py`, `radio/native.py` | Duplicate-capture removal and delivery counters; Python record types (`NativeRecord` with lazy array views, `CsiRecord` for the inspector) and backend access |
+| `radio/recording_io.py` | Native bounded recording worker; periodic batched disk writes |
 | `presentation/radio/live.py` | Compose the dashboard and transport panel; limit diagnostics to four updates per second |
 | `presentation/radio/pacing.py` | Shared display rates and timer intervals |
 | `radio/preprocessing/rendering.py` | Numerical preparation and a bounded one-snapshot/one-frame cache |
@@ -19,6 +19,10 @@ writing and trial timing remain in the collection controller and capture modules
 | `apps/collector/runtime.py` | Evaluate health, advance trial timing, update both windows and drain a run on exit |
 | `apps/collector/views/` | Setup/detail dialogs, operator controls, performer cues and presentation styles |
 | `collection/controller.py`, `capture.py` | Collection state transitions and immutable recording artifacts |
+
+The viewer writes no CSV: Rust journals every accepted record, and the viewer's
+`--output-dir` only selects where the journal (`transport/gateway/<run>`) goes.
+The collector journals into its session directory.
 
 `LiveRadio` binds configured identities without opening hardware. Its `start`
 method runs only after recording sinks and the UI are ready. Both applications

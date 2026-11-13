@@ -16,7 +16,7 @@ ENV = {"receiver_ids": {"00:11:22:33:44:55": "rx-1"}}
 def test_resume_reads_and_appends_compressed_events(tmp_path):
     from fall_detection._radio_native import storage_read_file as read_bytes
 
-    from fall_detection.radio.acquisition.recording_io import RecordingIO
+    from fall_detection.radio.recording_io import RecordingIO
 
     clock = FakeClock()
     old = controller(tmp_path, clock)
@@ -160,7 +160,7 @@ def test_resume_uses_saved_protocol_and_rejects_corruption(tmp_path):
 
 
 def test_accept_queues_while_saving_and_advances_without_another_click(tmp_path):
-    from fall_detection.radio.acquisition.recording_io import RecordingIO
+    from fall_detection.radio.recording_io import RecordingIO
 
     clock = FakeClock()
     c = controller(tmp_path, clock)

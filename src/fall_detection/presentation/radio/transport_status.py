@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fall_detection.radio.acquisition.gateway_diagnostics import (
+from fall_detection.radio.gateway_diagnostics import (
     GatewayDiagnostics,
     ReceiverDiagnostics,
 )

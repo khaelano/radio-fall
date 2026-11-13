@@ -10,7 +10,6 @@ from __future__ import annotations
 import csv
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
-from io import StringIO
 from math import atan2, hypot
 from typing import Any
 
@@ -18,13 +17,7 @@ import numpy as np
 import pyarrow as pa
 
 from .._radio_native import FrameStore
-from ..radio.acquisition.buffer import BufferSnapshot
-from ..radio.acquisition.protocol import (
-    CSI_HEADER,
-    CsiRecord,
-    format_csi_record,
-    parse_csi_line,
-)
+from ..radio.buffer import BufferSnapshot
 from ..radio.preprocessing.phase import (
     DEFAULT_PHASE_AMPLITUDE_FLOOR,
     HE20_COMPACT_SLOT_INDICES,
@@ -34,6 +27,7 @@ from ..radio.preprocessing.phase import (
     HT20_VALID_SUBCARRIERS,
 )
 from ..radio.preprocessing.rendering import PreparedCsiFrame, prepare_frame
+from ..radio.records import CSI_HEADER, CsiRecord, format_csi_record
 from .models import RecordedAttempt, attempt_indices
 
 CancellationCallback = Callable[[], bool]
@@ -147,6 +141,8 @@ class AttemptData:
     warnings: tuple[str, ...] = ()
     signal_times: tuple[float, ...] | None = None
     time_source: str = UNALIGNED_TIME_SOURCE
+    attempt: RecordedAttempt | None = None
+    """Source attempt; lets a compact UI load rebuild one record on demand."""
 
     @property
     def record_count(self) -> int:
@@ -183,9 +179,9 @@ def _split_row(line: str) -> tuple[str, ...]:
 def _frame_record(frame: dict[str, Any], index: int) -> CsiRecord:
     """Build the record of frame ``index`` from its columns.
 
-    The payload holds interleaved imaginary and real bytes. As in the legacy CSV
-    parser, the first two values of a frame flagged ``first_word_invalid`` stay
-    in ``raw_csi`` but are not plottable.
+    The payload holds interleaved imaginary and real bytes. The first two values
+    of a frame flagged ``first_word_invalid`` stay in ``raw_csi`` but are not
+    plottable.
     """
 
     payload = np.frombuffer(frame["csi"][index], dtype=np.int8)
@@ -502,6 +498,7 @@ def load_attempt_data(
         warnings=warnings,
         signal_times=times,
         time_source=CAPTURE_TIME_SOURCE if times is not None else UNALIGNED_TIME_SOURCE,
+        attempt=attempt,
     )
     return (
         prepare_attempt_signals(result, cancelled=cancelled)
@@ -521,8 +518,8 @@ def load_attempt_data_for_ui(
     Session inspector workers run this function in a separate process. The
     exact table rows and prepared plot arrays remain available, while parsed
     ``CsiRecord`` objects and the intermediate snapshot are discarded before
-    inter-process serialization. A selected value row is parsed on demand by
-    :func:`csi_record_for_table_row`.
+    inter-process serialization. A selected value row is rebuilt on demand from
+    the frame tables by :func:`csi_record_for_table_row`.
     """
 
     data = load_attempt_data(
@@ -537,7 +534,12 @@ def csi_record_for_table_row(
     data: AttemptData,
     source_row: int,
 ) -> CsiRecord | None:
-    """Parse one exact CSI table row for on-demand value inspection."""
+    """Return the record behind one CSI table row for value inspection.
+
+    Rows are in frame order, so ``source_row`` indexes the receiver's frames in
+    the attempt. Compact UI loads carry no records; the row's frame is then read
+    again from the frame tables.
+    """
 
     if not 0 <= source_row < len(data.csi.rows):
         return None
@@ -547,12 +549,21 @@ def csi_record_for_table_row(
         except ValueError:
             return None
         return data.records[record_index]
-    stream = StringIO()
-    csv.writer(stream, lineterminator="").writerow(data.csi.rows[source_row])
-    try:
-        return parse_csi_line(stream.getvalue())
-    except ValueError:
+    attempt = data.attempt
+    if attempt is None:
         return None
+    session = FrameStore.ensure(str(attempt.session_path), str(attempt.frames_path))
+    index = attempt_indices(session).get(
+        (attempt.trial_ordinal, attempt.attempt_number)
+    )
+    if index is None:
+        return None
+    frames = pa.table(
+        session.attempt_frames(index, data.receiver_id, columns=_FRAME_COLUMNS)
+    )
+    if source_row >= frames.num_rows:
+        return None
+    return _frame_record(frames.slice(source_row, 1).to_pydict(), 0)
 
 
 def prepare_attempt_signals(

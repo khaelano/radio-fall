@@ -14,7 +14,7 @@ from fall_detection.presentation.radio.gaps import (
     CsiGapPanel,
     gap_values,
 )
-from fall_detection.radio.acquisition.availability import AvailabilitySnapshot
+from fall_detection.radio.availability import AvailabilitySnapshot
 
 
 def empty_snapshot(receivers, seconds, now_ns, *, bin_hz=50, grace_ms=100):

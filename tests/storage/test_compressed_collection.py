@@ -14,7 +14,7 @@ from fall_detection._radio_native import (
     storage_verify_archive,
 )
 
-from fall_detection.radio.acquisition.recording_io import RecordingIO
+from fall_detection.radio.recording_io import RecordingIO
 
 
 def test_native_writer_emits_zstd_before_close_and_appends_complete_frames(tmp_path):

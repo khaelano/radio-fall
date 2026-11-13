@@ -7,8 +7,7 @@ from pathlib import Path
 import pytest
 from test_gateway_io import _idf_headers
 from test_gateway_tuning import identities
-
-from fall_detection.radio.espnow_config import EspnowTransportConfig
+from transport_config import transport_config
 
 
 @pytest.mark.parametrize(
@@ -126,7 +125,7 @@ int main(int argc,char **argv){
 """
     )
     inv, profile = identities()
-    raw = EspnowTransportConfig(
+    raw = transport_config(
         schema_version=7,
         maximum_age_ms=750,
         maximum_retries=0 if ackless else 2,

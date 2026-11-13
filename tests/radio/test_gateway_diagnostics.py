@@ -7,7 +7,7 @@ import pytest
 from fake_acquisition import FakeAcquisition
 
 from fall_detection.apps.csi_viewer.app import _parser
-from fall_detection.radio.acquisition.gateway_diagnostics import DeliveryRates
+from fall_detection.radio.gateway_diagnostics import DeliveryRates
 from fall_detection.radio.live import LiveRadio
 
 

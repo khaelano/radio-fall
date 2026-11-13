@@ -6,8 +6,7 @@ import hashlib
 import json
 import struct
 import zlib
-from dataclasses import asdict, dataclass, fields
-from pathlib import Path
+from dataclasses import asdict, dataclass
 
 from .profile import RadioInventory, RadioProfile, profile_fingerprint
 
@@ -22,29 +21,34 @@ def mac_bytes(value: str) -> bytes:
 
 @dataclass(frozen=True)
 class EspnowTransportConfig:
-    """Bounded transport settings; timing reserves require hardware qualification."""
+    """Bounded transport settings; timing reserves require hardware qualification.
 
+    ``configs/radio.json`` is the single source of operational values, so every
+    field it sets is required here. Only fields that file leaves out have
+    defaults: they are off or zero unless the settings file turns them on.
+    """
+
+    channel: int
+    phy: str
+    slot_ms: int
+    start_guard_ms: int
+    return_reserve_ms: int
+    queue_capacity: int
+    maximum_age_ms: int
+    outstanding_batches: int
+    ack_timeout_ms: int
+    maximum_retries: int
+    records_per_slot: int
+    bin_hz: int
+    delivery_grace_ms: int
+    drain_ms: int
+    application_acknowledgements: bool
+    measure_send_completions: bool
     schema_version: int = 7
-    channel: int = 6
-    phy: str = "ht20_mcs0_lgi"
-    slot_ms: int = 50
-    start_guard_ms: int = 5
-    return_reserve_ms: int = 10
-    queue_capacity: int = 64
-    maximum_age_ms: int = 500
-    outstanding_batches: int = 4
     early_return_idle_ms: int = 0
     minimum_revisit_ms: int = 0
     send_completion_guard_ms: int = 10
     batch_acknowledgements: bool = False
-    measure_send_completions: bool = False
-    application_acknowledgements: bool = True
-    ack_timeout_ms: int = 50
-    maximum_retries: int = 1
-    records_per_slot: int = 16
-    bin_hz: int = 50
-    delivery_grace_ms: int = 500
-    drain_ms: int = 1000
 
     def __post_init__(self) -> None:
         if (
@@ -110,16 +114,6 @@ class EspnowTransportConfig:
         ):
             raise ValueError("inconsistent retention/ACK/drain settings")
 
-    @classmethod
-    def load(cls, path: Path | None) -> EspnowTransportConfig:
-        """Load a strict policy; never adjust failed benchmark settings silently."""
-        if path is None:
-            return cls()
-        value = json.loads(path.read_text())
-        if not isinstance(value, dict) or set(value) - {f.name for f in fields(cls)}:
-            raise ValueError("unknown ESP-NOW policy fields")
-        return cls(**value)
-
     def validate(
         self,
         inventory: RadioInventory,
@@ -138,7 +132,7 @@ class EspnowTransportConfig:
             require_four and len(inventory.receivers) != 4
         ):
             raise ValueError("collection requires four registered C5 receivers")
-        if inventory.gateway is None or inventory.gateway.target != "esp32c6":
+        if inventory.gateway.target != "esp32c6":
             raise ValueError("inventory requires an identified ESP32-C6 gateway")
 
     def fingerprint(self, inventory: RadioInventory, profile: RadioProfile) -> str:

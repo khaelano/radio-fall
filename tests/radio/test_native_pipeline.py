@@ -8,19 +8,18 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from test_gateway import batch
-
-from fall_detection import _radio_native as core
-from fall_detection.radio.acquisition.native import NativeRecord
-from fall_detection.radio.acquisition.protocol import format_csi_record
-from fall_detection.radio.acquisition.serial_framing import (
-    decode_serial_frame,
-    encode_serial_frame,
-)
-from fall_detection.radio.acquisition.wire import (
+from wire_encoder import (
     DecodedCsiDatagram,
     ReceiverStats,
     encode_csi_batch,
 )
+
+from fall_detection import _radio_native as core
+from fall_detection.radio.provisioning import (
+    decode_serial_frame,
+    encode_serial_frame,
+)
+from fall_detection.radio.records import NativeRecord, format_csi_record
 
 
 def packet(size, invalid=False, seed=17):

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
 
 import pytest
 
@@ -13,12 +13,12 @@ from fall_detection.collection.controller import (
     SessionState,
 )
 from fall_detection.collection.protocol import protocol_from_mapping
-from fall_detection.radio.acquisition.telemetry import (
+from fall_detection.radio.telemetry import (
     BackhaulTelemetrySnapshot,
     GatewayTelemetry,
+    ReceiverStats,
     TransmitterTelemetry,
 )
-from fall_detection.radio.acquisition.wire import ReceiverStats
 
 
 def protocol():
@@ -68,7 +68,7 @@ def ready_health() -> HealthSnapshot:
 
 
 def make_controller(
-    tmp_path: Path, clock: FakeClock, *, video_recorder=None
+    tmp_path: Path, clock: FakeClock, *, video_recorder=None, csv_sidecars=True
 ) -> SessionController:
     return SessionController(
         protocol_from_mapping(protocol()),
@@ -78,6 +78,7 @@ def make_controller(
         session_id_factory=lambda: "session",
         video_recorder=video_recorder,
         environment={"receiver_ids": {"00:11:22:33:44:55": "rx-1"}},
+        csv_sidecars=csv_sidecars,
     )
 
 
@@ -101,6 +102,17 @@ def test_radio_interruption_invalidates_attempt_before_display_refresh(tmp_path)
     assert recovered.attempt_status == "invalid"
     with pytest.raises(RuntimeError, match="invalid attempt"):
         controller.dispatch(OperatorCommand.ACCEPT)
+
+
+def test_controller_passes_the_csv_sidecar_option_to_each_attempt(tmp_path: Path):
+    controller = make_controller(tmp_path, FakeClock(), csv_sidecars=False)
+    start_ready(controller)
+
+    controller.dispatch(OperatorCommand.START_TRIAL)
+
+    attempt_dir = tmp_path / "session" / "trials" / "001_one" / "attempt_01"
+    assert (attempt_dir / "attempt.json").exists()
+    assert not (attempt_dir / "receivers").exists()
 
 
 def test_controller_runs_timed_trial_and_writes_bundle(tmp_path: Path):
@@ -247,7 +259,8 @@ def test_attempt_persists_boot_aware_radio_telemetry_delta(tmp_path: Path):
 
 def test_ble_delayed_records_route_by_capture_time_across_attempts(tmp_path: Path):
     from dataclasses import replace
-    from fall_detection.radio.acquisition.protocol import CsiRecord
+
+    from fall_detection.radio.records import CsiRecord
 
     clock = FakeClock()
     controller = SessionController(

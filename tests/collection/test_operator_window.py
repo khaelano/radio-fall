@@ -253,7 +253,7 @@ def test_metadata_dialog_defaults_to_every_block(qt_app):
 
 
 def test_dashboard_panel_lists_bound_receivers_and_switches_stream(qt_app):
-    from fall_detection.radio.acquisition.buffer import RollingCsiBuffer
+    from fall_detection.radio.buffer import RollingCsiBuffer
 
     state = LiveState(100)
     first, second = RollingCsiBuffer(), RollingCsiBuffer()

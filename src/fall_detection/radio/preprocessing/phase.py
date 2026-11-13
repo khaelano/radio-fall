@@ -83,7 +83,7 @@ class LtfBlock:
 
 
 def _native():
-    from ..acquisition.native import require_native
+    from ..native import require_native
 
     return require_native()
 

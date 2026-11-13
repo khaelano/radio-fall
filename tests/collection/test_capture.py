@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from fall_detection.collection.capture import CLOCK_SYNC_HEADER, TrialCapture
-from fall_detection.radio.acquisition.protocol import CSI_HEADER, CsiRecord
+from fall_detection.radio.records import CSI_HEADER, CsiRecord
 
 
 def record(receiver_mac: str = "AA:BB:CC:DD:EE:FF") -> CsiRecord:
@@ -77,3 +77,22 @@ def test_trial_capture_ignores_unknown_receivers(tmp_path: Path):
 def test_trial_capture_requires_a_receiver_inventory(tmp_path: Path):
     with pytest.raises(ValueError, match="receiver binding"):
         TrialCapture(tmp_path / "attempt_01", {}, receiver_ids={})
+
+
+def test_trial_capture_without_csv_sidecars_keeps_only_the_attempt_manifest(
+    tmp_path: Path,
+):
+    capture = TrialCapture(
+        tmp_path / "attempt_01",
+        {"trial_ordinal": 1},
+        receiver_ids={"aa:bb:cc:dd:ee:ff": "rx-1"},
+        csv_sidecars=False,
+    )
+
+    capture.write_radio(record(), host_receive_monotonic_ns=10)
+    metadata = capture.finish("accepted")
+
+    attempt = tmp_path / "attempt_01"
+    assert capture.writes_complete
+    assert metadata["status"] == "accepted"
+    assert sorted(path.name for path in attempt.iterdir()) == ["attempt.json"]

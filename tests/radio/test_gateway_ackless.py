@@ -7,13 +7,12 @@ from pathlib import Path
 
 import pytest
 from test_gateway_tuning import identities
-
-from fall_detection.radio.espnow_config import EspnowTransportConfig
+from transport_config import transport_config
 
 
 def test_ackless_config_contract_and_c_decoder(tmp_path):
     inventory, profile = identities()
-    config = EspnowTransportConfig(
+    config = transport_config(
         schema_version=7, application_acknowledgements=False, maximum_retries=0
     )
     raw = config.encode(123, inventory, profile)

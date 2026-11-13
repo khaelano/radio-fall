@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
+import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from math import nan
 from threading import Lock
-from typing import Optional
-from collections.abc import Callable
-import time
 
-from .protocol import CsiRecord
-
+from .records import AnyCsiRecord
 
 DEFAULT_NOMINAL_RATE_HZ = 50
 
@@ -26,8 +24,8 @@ class BufferSnapshot:
 
     timestamps: tuple[float, ...]
     amplitudes: tuple[tuple[float, ...], ...]
-    start_sequence: Optional[int]
-    end_sequence: Optional[int]
+    start_sequence: int | None
+    end_sequence: int | None
     max_subcarriers: int
     # Keep the first five fields stable for small offline callers that create
     # snapshots positionally.  The additional views are parallel to
@@ -71,7 +69,7 @@ class RollingCsiBuffer:
         nominal_rate: int = DEFAULT_NOMINAL_RATE_HZ,
         seconds: int = 10,
         *,
-        max_records: Optional[int] = None,
+        max_records: int | None = None,
         reorder_window: int = 128,
     ) -> None:
         self._seconds = max(1, seconds)
@@ -80,17 +78,17 @@ class RollingCsiBuffer:
             if max_records is None
             else max(1, max_records)
         )
-        self._records: deque[tuple[CsiRecord, int]] = deque()
+        self._records: deque[tuple[AnyCsiRecord, int]] = deque()
         self._lock = Lock()
-        self._last_sequence: Optional[int] = None
+        self._last_sequence: int | None = None
         self._missing_sequences = 0
         self._received_records = 0
         self._pending_missing: set[int] = set()
         self._reorder_window = max(0, reorder_window)
-        self._last_timestamp_raw: Optional[int] = None
-        self._last_timestamp_unwrapped: Optional[int] = None
+        self._last_timestamp_raw: int | None = None
+        self._last_timestamp_unwrapped: int | None = None
         self._timestamp_offset = 0
-        self._time_origin_us: Optional[int] = None
+        self._time_origin_us: int | None = None
 
     @property
     def missing_sequences(self) -> int:
@@ -103,11 +101,11 @@ class RollingCsiBuffer:
             return self._received_records
 
     @property
-    def last_sequence(self) -> Optional[int]:
+    def last_sequence(self) -> int | None:
         with self._lock:
             return self._last_sequence
 
-    def append(self, record: CsiRecord) -> None:
+    def append(self, record: AnyCsiRecord) -> None:
         with self._lock:
             sequence = record.sequence & 0xFFFFFFFF
             sequence_advanced = False
@@ -174,7 +172,7 @@ class RollingCsiBuffer:
 
     def _window_entries(
         self, seconds: float | None
-    ) -> tuple[tuple[tuple[CsiRecord, int], ...], int | None]:
+    ) -> tuple[tuple[tuple[AnyCsiRecord, int], ...], int | None]:
         with self._lock:
             entries = tuple(self._records)
             origin = self._time_origin_us
@@ -221,9 +219,9 @@ class RollingCsiBuffer:
     def snapshot(
         self,
         start: int = 0,
-        end: Optional[int] = None,
+        end: int | None = None,
         *,
-        seconds: Optional[float] = None,
+        seconds: float | None = None,
         include_raw_views: bool = True,
         prepared_only: bool = False,
     ) -> BufferSnapshot:

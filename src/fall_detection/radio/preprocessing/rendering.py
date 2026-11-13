@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from ..acquisition.buffer import BufferSnapshot, RollingCsiBuffer
+from ..buffer import BufferSnapshot, RollingCsiBuffer
 from .phase import (
     HE20_VALID_SUBCARRIERS,
     HT20_VALID_SUBCARRIERS,

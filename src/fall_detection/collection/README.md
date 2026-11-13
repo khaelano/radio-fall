@@ -37,6 +37,15 @@ journals directly into complete Zstandard frames in `.zst` files. Compression
 happens on the disk worker at each configured flush; no plain stream copy is
 written. Small mutable JSON metadata and video frame indexes remain plain.
 
+The Rust transport journal in the session directory is the canonical raw record
+and is included in the archive. By default the collector also writes the
+per-receiver `csi.csv`, `radio_timing.csv`, `usb_clock_sync.csv` and
+`gateway_timing.jsonl` sidecars. They are a temporary safety net until one
+Rust-era hardware session has been verified with
+`tools/processing/check_storage_equivalence.py`; they will then be removed.
+Pass `--no-csv-sidecars` to skip them (the session manifest records
+`environment.csv_sidecars`). The CSI viewer keeps no recording of its own.
+
 On application exit the collector drains and closes acquisition and video,
 then saves a verified `<session-id>.zip` raw recording beside its working
 directory. Version-2 archives retain the `.zst` bytes directly and expose logical

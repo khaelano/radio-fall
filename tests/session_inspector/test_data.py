@@ -5,13 +5,13 @@ import pytest
 from inspector_sessions import ATTEMPT_LENGTH_NS, FrameSpec, attempt_origin
 from journal_builder import TX, mac_text
 
-from fall_detection.radio.acquisition.buffer import RollingCsiBuffer
-from fall_detection.radio.acquisition.protocol import CSI_HEADER, CsiRecord
+from fall_detection.radio.buffer import RollingCsiBuffer
 from fall_detection.radio.preprocessing.phase import (
     HE20_COMPACT_SLOT_INDICES,
     HE20_SLOT_INDICES,
     HT20_SLOT_INDICES,
 )
+from fall_detection.radio.records import CSI_HEADER, CsiRecord
 from fall_detection.session_inspector.data import (
     MAX_PLOT_RECORDS,
     AttemptData,

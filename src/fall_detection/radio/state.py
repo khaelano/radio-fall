@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from threading import Lock
 
-from .acquisition.buffer import DEFAULT_NOMINAL_RATE_HZ, RollingCsiBuffer
+from .buffer import DEFAULT_NOMINAL_RATE_HZ, RollingCsiBuffer
 
 HISTORY_SECONDS = 10.0
 

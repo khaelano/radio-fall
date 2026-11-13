@@ -2,10 +2,8 @@ import struct
 from dataclasses import replace
 
 import pytest
-
-from fall_detection.radio.acquisition.protocol import format_csi_record
-from fall_detection.radio.acquisition.protocol import parse_csi_line as _parse_csi_line
-from fall_detection.radio.acquisition.wire import (
+from csi_line import record_from_csi_line
+from wire_encoder import (
     BATCH_HEADER_SIZE,
     HEADER_SIZE,
     MAX_BATCH_RECORDS,
@@ -18,9 +16,11 @@ from fall_detection.radio.acquisition.wire import (
     encode_csi_datagram,
 )
 
+from fall_detection.radio.records import format_csi_record
+
 
 def parse_csi_line(line):
-    return replace(_parse_csi_line(line), profile_fingerprint="0123456789abcdef")
+    return replace(record_from_csi_line(line), profile_fingerprint="0123456789abcdef")
 
 
 from wire_reference import decode_csi_datagram, decode_csi_packet

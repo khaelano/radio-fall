@@ -7,13 +7,12 @@ from pathlib import Path
 
 import pytest
 from test_gateway_tuning import identities
-
-from fall_detection.radio.espnow_config import EspnowTransportConfig
+from transport_config import transport_config
 
 
 def test_retention_retry_version_and_deadline_contract(tmp_path):
     inv, profile = identities()
-    policy = EspnowTransportConfig(
+    policy = transport_config(
         schema_version=7,
         maximum_age_ms=750,
         maximum_retries=2,

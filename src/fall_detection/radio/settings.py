@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass, fields
+from dataclasses import MISSING, dataclass, fields
 from pathlib import Path
 from typing import Any
 
@@ -116,6 +116,13 @@ class RadioSettings:
         )
         inventory = RadioInventory.from_mapping(inventory_value)
         profile = RadioProfile.from_mapping(profile_value)
+        required = {
+            field.name
+            for field in fields(EspnowTransportConfig)
+            if field.default is MISSING
+        }
+        if missing := required - policy.keys():
+            raise ValueError(f"missing transport fields: {', '.join(sorted(missing))}")
         transport = EspnowTransportConfig(**policy)
         transport.validate(inventory, profile, require_four=False)
         return cls(inventory, profile, transport, connection)

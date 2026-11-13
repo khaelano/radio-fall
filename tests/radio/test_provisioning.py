@@ -6,16 +6,14 @@ import pytest
 import serial
 from serial.tools import list_ports
 
-from fall_detection.radio.acquisition.serial_framing import (
-    TYPE_DEVICE_STATUS,
-    encode_serial_frame,
-)
 from fall_detection.radio.profile import RadioInventory, RadioProfile
 from fall_detection.radio.provisioning import (
+    TYPE_DEVICE_STATUS,
     DeviceStatus,
     ProvisioningError,
     RadioProvisioner,
     _open_serial_devices,
+    encode_serial_frame,
 )
 
 
@@ -103,7 +101,7 @@ def test_discovery_preserves_power_and_reset_diagnostics():
 
 class FakeProvisioningDevice:
     def __init__(self, device):
-        self.status = DeviceStatus(device.role, device.target, device.mac, "test", 2)
+        self.status = DeviceStatus(device.role, device.target, device.mac, "test", 3)
         self.payloads = []
         self.commits = 0
         self.closed = False
@@ -134,24 +132,30 @@ def provisioning_setup():
         return {
             "id": f"board-{i}",
             "role": "transmitter" if i == 0 else "receiver",
-            "target": "esp32c6",
+            "target": "esp32c5",
             "mac": f"02:00:00:00:00:{i:02x}",
         }
 
     inventory = RadioInventory.from_mapping(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "transmitter": device(0),
             "receivers": [device(i) for i in range(1, 5)],
+            "gateway": {
+                "id": "gateway",
+                "role": "gateway",
+                "target": "esp32c6",
+                "mac": "02:00:00:00:00:05",
+            },
         }
     )
     profile = RadioProfile.from_mapping(
         {
-            "schema_version": 1,
-            "profile_id": "indonesia-2g-ch6-80hz",
+            "schema_version": 2,
+            "profile_id": "indonesia-5g-ch44-80hz",
             "country_code": "ID",
-            "band": "2.4ghz",
-            "channel": 6,
+            "band": "5ghz",
+            "channel": 44,
             "bandwidth_mhz": 20,
             "nominal_rate_hz": 80,
         }
@@ -193,7 +197,7 @@ def test_sequential_requires_exactly_one_board(provisioning_setup, count):
     "change,match",
     [
         ({"mac": "02:00:00:00:ff:ff"}, "unknown device MAC"),
-        ({"target": "esp32c5"}, "role/target"),
+        ({"target": "esp32c6"}, "role/target"),
         ({"role": "receiver"}, "role/target"),
         ({"protocol_version": 1}, "unsupported protocol"),
     ],
@@ -210,24 +214,25 @@ def test_sequential_rejects_unverified_identity(provisioning_setup, change, matc
 def test_default_provisioning_still_requires_all_boards(provisioning_setup):
     inventory, profile = provisioning_setup
     board = FakeProvisioningDevice(inventory.transmitter)
-    with pytest.raises(ProvisioningError, match="expected 5 devices"):
+    with pytest.raises(ProvisioningError, match="expected 6 devices"):
         RadioProvisioner([board]).provision(inventory, profile)
     boards = [
         FakeProvisioningDevice(device)
-        for device in (inventory.transmitter, *inventory.receivers)
+        for device in (inventory.transmitter, *inventory.receivers, inventory.gateway)
     ]
     report = RadioProvisioner(boards).provision(inventory, profile)
-    assert len(report.devices) == 5 and all(board.status.ready for board in boards)
+    assert len(report.devices) == 6
+    assert all(b.status.ready for b in boards if b.status.role != "gateway")
 
 
 def test_sequential_validates_disconnected_board_capabilities(provisioning_setup):
     inventory, _ = provisioning_setup
     inventory = replace(
-        inventory, transmitter=replace(inventory.transmitter, target="esp32c5")
+        inventory, transmitter=replace(inventory.transmitter, target="esp32c6")
     )
     profile = RadioProfile.from_mapping(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "profile_id": "indonesia-5g-ch44-80hz",
             "country_code": "ID",
             "band": "5ghz",

@@ -57,6 +57,7 @@ def test_live_acquisition_is_owned_by_rust():
             "recovery",
         )
     }
+    assert not (PACKAGE / "radio" / "acquisition").exists()
     for name in retired:
         assert not (PACKAGE / Path(*name.split(".")[1:])).with_suffix(".py").exists()
     violations = []

@@ -48,8 +48,11 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   archives 4,527,879 CSV rows matched the tables with no mismatch, and the
   archives shrank from 11.9 GB to 6.63 GB (video unchanged). The analysis
   pipeline, phase and integrity analysis, and the session inspector read the
-  tables; the collector still writes the CSV sidecars, and the Rust-era journal
-  path is verified on synthetic journals only. See the
+  tables; the collector still writes the CSV sidecars by default
+  (`--no-csv-sidecars` disables them) as a safety net until one Rust-era hardware
+  session passes `tools/processing/check_storage_equivalence.py`, and the
+  Rust-era journal path is verified on synthetic journals only. Journals in the
+  session directory are included in the finalized archive. See the
   [specification](storage-layout-spec.md) and
   [report](reports/storage-layout-migration-2026-11-13.md).
 - **Rust-owned live path (12 November 2026):** one Rust transport session
@@ -57,8 +60,9 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   journal-before-ACK acceptance, capture mapping, availability bins,
   duplicate-capture removal and restarts for the viewer, collector and detector.
   Python apps receive accepted records and health through `NativeAcquisition`
-  and only display, record CSV rows formatted in Rust, and run the collection
-  workflow. The Python acquisition modules, Python detector, USB transmitter
+  and only display and run the collection workflow; the viewer's own CSV
+  recorder was removed. The collector still writes temporary CSV sidecars (see
+  the storage entry above). The Python acquisition modules, Python detector, USB transmitter
   link and `csi-gateway-benchmark` were removed. Phase calibration and clock
   fitting have one Rust implementation; independent NumPy/Python references
   remain in tests only. ACKs now certify the native envelope journal rather
@@ -97,7 +101,8 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   CSI1 v3 records are decoded by Rust; the host accepts gateway policy
   version 7, operational inventory/profile schema 2 and the `espnow_uart`
   reference link only. `configs/radio.json` is the shared operational settings
-  file.
+  file and the only source of transport values: `EspnowTransportConfig` has no
+  defaults for them.
   C5 receivers send scheduled ESP-NOW batches to a C6 USB gateway; hardware
   qualification evidence and limitations are in the
   [gateway guide](espnow-gateway.md) and [dated reports](reports/README.md).
@@ -176,7 +181,8 @@ modules in live application code.
 
 `src/fall_detection/apps/` contains the collector, CSI viewer, session
 inspector, and detector application entry points and presentation code.
-`radio/`, `storage/`, `analysis/`, `collection/`, `session_inspector/`
+`radio/` (settings, profile, live delivery, record types and display buffers,
+provisioning), `storage/`, `analysis/`, `collection/`, `session_inspector/`
 and `contracts/` contain the reusable radio, data, and domain
 components used by these applications and research tools. The viewer and
 collector share the dashboard in `presentation/radio/`.

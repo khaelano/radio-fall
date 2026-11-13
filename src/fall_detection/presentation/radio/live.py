@@ -14,7 +14,7 @@ from fall_detection.presentation.radio.transport_status import (
     GatewayStatusPanel,
     TransportStatusText,
 )
-from fall_detection.radio.acquisition.availability import AvailabilitySnapshot
+from fall_detection.radio.availability import AvailabilitySnapshot
 from fall_detection.radio.preprocessing.rendering import (
     DEFAULT_DASHBOARD_SUBCARRIERS,
     DEFAULT_INSPECT_SUBCARRIER,

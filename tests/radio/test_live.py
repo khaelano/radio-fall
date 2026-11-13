@@ -114,16 +114,13 @@ def test_storage_failure_is_reported_once_and_display_continues(tmp_path):
     assert radio.buffers["rx-1"].received_records == 2
 
 
-def test_without_sink_records_are_written_to_receiver_csv(tmp_path):
+def test_without_sink_records_only_feed_the_display_buffers(tmp_path):
     radio = make_radio(tmp_path)
     radio.start()
     FakeAcquisition.instances[-1].push(item(1, 1))
     radio.stop()
-    (path,) = (tmp_path / "rx-2").glob("csi_*.csv")
-    lines = path.read_text().splitlines()
-    assert lines[1].startswith("CSI_DATA,1,")
-    (timing,) = (tmp_path / "rx-2").glob("radio_timing_*.csv")
-    assert timing.read_text().splitlines()[1].endswith(",6000")
+    assert radio.buffers["rx-2"].received_records == 1
+    assert list(tmp_path.rglob("*.csv")) == []
 
 
 def test_health_drives_status_interruptions_and_readiness(tmp_path):

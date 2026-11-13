@@ -9,8 +9,8 @@ from typing import Any
 import numpy as np
 
 from fall_detection.presentation.radio.gaps import CsiGapPanel
-from fall_detection.radio.acquisition.availability import AvailabilitySnapshot
-from fall_detection.radio.acquisition.buffer import PreviewNotReady
+from fall_detection.radio.availability import AvailabilitySnapshot
+from fall_detection.radio.buffer import PreviewNotReady
 from fall_detection.radio.preprocessing.rendering import (
     DASHBOARD_TRACE_COUNTS,
     DEFAULT_DASHBOARD_SUBCARRIERS,

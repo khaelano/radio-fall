@@ -1,7 +1,7 @@
 import numpy as np
+from csi_line import record_from_csi_line
 
-from fall_detection.radio.acquisition.buffer import BufferSnapshot, RollingCsiBuffer
-from fall_detection.radio.acquisition.protocol import CsiRecord, parse_csi_line
+from fall_detection.radio.buffer import BufferSnapshot, RollingCsiBuffer
 from fall_detection.radio.preprocessing.rendering import (
     VALID_SUBCARRIERS,
     RenderGate,
@@ -9,6 +9,7 @@ from fall_detection.radio.preprocessing.rendering import (
     prepare_frame,
     representative_subcarriers,
 )
+from fall_detection.radio.records import CsiRecord
 
 PHASE_MODE_CALIBRATED = "Calibrated phase"
 PHASE_MODE_CHANGE = "Phase change"
@@ -170,7 +171,7 @@ def test_c6_he20_256_slot_payload_populates_amplitude_and_phase_views():
         + '"'
     )
     buffer = RollingCsiBuffer(nominal_rate=100, seconds=3)
-    buffer.append(parse_csi_line(line))
+    buffer.append(record_from_csi_line(line))
 
     frame = prepare_frame(
         buffer.snapshot(),

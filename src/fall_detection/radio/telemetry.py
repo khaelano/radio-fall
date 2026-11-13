@@ -1,30 +1,25 @@
-"""Stable firmware telemetry records used by captures and experiments."""
+"""Cumulative radio counters recorded with each collection attempt."""
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from .wire import ReceiverStats
-
-
-RECEIVER_MODES = {
-    "serial",
-    "metrics-only",
-    "udp-dry-run",
-    "udp-active",
-    "espnow-active",
-}
-
 
 @dataclass(frozen=True)
-class ReceiverTelemetry:
-    """One cumulative receiver counter snapshot."""
+class ReceiverStats:
+    """Cumulative receiver counters carried by a batched packet."""
 
-    mode: str
-    uptime_ms: int
-    boot_id: int
-    stats: ReceiverStats
+    accepted_records: int
+    sensing_missing: int
+    sensing_reordered: int
+    sensing_restarts: int
+    queue_drops: int
+    unavailable_ip_drops: int
+    batches_built: int
+    batches_sent: int
+    records_sent: int
+    send_errors: int
 
 
 @dataclass(frozen=True)
@@ -82,7 +77,7 @@ class BackhaulTelemetrySnapshot:
         result = asdict(self)
         return result
 
-    def delta(self, start: "BackhaulTelemetrySnapshot") -> dict[str, Any]:
+    def delta(self, start: BackhaulTelemetrySnapshot) -> dict[str, Any]:
         """Compute a boot-aware unsigned-counter delta from ``start``.
 
         Host counters are ordinary process counters. Firmware counters use
@@ -222,84 +217,3 @@ def telemetry_delta(
             "values": None,
         }
     return end.delta(start)
-
-
-def _unsigned(text: str, name: str, maximum: int | None = 0xFFFFFFFF) -> int:
-    try:
-        value = int(text)
-    except ValueError as exc:
-        raise ValueError(f"invalid {name}") from exc
-    if value < 0 or (maximum is not None and value > maximum):
-        raise ValueError(f"{name} is outside its unsigned range")
-    return value
-
-
-def parse_receiver_telemetry(line: str) -> ReceiverTelemetry:
-    """Parse one CSI_RX_STATS CSV record."""
-
-    fields = line.strip().split(",")
-    if len(fields) != 14 or fields[0] != "CSI_RX_STATS":
-        raise ValueError("invalid CSI_RX_STATS field count")
-    mode = fields[1]
-    if mode not in RECEIVER_MODES:
-        raise ValueError("unknown receiver mode")
-    values = [
-        _unsigned(fields[2], "receiver uptime", None),
-        *(
-            _unsigned(value, f"receiver field {index}")
-            for index, value in enumerate(fields[3:], start=3)
-        ),
-    ]
-    return ReceiverTelemetry(
-        mode=mode,
-        uptime_ms=values[0],
-        boot_id=values[1],
-        stats=ReceiverStats(*values[2:]),
-    )
-
-
-def parse_transmitter_telemetry(line: str) -> TransmitterTelemetry:
-    """Parse one CSI_TX_STATS CSV record."""
-
-    fields = line.strip().split(",")
-    if len(fields) != 6 or fields[0] != "CSI_TX_STATS":
-        raise ValueError("invalid CSI_TX_STATS field count")
-    values = [
-        _unsigned(fields[1], "transmitter uptime", None),
-        *(
-            _unsigned(value, f"transmitter field {index}")
-            for index, value in enumerate(fields[2:], start=2)
-        ),
-    ]
-    return TransmitterTelemetry(*values)
-
-
-def parse_gateway_telemetry(line: str) -> GatewayTelemetry:
-    """Parse one CSI_GATEWAY_STATS CSV record."""
-
-    fields = line.strip().split(",")
-    if len(fields) != 7 or fields[0] != "CSI_GATEWAY_STATS":
-        raise ValueError("invalid CSI_GATEWAY_STATS field count")
-    values = [
-        _unsigned(fields[1], "gateway uptime", None),
-        *(
-            _unsigned(value, f"gateway field {index}")
-            for index, value in enumerate(fields[2:], start=2)
-        ),
-    ]
-    return GatewayTelemetry(*values)
-
-
-def parse_telemetry_line(
-    line: str,
-) -> ReceiverTelemetry | TransmitterTelemetry | GatewayTelemetry | None:
-    """Parse telemetry, returning None for unrelated console text."""
-
-    text = line.strip()
-    if text.startswith("CSI_RX_STATS,"):
-        return parse_receiver_telemetry(text)
-    if text.startswith("CSI_TX_STATS,"):
-        return parse_transmitter_telemetry(text)
-    if text.startswith("CSI_GATEWAY_STATS,"):
-        return parse_gateway_telemetry(text)
-    return None

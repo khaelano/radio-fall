@@ -5,8 +5,9 @@ gateway startup and relay recovery, USB framing, CRC and CSI decoding,
 journal-before-ACK acceptance, clock fitting and capture mapping, availability
 bins, duplicate-capture removal, signal preprocessing and inference. Python
 applications receive accepted records and health snapshots; they display data,
-run the collection workflow and write per-attempt CSV files from Rust-formatted
-rows. Firmware and radio settings are unchanged.
+run the collection workflow. The collector also writes temporary per-attempt CSV
+sidecars from Rust-formatted rows (`--no-csv-sidecars` turns them off); the
+viewer writes none. Firmware and radio settings are unchanged.
 
 | Crate | Responsibility |
 | --- | --- |
@@ -81,8 +82,8 @@ use the same kernels through `phase_block` and `ltf_layouts`. No fast-math
 flags relax floating-point semantics.
 
 Python keeps independent references only in the tests:
-`tests/radio/wire_reference.py` decodes the wire format and
-`tests/radio/phase_reference.py` calibrates phase with NumPy. Cross-checks
+`tests/radio/wire_reference.py` decodes the wire format (its fixtures come from
+the encoder in `tests/radio/wire_encoder.py`) and `tests/radio/phase_reference.py` calibrates phase with NumPy. Cross-checks
 compare raw I/Q and CSV bytes exactly, magnitude and wrapped phase within
 explicit tolerances, and invalid masks exactly.
 

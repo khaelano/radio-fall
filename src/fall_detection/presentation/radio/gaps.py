@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from fall_detection.radio.acquisition.availability import AvailabilitySnapshot
+from fall_detection.radio.availability import AvailabilitySnapshot
 
 UNKNOWN, GAP, RECEIVED, PENDING = range(4)
 GAP_REFRESH_NS = 250_000_000

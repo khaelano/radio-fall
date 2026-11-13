@@ -118,7 +118,8 @@ Rules of thumb:
 - A **receiver directory** is one ESP32 receiver. The same transmitted frame
   appears once under every receiver that heard it; never merge those rows.
 - `data/raw/receivers/` contains standalone `csi_<timestamp>.csv` and
-  `radio_timing_<timestamp>.csv` captures. They use the schemas in
+  `radio_timing_<timestamp>.csv` captures from earlier viewer runs; the viewer
+  no longer writes CSV. They use the schemas in
   [section 4](#4-csv-formats) but have no session manifest, trial metadata, or
   review sidecar, and generally no clock-sync file. Treat them as scratch data,
   not as a substitute for a session bundle.
@@ -586,13 +587,13 @@ Parsing `data`:
 
 - The array alternates imaginary and real parts. A pair `[i, r]` is
   `complex(r, i)`; this is the convention used by
-  `fall_detection.radio.acquisition.protocol.parse_csi_line`.
+  `fall_detection.radio.records.CsiRecord`.
 - `len` counts integers, not subcarriers. For the current HE20 compact layout,
   `len` is typically `490` (245 complex slots). Do not hard-code the width; use
   `len`, or derive the layout from `sig_mode`, `bandwidth`, and `stbc` with the
   helpers in `fall_detection.radio.preprocessing.phase`.
-- When `first_word` is `1`, `parse_csi_line` preserves the raw values but sets
-  the first two parsed complex values to `NaN` for plotting. `raw_csi` keeps the
+- When `first_word` is `1`, `CsiRecord` preserves the raw values but sets
+  the first two complex values to `NaN` for plotting. `raw_csi` keeps the
   original values; `csi` is the masked view.
 - Rows with `sig_mode == 1` are commonly non-HE frames (control/ESP-NOW or
   ambient traffic) captured by the same receiver. For the standard HE20 sensing
@@ -617,9 +618,10 @@ frame["csi"] = frame["data"].map(
 )
 ```
 
-This produces one `numpy` complex vector per row. For validated parsing,
-including the `first_word` mask and declared-length checks, use
-`parse_csi_line(row_text)` from the package instead of the one-liner.
+This produces one `numpy` complex vector per row, without the `first_word` mask
+or a check of `len`. The package no longer parses CSV rows; the session
+inspector and analysis code read the typed frame tables instead (schema 3,
+below).
 
 ### 4.2 `radio_timing.csv`
 
@@ -678,8 +680,8 @@ host_receive_monotonic_ns,receiver_mac,sync_id,sensing_sequence,receiver_boot_id
 
 A header-only file means no exchange was recorded for that receiver. To map
 receiver time to the reference timeline, use the clock-fit code in
-`fall_detection.radio.acquisition.clock_sync` rather than a single offset row;
-the fit accounts for drift and boot changes.
+the native clock fit (`radio_transport`) rather than a single offset row; the
+fit accounts for drift and boot changes.
 
 Reading caveats for USB sessions:
 
@@ -998,7 +1000,7 @@ Related documentation:
 - [`configs/collection/README.md`](../configs/collection/README.md) — protocol and scenario selection
 - [`src/fall_detection/collection/README.md`](../src/fall_detection/collection/README.md) — collector operation and schema-2 writer
 - [`src/fall_detection/session_inspector/`](../src/fall_detection/session_inspector/) — manifest reader, frame-table loader, review sidecar, exporter
-- [`src/fall_detection/radio/acquisition/protocol.py`](../src/fall_detection/radio/acquisition/protocol.py) — exact `CSI_DATA` parser and formatter
+- [`src/fall_detection/radio/records.py`](../src/fall_detection/radio/records.py) — CSI record types and the exact `CSI_DATA` row formatter
 
 ## Derived frame tables (schema 3)
 

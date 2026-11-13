@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 from test_gateway_tuning import identities
+from transport_config import transport_config
 
-from fall_detection.radio.espnow_config import EspnowTransportConfig
 from fall_detection.radio.profile import RadioProfile, RadioProfileError
 
 
@@ -18,7 +18,7 @@ def test_throughput_python_c_contract(tmp_path, mcs):
     profile = RadioProfile.from_mapping(
         dict(old_profile.as_dict(), schema_version=2, nominal_rate_hz=120)
     )
-    policy = EspnowTransportConfig(
+    policy = transport_config(
         schema_version=7,
         phy=f"ht20_mcs{mcs}_lgi",
         application_acknowledgements=False,
@@ -174,7 +174,7 @@ def test_queue96_requires_new_version_and_fits_control_queue_savings(tmp_path):
     profile = RadioProfile.from_mapping(
         dict(old_profile.as_dict(), schema_version=2, nominal_rate_hz=120)
     )
-    config = EspnowTransportConfig(
+    config = transport_config(
         schema_version=7,
         queue_capacity=96,
         records_per_slot=64,

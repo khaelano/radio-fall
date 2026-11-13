@@ -13,8 +13,8 @@ from typing import Any, TextIO
 
 from .._radio_native import storage_read_file
 from ..contracts import ARTIFACT_SCHEMA_VERSION
-from ..radio.acquisition.protocol import CSI_HEADER, CsiRecord, format_csi_record
-from ..radio.acquisition.recording_io import RecordingIO
+from ..radio.recording_io import RecordingIO
+from ..radio.records import CSI_HEADER, AnyCsiRecord, format_csi_record
 from .protocol import CollectionProtocol, Trial
 
 TIMING_HEADER = (
@@ -68,7 +68,16 @@ def _lock_events(stream: TextIO) -> None:
 
 
 class TrialCapture:
-    """Thread-safe, receiver-split writers for one trial attempt."""
+    """Thread-safe, receiver-split writers for one trial attempt.
+
+    The Rust transport journal in the session directory is the canonical record
+    of the radio data. With ``csv_sidecars`` the capture also writes per-receiver
+    ``csi.csv``, ``radio_timing.csv``, ``usb_clock_sync.csv`` and
+    ``gateway_timing.jsonl`` files. They are a temporary safety net until one
+    Rust-era hardware session has been verified with
+    ``tools/processing/check_storage_equivalence.py``; they will then be removed.
+    Without them the capture only keeps ``attempt.json``.
+    """
 
     def __init__(
         self,
@@ -77,6 +86,7 @@ class TrialCapture:
         *,
         receiver_ids: dict[str, str],
         recording_io: RecordingIO | None = None,
+        csv_sidecars: bool = True,
     ) -> None:
         if not receiver_ids:
             raise ValueError("TrialCapture requires at least one receiver binding")
@@ -87,6 +97,7 @@ class TrialCapture:
         self._metadata["artifact_schema_version"] = ARTIFACT_SCHEMA_VERSION
         self._metadata["status"] = "recording"
         self._io = recording_io
+        self._csv_sidecars = csv_sidecars
         _write_json(self.path / "attempt.json", self._metadata)
         self.receiver_ids = {
             mac.lower(): receiver_id for mac, receiver_id in receiver_ids.items()
@@ -95,6 +106,8 @@ class TrialCapture:
         self._gateway_streams: dict[str, TextIO] = {}
         self._clock_streams: dict[str, TextIO] = {}
         for receiver_id in sorted(set(self.receiver_ids.values())):
+            if not csv_sidecars:
+                break
             receiver_path = self.path / "receivers" / _slug(receiver_id)
             receiver_path.mkdir(parents=True, exist_ok=True)
             csi_file = self._open(
@@ -129,9 +142,15 @@ class TrialCapture:
         )
         return all(getattr(s, "saved", s.closed) for s in streams)
 
-    def write_radio(self, record: CsiRecord, host_receive_monotonic_ns: int) -> None:
-        """Append one decoded radio record and its timing sidecar row."""
+    def write_radio(self, record: AnyCsiRecord, host_receive_monotonic_ns: int) -> None:
+        """Append one decoded radio record and its timing sidecar row.
 
+        Does nothing when the CSV sidecars are disabled; the transport journal
+        already holds the record.
+        """
+
+        if not self._csv_sidecars:
+            return
         with self._lock:
             receiver_id = self.receiver_ids.get(record.receiver_mac.lower())
             if receiver_id is None:
@@ -157,7 +176,7 @@ class TrialCapture:
                 )
 
     def _write_gateway_timing(
-        self, receiver_id: str, record: CsiRecord, arrival_ns: int
+        self, receiver_id: str, record: AnyCsiRecord, arrival_ns: int
     ) -> None:
         if receiver_id not in self._gateway_streams:
             path = self.path / "receivers" / _slug(receiver_id) / "gateway_timing.jsonl"
@@ -241,8 +260,10 @@ class SessionArtifactStore:
         session_id: str,
         environment: dict[str, Any] | None = None,
         recording_io: RecordingIO | None = None,
+        csv_sidecars: bool = True,
     ) -> None:
         self._receiver_ids = _receiver_bindings(environment)
+        self._csv_sidecars = csv_sidecars
         self.root = output_dir / _slug(session_id)
         self.root.mkdir(parents=True, exist_ok=False)
         self.protocol = protocol
@@ -273,7 +294,13 @@ class SessionArtifactStore:
         _write_json(self.root / "session.json", self._session)
 
     @classmethod
-    def reopen(cls, root: Path, environment: dict[str, Any], recording_io=None):
+    def reopen(
+        cls,
+        root: Path,
+        environment: dict[str, Any],
+        recording_io=None,
+        csv_sidecars: bool = True,
+    ):
         """Lock and validate an existing session before allowing any mutation."""
         from .resume import load_session_resume
 
@@ -306,6 +333,7 @@ class SessionArtifactStore:
             store._receiver_ids = _receiver_bindings(environment)
             store._event_file, store._closed = stream, False
             store._io = recording_io
+            store._csv_sidecars = csv_sidecars
             return store, saved
         except BaseException:
             stream.close()
@@ -378,6 +406,7 @@ class SessionArtifactStore:
             metadata,
             receiver_ids=self._receiver_ids,
             recording_io=self._io,
+            csv_sidecars=self._csv_sidecars,
         )
 
     def finish(self, status: str, monotonic_ns: int, **updates: Any) -> None:

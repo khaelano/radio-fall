@@ -18,19 +18,18 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Any
 
-from .acquisition.availability import AvailabilitySnapshot
-from .acquisition.buffer import RollingCsiBuffer
-from .acquisition.gateway_diagnostics import (
+from .availability import AvailabilitySnapshot
+from .buffer import RollingCsiBuffer
+from .gateway_diagnostics import (
     DeliveryRates,
     GatewayDiagnostics,
     ReceiverDiagnostics,
 )
-from .acquisition.native import NativeRecord, backend_info, require_native
-from .acquisition.protocol import CsiRecord
-from .acquisition.recorder import CsiRecorder
-from .acquisition.telemetry import BackhaulTelemetrySnapshot
+from .native import backend_info, require_native
+from .records import AnyCsiRecord, NativeRecord
 from .settings import add_live_arguments, resolve_settings
 from .state import LiveState
+from .telemetry import BackhaulTelemetrySnapshot
 
 __all__ = ["LiveRadio", "ReceiverBinding", "add_live_arguments"]
 
@@ -69,15 +68,16 @@ class LiveRadio:
 
     Args:
         args: Parsed live arguments with ``config``, ``gateway_port`` and
-            ``output_dir``; ``receiver_id`` optionally selects the preview.
+            ``output_dir`` (the journal directory when ``journal_root`` is
+            absent); ``receiver_id`` optionally selects the preview.
         require_four: Require exactly four configured receivers.
         on_status: Receives human-readable radio state changes.
         record_sink: Receives each accepted first-capture record and its host
-            arrival time. Without a sink, records are written to per-receiver
-            CSV files below ``args.output_dir``.
-        journal_root: Returns the directory for transport journals at start.
+            arrival time. Rust has already journaled the record, so the viewer
+            needs no sink.
+        journal_root: Returns the directory for transport journals at start;
+            defaults to ``args.output_dir``.
         on_interruption: Called once per failed run with the failure reason.
-        recording_io: Optional native recording writer for the CSV fallback.
         acquisition_factory: Builds the native acquisition from JSON.
     """
 
@@ -87,10 +87,9 @@ class LiveRadio:
         *,
         require_four: bool = False,
         on_status: Callable[[str, bool], None] | None = None,
-        record_sink: Callable[[CsiRecord, int], None] | None = None,
+        record_sink: Callable[[AnyCsiRecord, int], None] | None = None,
         journal_root: Callable[[], Path | None] | None = None,
         on_interruption: Callable[[str], None] | None = None,
-        recording_io: Any = None,
         acquisition_factory: Callable[[str], Any] = _native_acquisition,
     ) -> None:
         self.settings = resolve_settings(args)
@@ -126,10 +125,8 @@ class LiveRadio:
         self._record_sink = record_sink
         self._journal_root = journal_root
         self._on_interruption = on_interruption
-        self._recording_io = recording_io
         self._factory = acquisition_factory
         self._acquisition: Any = None
-        self._recorders: dict[str, CsiRecorder] = {}
         self._rates = DeliveryRates()
         self._health: dict[str, Any] = {"session": {"state": "idle"}}
         self._health_lock = Lock()
@@ -235,8 +232,6 @@ class LiveRadio:
         if self._acquisition is not None:
             self._drain()
             self._refresh_health()
-        for recorder in self._recorders.values():
-            recorder.close()
         if error is not None:
             raise error
 
@@ -292,10 +287,6 @@ class LiveRadio:
             try:
                 if self._record_sink is not None:
                     self._record_sink(record, arrival_ns)
-                else:
-                    self._recorder(binding.receiver_id).write_record(
-                        record, host_receive_monotonic_ns=arrival_ns
-                    )
             except Exception as exc:  # noqa: BLE001 — storage failure ends delivery
                 self._sink_failure = f"record storage failed: {exc}"
                 self._report(self._sink_failure, False)
@@ -303,15 +294,6 @@ class LiveRadio:
                     self._on_interruption(self._sink_failure)
         self.buffers[binding.receiver_id].append(record)
         self._rates.observe(binding.receiver_id, 1, time.monotonic_ns())
-
-    def _recorder(self, receiver_id: str) -> CsiRecorder:
-        recorder = self._recorders.get(receiver_id)
-        if recorder is None:
-            recorder = self._recorders[receiver_id] = CsiRecorder(
-                Path(self._args.output_dir) / receiver_id,
-                recording_io=self._recording_io,
-            )
-        return recorder
 
     # ----------------------------------------------------------------- health
 

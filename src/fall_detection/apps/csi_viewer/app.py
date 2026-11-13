@@ -36,7 +36,15 @@ def _parser() -> argparse.ArgumentParser:
         "--receiver-id",
         help="receiver inventory ID to preview when multiple ESP-NOW gateway receivers are configured",
     )
-    parser.add_argument("--output-dir", type=Path, default=Path("data/raw"))
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("data/raw"),
+        help=(
+            "directory receiving the native transport journal "
+            "(transport/gateway/<run>); the viewer writes no other recording"
+        ),
+    )
     parser.add_argument(
         "--fps",
         type=int,

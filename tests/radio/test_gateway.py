@@ -9,20 +9,20 @@ from pathlib import Path
 
 import pytest
 from envelope_reference import Envelope
-
-from fall_detection import _radio_native as core
-from fall_detection.radio.acquisition.protocol import CsiRecord
-from fall_detection.radio.acquisition.wire import (
+from transport_config import transport_config
+from wire_encoder import (
     DecodedCsiDatagram,
     ReceiverStats,
     encode_csi_batch,
 )
-from fall_detection.radio.espnow_config import EspnowTransportConfig
+
+from fall_detection import _radio_native as core
 from fall_detection.radio.profile import (
     RadioInventory,
     RadioProfile,
     profile_fingerprint,
 )
+from fall_detection.radio.records import CsiRecord
 
 
 def inventory():
@@ -47,7 +47,7 @@ def inventory():
 def profile():
     return RadioProfile.from_mapping(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "profile_id": "test",
             "country_code": "ID",
             "band": "5ghz",
@@ -86,7 +86,7 @@ def batch(inv=None, seq=1, receiver=0, payload=None):
 
 
 def test_config_inventory_order_and_identity_fingerprint():
-    inv, p, c = inventory(), profile(), EspnowTransportConfig()
+    inv, p, c = inventory(), profile(), transport_config()
     c.validate(inv, p)
     raw = c.encode(123, inv, p)
     assert len(raw) == 108 and raw[:4] == b"CGCF" and raw[5:8] == bytes([4, 44, 6])
@@ -99,9 +99,8 @@ def test_config_inventory_order_and_identity_fingerprint():
     old = inv.as_dict()
     old["schema_version"] = 1
     old.pop("gateway")
-    assert RadioInventory.from_mapping(old).gateway is None
     with pytest.raises(ValueError):
-        c.validate(RadioInventory.from_mapping(old), p)
+        RadioInventory.from_mapping(old)
     with pytest.raises(ValueError):
         c.validate(
             replace(inv, transmitter=replace(inv.transmitter, target="esp32c6")), p
@@ -109,7 +108,7 @@ def test_config_inventory_order_and_identity_fingerprint():
 
 
 def test_current_policy_encodes_eight_batch_window():
-    current = EspnowTransportConfig(outstanding_batches=8, early_return_idle_ms=5)
+    current = transport_config(outstanding_batches=8, early_return_idle_ms=5)
     raw = current.encode(123, inventory(), profile())
     assert raw[4] == 7 and raw[29] == 8 and raw[100] == 5
     assert current.fingerprint(inventory(), profile()) != replace(
@@ -135,7 +134,7 @@ def test_current_policy_encodes_eight_batch_window():
 )
 def test_config_rejects_unsafe_policies(changes):
     with pytest.raises(ValueError):
-        EspnowTransportConfig(**changes)
+        transport_config(**changes)
 
 
 def test_rust_envelope_decoder_checks_crc_identity_and_size():
@@ -274,7 +273,7 @@ int main(int argc,char **argv){
     subprocess.run(
         [
             str(tmp_path / "check"),
-            EspnowTransportConfig(
+            transport_config(
                 schema_version=7, outstanding_batches=8, early_return_idle_ms=5
             )
             .encode(123, inventory(), profile())

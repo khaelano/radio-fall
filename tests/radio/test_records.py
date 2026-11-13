@@ -1,19 +1,17 @@
+from math import isclose, isnan
 from pathlib import Path
-from math import isnan
-from math import isclose
 
-import pytest
+from csi_line import record_from_csi_line
 
-from fall_detection.radio.acquisition.protocol import iter_csi_lines, parse_csi_line
-
+from fall_detection.radio.records import CSI_HEADER, format_csi_record
 
 FIXTURE = Path(__file__).parent / "fixtures" / "csi_sample.csv"
 
 
-def test_parse_csi_line_decodes_interleaved_imaginary_real_values():
+def test_csi_line_record_decodes_interleaved_imaginary_real_values():
     line = FIXTURE.read_text(encoding="utf-8").splitlines()[1]
 
-    record = parse_csi_line(line)
+    record = record_from_csi_line(line)
 
     assert record.sequence == 10
     assert record.mac == "1a:00:00:00:00:00"
@@ -25,33 +23,10 @@ def test_parse_csi_line_decodes_interleaved_imaginary_real_values():
     assert record.phases[1] == 0.0
 
 
-def test_iter_csi_lines_skips_header_and_bad_lines():
-    lines = FIXTURE.read_text(encoding="utf-8").splitlines()
-    lines.append("CSI_DATA,this,is,not,a,valid,line")
-
-    records = list(iter_csi_lines(lines))
-
-    assert [record.sequence for record in records] == [10, 11, 13]
-
-
-@pytest.mark.parametrize(
-    "line",
-    [
-        "not CSI data",
-        "CSI_DATA,1,aa:bb:cc:dd:ee:ff,-40",
-        'CSI_DATA,1,gg:bb:cc:dd:ee:ff,-40,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,100,0,36,0,4,0,"[1,2,3,4]"',
-        'CSI_DATA,1,aa:bb:cc:dd:ee:ff,-40,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,100,0,36,0,5,0,"[1,2]"',
-    ],
-)
-def test_parse_csi_line_rejects_invalid_input(line):
-    with pytest.raises(ValueError):
-        parse_csi_line(line)
-
-
-def test_parse_csi_line_masks_invalid_first_word_without_shifting_subcarriers():
+def test_csi_line_record_masks_invalid_first_word_without_shifting_subcarriers():
     line = 'CSI_DATA,2,aa:bb:cc:dd:ee:ff,-40,11,1,0,0,1,1,0,0,0,0,-95,0,11,0,100,0,36,0,6,1,"[9,9,3,4,0,5]"'
 
-    record = parse_csi_line(line)
+    record = record_from_csi_line(line)
 
     assert record.first_word_invalid is True
     assert isnan(record.amplitudes[0])
@@ -62,16 +37,6 @@ def test_parse_csi_line_masks_invalid_first_word_without_shifting_subcarriers():
     assert record.csi[2] == complex(5, 0)
 
 
-def test_parse_csi_line_rejects_trailing_mac_garbage():
-    line = (
-        FIXTURE.read_text(encoding="utf-8")
-        .splitlines()[1]
-        .replace("00,-42", "00:garbage,-42")
-    )
-    with pytest.raises(ValueError, match="MAC"):
-        parse_csi_line(line)
-
-
 def test_parse_ht20_payload_exposes_ltf_blocks_and_raw_csi():
     values = [component for pair in ([20, 0] for _ in range(128)) for component in pair]
     line = (
@@ -80,7 +45,7 @@ def test_parse_ht20_payload_exposes_ltf_blocks_and_raw_csi():
         + '"'
     )
 
-    record = parse_csi_line(line)
+    record = record_from_csi_line(line)
 
     assert record.sig_mode == 1
     assert record.bandwidth == 0
@@ -100,7 +65,7 @@ def test_c6_he20_payload_exposes_he_ltf_channel_estimate():
         + '"'
     )
 
-    record = parse_csi_line(line)
+    record = record_from_csi_line(line)
 
     assert record.sig_mode == 4
     assert record.csi_length == 490
@@ -117,7 +82,7 @@ def test_he_ltf_calibration_is_lazy_until_a_phase_view_requests_it():
         + '"'
     )
 
-    record = parse_csi_line(line)
+    record = record_from_csi_line(line)
 
     assert record._ltf_blocks_cache is None
     assert record.mean_i == 20.0
@@ -126,3 +91,12 @@ def test_he_ltf_calibration_is_lazy_until_a_phase_view_requests_it():
 
     assert record.channel_estimate_block is not None
     assert record._ltf_blocks_cache is not None
+
+
+def test_format_csi_record_round_trips_a_python_record_to_its_row():
+    line = FIXTURE.read_text(encoding="utf-8").splitlines()[1]
+
+    row = format_csi_record(record_from_csi_line(line))
+
+    assert row == line
+    assert len(row.split(",", 24)) == len(CSI_HEADER.split(","))

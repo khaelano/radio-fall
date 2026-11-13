@@ -37,8 +37,8 @@ from fall_detection.presentation.radio.pacing import (
 from fall_detection.presentation.radio.pacing import (
     frame_interval_ms,
 )
-from fall_detection.radio.acquisition.recording_io import RecordingIO
 from fall_detection.radio.live import LiveRadio, add_live_arguments
+from fall_detection.radio.recording_io import RecordingIO
 from fall_detection.radio.settings import DEFAULT_CONFIG
 
 DEFAULT_PROTOCOL = DEFAULT_CONFIG.parent / "collection/fall_simple.json"
@@ -85,6 +85,15 @@ def _parser() -> argparse.ArgumentParser:
         type=float,
         default=5,
         help="interval between background recording writes (default: 5 s)",
+    )
+    parser.add_argument(
+        "--no-csv-sidecars",
+        action="store_true",
+        help=(
+            "skip the per-receiver CSV and timing sidecars; the native transport "
+            "journal remains the only raw record (the sidecars are a temporary "
+            "safety net and will be removed)"
+        ),
     )
     parser.add_argument(
         "--resume-session",
@@ -233,7 +242,6 @@ def _run(
             ),
             journal_root=lambda: controller.session_root,
             on_interruption=lambda reason: controller.interrupt_radio(reason),
-            recording_io=recording_io,
         )
     except (OSError, RuntimeError, ValueError) as exc:
         parser.error(str(exc))
@@ -256,6 +264,7 @@ def _run(
         environment={
             **radio.environment(),
             "video": video.config.metadata() if video else None,
+            "csv_sidecars": not args.no_csv_sidecars,
             "recording_io": {
                 "flush_interval_s": args.recording_flush_seconds,
                 "compression": "zstd" if recording_io.compressed else "none",
@@ -265,6 +274,7 @@ def _run(
         telemetry_provider=lambda: radio.telemetry_snapshot(),
         video_recorder=video,
         recording_io=recording_io,
+        csv_sidecars=not args.no_csv_sidecars,
         manual_confirmation_required=not args.continuous,
     )
     args._archive_controller = controller

@@ -164,7 +164,8 @@ int main(void){
 
 @pytest.mark.parametrize("config_version", [7])
 def test_receiver_retries_return_notice_until_new_grant(tmp_path, config_version):
-    from fall_detection.radio.espnow_config import EspnowTransportConfig
+    from transport_config import transport_config
+
     from fall_detection.radio.profile import RadioInventory, RadioProfile
 
     cc = shutil.which("cc")
@@ -317,7 +318,7 @@ int main(int argc,char **argv){
     )
     profile = RadioProfile.from_mapping(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "profile_id": "test",
             "country_code": "ID",
             "band": "5ghz",
@@ -326,7 +327,7 @@ int main(int argc,char **argv){
             "nominal_rate_hz": 80,
         }
     )
-    config = EspnowTransportConfig(
+    config = transport_config(
         schema_version=config_version,
         maximum_retries=2 if config_version == 4 else 1,
         outstanding_batches=8,

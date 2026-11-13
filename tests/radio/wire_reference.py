@@ -4,8 +4,7 @@ import re
 import struct
 from math import nan
 
-from fall_detection.radio.acquisition.protocol import CsiRecord
-from fall_detection.radio.acquisition.wire import (
+from wire_encoder import (
     BATCH_HEADER,
     BATCH_HEADER_SIZE,
     BATCH_MAGIC,
@@ -25,6 +24,8 @@ from fall_detection.radio.acquisition.wire import (
     DecodedCsiPacket,
     ReceiverStats,
 )
+
+from fall_detection.radio.records import CsiRecord
 
 
 def _mac_text(value: bytes) -> str:
@@ -121,7 +122,6 @@ def decode_csi_datagram(data: bytes) -> DecodedCsiDatagram:
         noise_floor=noise_floor,
         timestamp_us=timestamp,
         csi=tuple(csi),
-        raw_line="",
         receiver_mac=receiver_mac,
         transport_sequence=transport_sequence,
         tx_timestamp_us=tx_timestamp_us,

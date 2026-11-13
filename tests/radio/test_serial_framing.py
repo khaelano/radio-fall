@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from fall_detection.radio.acquisition.serial_framing import (
+from fall_detection.radio.provisioning import (
     MAX_PAYLOAD,
     TYPE_CLOCK_SYNC,
     TYPE_CSI_PACKET,

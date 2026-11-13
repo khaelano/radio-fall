@@ -1025,7 +1025,11 @@ pairs with the imaginary byte first. Amplitude and phase decoding happen in
 packets are read.
 
 Convert or reuse tables with `FrameStore.ensure(source, frames_dir)`, which
-converts only when the source fingerprint changed. `FrameStore.frames(
+converts only when the source fingerprint changed. The check and the
+conversion hold an exclusive advisory lock on the sibling file
+`<frames_dir>.lock`, so concurrent processes serialise and a waiting one reuses
+the tables the first one published (the lock file is left in place).
+`FrameStore.frames(
 receiver_id=..., capture_start_ns=..., capture_end_ns=..., columns=...)` prunes
 row groups by statistics, and `attempts()`, `phases()` and
 `attempt_frames(index, receiver_id)` return the small tables and one attempt

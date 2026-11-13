@@ -8,7 +8,7 @@ use arrow_array::{Array, RecordBatch};
 use arrow_schema::SchemaRef;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde_json::Value;
-use std::fs::File;
+use std::fs::{File, TryLockError};
 use std::path::{Path, PathBuf};
 
 const TABLES: [&str; 3] = ["frames.parquet", "attempts.parquet", "phases.parquet"];
@@ -131,25 +131,98 @@ impl FrameStore {
     }
 }
 
+/// Stage reported by [`ensure_frames`] to its progress callback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnsureStage {
+    /// Another process or thread holds the conversion lock; reported once.
+    Waiting,
+    /// The tables are stale and conversion is about to start.
+    Converting,
+}
+
+/// Exclusive advisory lock released when dropped, on every path.
+struct ConversionLock(File);
+
+impl Drop for ConversionLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
+/// Path of the lock file guarding `directory`.
+///
+/// It is the sibling `<directory>.lock` rather than a file inside the
+/// directory, so the lock stays valid while the directory is created or
+/// replaced. The file is never deleted; removing it would let two holders lock
+/// different inodes.
+fn lock_path(directory: &Path) -> Result<PathBuf> {
+    let name = directory
+        .file_name()
+        .ok_or_else(|| Error(format!("{} has no directory name", directory.display())))?;
+    let mut name = name.to_os_string();
+    name.push(".lock");
+    Ok(directory.with_file_name(name))
+}
+
+fn acquire_lock(directory: &Path, progress: &mut dyn FnMut(EnsureStage)) -> Result<ConversionLock> {
+    let path = lock_path(directory)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = File::options()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)?;
+    match file.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => {
+            progress(EnsureStage::Waiting);
+            file.lock()?;
+        }
+        Err(TryLockError::Error(error)) => return Err(error.into()),
+    }
+    Ok(ConversionLock(file))
+}
+
 /// Open the converted tables of `source`, converting only when needed.
 ///
 /// The tables are reused when `conversion.json` records the source's current
 /// fingerprint, the current schema version and a complete file set. Conversion
 /// writes complete files atomically, so an interrupted run leaves the previous
-/// tables untouched. `before_convert` runs just before a conversion starts.
+/// tables untouched.
+///
+/// The staleness check, the conversion and the publish all run under an
+/// exclusive advisory lock on the sibling file `<directory>.lock`, so
+/// concurrent callers (threads or processes) on one directory are serialised.
+/// A caller that has to wait reports [`EnsureStage::Waiting`] once, then
+/// re-checks currency and reuses tables another caller just finished.
+/// [`EnsureStage::Converting`] is reported just before a conversion starts.
+/// An explicit `rebuild` always converts, even after waiting. If the lock file
+/// cannot be created (for example a read-only location), current tables are
+/// still reused without locking.
 ///
 /// Returns the store and whether a conversion happened.
 pub fn ensure_frames(
     source: &dyn Vfs,
     directory: &Path,
     rebuild: bool,
-    before_convert: &mut dyn FnMut(),
+    progress: &mut dyn FnMut(EnsureStage),
 ) -> Result<(FrameStore, bool)> {
     let fingerprint = source.fingerprint()?;
+    let _lock = match acquire_lock(directory, progress) {
+        Ok(lock) => lock,
+        // A read-only location can still serve tables that are already current.
+        Err(_) if !rebuild && tables_current(directory, &fingerprint) => {
+            return Ok((FrameStore::open(directory)?, false));
+        }
+        Err(error) => return Err(error),
+    };
     if !rebuild && tables_current(directory, &fingerprint) {
         return Ok((FrameStore::open(directory)?, false));
     }
-    before_convert();
+    progress(EnsureStage::Converting);
     convert_session(source, directory, &ConvertOptions::default())?;
     Ok((FrameStore::open(directory)?, true))
 }

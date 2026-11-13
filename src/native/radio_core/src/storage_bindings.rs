@@ -13,11 +13,11 @@ use radio_storage::arrow_array::ffi_stream::FFI_ArrowArrayStream;
 use radio_storage::arrow_array::{RecordBatch, RecordBatchIterator};
 use radio_storage::arrow_schema::SchemaRef;
 use radio_storage::{
-    ArchiveOptions, ConvertOptions, FrameQuery, FrameScope, MigrateOptions, OpenedSession, Table,
-    annotation_path, annotations_dir_for, archive_manifest, convert_session, ensure_frames,
-    extract_archive, extract_session_file, frame_counts, migrate_archive, open_session,
-    open_source, read_session_file, resolve_source, session_files, verify_against_source,
-    verify_archive, verify_dir, vfs, write_archive,
+    ArchiveOptions, ConvertOptions, EnsureStage, FrameQuery, FrameScope, MigrateOptions,
+    OpenedSession, Table, annotation_path, annotations_dir_for, archive_manifest, convert_session,
+    ensure_frames, extract_archive, extract_session_file, frame_counts, migrate_archive,
+    open_session, open_source, read_session_file, resolve_source, session_files,
+    verify_against_source, verify_archive, verify_dir, vfs, write_archive,
 };
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -238,8 +238,10 @@ impl FrameStore {
     /// Open the tables of `source`, converting its journals only when needed.
     ///
     /// The tables are reused when `conversion.json` records the source's
-    /// current fingerprint and the current schema version. `progress` is called
-    /// with a message just before a conversion starts.
+    /// current fingerprint and the current schema version. The check and any
+    /// conversion hold an exclusive lock on `<frames_dir>.lock`. `progress` is
+    /// called once with a message if another conversion holds the lock, and
+    /// again just before this call converts.
     #[staticmethod]
     #[pyo3(signature = (source, frames_dir, rebuild=false, progress=None))]
     fn ensure(
@@ -249,12 +251,17 @@ impl FrameStore {
         rebuild: bool,
         progress: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
-        let message = format!("Converting {} into typed frame tables", source.display());
+        let converting = format!("Converting {} into typed frame tables", source.display());
+        let waiting = format!("Waiting for another conversion of {}", frames_dir.display());
         let (inner, _) = py
             .detach(|| {
                 let opened = vfs::open(&source)?;
-                ensure_frames(opened.as_ref(), &frames_dir, rebuild, &mut || {
+                ensure_frames(opened.as_ref(), &frames_dir, rebuild, &mut |stage| {
                     if let Some(callback) = &progress {
+                        let message = match stage {
+                            EnsureStage::Waiting => &waiting,
+                            EnsureStage::Converting => &converting,
+                        };
                         Python::attach(|py| {
                             let _ = callback.call1(py, (message.as_str(),));
                         });

@@ -127,6 +127,45 @@ def test_ensure_frames_reuses_current_tables_and_reconverts_stale_ones(tmp_path)
     assert FrameStore.open(frames).manifest["protocol_hash"] == "deadbeef"
 
 
+def test_concurrent_ensure_from_two_processes_publishes_consistent_tables(tmp_path):
+    import multiprocessing
+
+    from ensure_worker import ensure_tables
+
+    source = build_session(tmp_path / "session", batches=8)
+    frames = tmp_path / "frames"
+    context = multiprocessing.get_context("spawn")
+    barrier, queue = context.Barrier(2), context.Queue()
+    workers = [
+        context.Process(
+            target=ensure_tables, args=(str(source), str(frames), barrier, queue)
+        )
+        for _ in range(2)
+    ]
+    for worker in workers:
+        worker.start()
+    results = [queue.get(timeout=120) for _ in workers]
+    for worker in workers:
+        worker.join(timeout=60)
+    assert [result.get("error") for result in results] == [None, None]
+    assert all(worker.exitcode == 0 for worker in workers)
+
+    fingerprint = storage_source_fingerprint(str(source))
+    assert {result["fingerprint"] for result in results} == {fingerprint}
+    assert all(result["frames"] == 16 for result in results)
+    assert all(result["attempts"] == 1 for result in results)
+    # Exactly one process converted; the other waited for it or found it done.
+    converting = [
+        message
+        for result in results
+        for message in result["messages"]
+        if message.startswith("Converting")
+    ]
+    assert len(converting) == 1
+    assert FrameStore.open(frames).source_fingerprint == fingerprint
+    assert (tmp_path / "frames.lock").is_file()
+
+
 def test_directory_and_archive_sources_look_the_same(tmp_path):
     import zipfile
 

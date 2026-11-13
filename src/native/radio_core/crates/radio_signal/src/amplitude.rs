@@ -128,6 +128,9 @@ pub fn decode_magnitudes(
 }
 
 /// Masked magnitudes, normalized values, and per-tone lower and upper bounds.
+pub type PreparedAmplitude = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>);
+
+/// Masked magnitudes, normalized values, and per-tone lower and upper bounds.
 ///
 /// Each tone is scaled to `[-1, 1]` across the rows where it is finite. A tone
 /// whose finite values are all equal scales to zero, and a tone with no finite
@@ -139,7 +142,7 @@ pub fn prepare_amplitude(
     offsets: &[usize],
     first_word: &[bool],
     driver_valid: &[bool],
-) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>), String> {
+) -> Result<PreparedAmplitude, String> {
     let rows = first_word.len();
     let masked = decode_magnitudes(i, q, offsets, first_word, driver_valid)?;
     let mut normalized = vec![f64::NAN; masked.len()];

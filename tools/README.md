@@ -28,7 +28,7 @@ tools/
   `verify-archive`; Python: `fall_detection._radio_native.storage_*`).
 - `benchmark_*.py` measure offline amplitude preprocessing. Sequence model
   training is defined in `notebooks/latest/03_training.ipynb`. Live radio and
-  detector runtime checks are Rust binaries in `radio_detection`; the earlier
+  detector runtime checks are Rust examples in `radio_detection`; the earlier
   Python live-detector and radio-pipeline tools were removed with the Python
   acquisition path.
 

@@ -24,7 +24,7 @@ The existing Python reader replayed A's 1911 batches and 3820 records. A predate
 reference-event logging and cannot reproduce its live clock estimates. B retains
 initial clock samples, 26 gateway-status events, 7934 reference frames and nine
 periodic clock requests, plus the operational wire config and health summary.
-The native `cargo run --example mapped_replay -- RUN_JOURNAL_DIR` example now reconstructs B's
+The native `mapped_replay` tool (now `cargo run -p radio-detection --example mapped_replay -- RUN_JOURNAL_DIR`) reconstructs B's
 initial fit, periodic requests, responses and authoritative round validation,
 using bounded JSONL reads. It mapped all 3757 record timestamps twice with digest
 `35d20eedf8b1aad741b543adca3b173d1e78cbe8bfa0350641bd857afbc00800`.
@@ -48,7 +48,7 @@ Data is retained through existing DVC configuration without changing remotes:
 
 Capture C adds batch-acceptance events containing original arrival, availability,
 run/boot/batch identity and mapped capture timestamps for every record. Native
-`cargo run --example accepted_replay -- RUN_JOURNAL_DIR` reconstructs reference state at acceptance,
+`cargo run -p radio-detection --example accepted_replay -- RUN_JOURNAL_DIR` reconstructs reference state at acceptance,
 checks each event against the raw envelope and requires exact timestamp equality.
 All 1912 batches and 3822 records passed, producing digest
 `c9a71cae6c7fbc18b5e13e74eb5ba3e3dc2aeef4bf4d1b13dd044715d9311995`.

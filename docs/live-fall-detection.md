@@ -41,7 +41,7 @@ Transparent cells are missing samples. The backend keeps the raw stream and
 previews only for the GUI (`preview` in the native configuration).
 
 Captures B and C replay; capture A lacks reference timing evidence. The
-`live_detect` example in `radio_detection` (`cargo run --example live_detect`)
+`live_detect` example in `radio_detection` (`cargo run -p radio-detection --example live_detect`)
 runs the same backend from a JSON configuration without Python.
 
 ## Runtime

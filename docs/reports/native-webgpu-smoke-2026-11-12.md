@@ -32,7 +32,7 @@ are disposable smoke artifacts under `/tmp/radio-detection-gpu-*`.
 
 An additional unprofiled four-second LSTM run still took 1.126–1.329 s over
 20 submissions on the same synthetic input. Profiling overhead therefore does
-not explain the observed slowdown. The `qualify` example (`cargo run --example qualify`) accepts `-` as its
+not explain the observed slowdown. The `qualify` example (`cargo run -p radio-detection --example qualify`) accepts `-` as its
 profile argument to disable profiling. `qualify_all` loads verified bundles,
 keeps all nine CPU and GPU sessions resident in one native environment, and
 compares caller-supplied inputs. It does not verify those inputs' provenance or

@@ -417,7 +417,7 @@ def _open_serial_devices() -> list[SerialProvisioningDevice]:
                 connection.close()
                 continue
             devices.append(SerialProvisioningDevice(connection, status))
-        except Exception:
+        except Exception:  # noqa: BLE001 — a port that fails discovery is skipped
             if connection is not None:
                 try:
                     connection.close()

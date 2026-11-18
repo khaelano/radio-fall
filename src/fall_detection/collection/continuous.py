@@ -75,12 +75,12 @@ class ContinuousController(SessionController):
                 self._open_gap("segment ended or input interrupted")
                 if self._attempt_status == "invalid":
                     self._retry_locked()
-                elif self._attempt_status == "pending_review":
-                    if (
-                        self._last_capture is not None
-                        and self._last_capture.writes_complete
-                    ):
-                        self._accept_locked()
+                elif (
+                    self._attempt_status == "pending_review"
+                    and self._last_capture is not None
+                    and self._last_capture.writes_complete
+                ):
+                    self._accept_locked()
             if self._state is SessionState.READY:
                 self._open_gap("waiting for ready inputs or next segment")
                 if self._health_ready_locked():

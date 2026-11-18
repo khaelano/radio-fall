@@ -8,15 +8,15 @@ isolated process so a blocked camera/encoder cannot block CSI ingestion.
 from __future__ import annotations
 
 import csv
-from collections import deque
-from dataclasses import asdict, dataclass
-from fractions import Fraction
 import importlib.util
 import json
 import multiprocessing
+import time
+from collections import deque
+from dataclasses import asdict, dataclass
+from fractions import Fraction
 from pathlib import Path
 from queue import Empty, Full
-import time
 from typing import Any
 
 from .capture import _write_json
@@ -237,7 +237,7 @@ class _AttemptVideo:
             for packet in self.stream.encode():
                 self.output.mux(packet)
             self.output.close()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — any encoder failure invalidates the video
             error = error or str(exc)
         finally:
             self.csv_file.flush()
@@ -338,7 +338,7 @@ def _video_worker(
                     pending.popleft()
             if preview is not None:
                 preview.publish(frame, read_completed)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — worker process boundary; reported to the parent
         error = f"{type(exc).__name__}: {exc}"
         if attempt is not None and not attempt.closed:
             attempt.finish(time.monotonic_ns(), error)

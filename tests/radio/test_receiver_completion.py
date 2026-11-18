@@ -1,11 +1,10 @@
 """Execute the real receiver worker across an asynchronous send completion."""
 
-from pathlib import Path
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
-
 from test_gateway_io import _idf_headers
 
 

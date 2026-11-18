@@ -1,11 +1,11 @@
 """Real codec/timestamp checks without a camera, network or inference model."""
 
-from fractions import Fraction
 import csv
 import json
 import multiprocessing
-from queue import Queue
 import time
+from fractions import Fraction
+from queue import Queue
 from types import SimpleNamespace
 
 import numpy as np
@@ -15,8 +15,8 @@ from fall_detection.collection.video import (
     VideoConfig,
     VideoRecorder,
     _AttemptVideo,
-    _VideoPreview,
     _video_worker,
+    _VideoPreview,
 )
 
 
@@ -254,6 +254,7 @@ def test_video_finalization_timeout_fails_pending_clip_instead_of_waiting_foreve
 ):
     pytest.importorskip("av")
     import multiprocessing
+
     from fall_detection.collection import video as module
 
     camera = VideoRecorder(VideoConfig("/dev/video-test", 64, 48))

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Convert Pandoc Markdown to ODT with live Zotero citation fields.
 
 Usage:
@@ -34,8 +33,9 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 FILTER_URL = "https://retorque.re/zotero-better-bibtex/exporting/zotero.lua"
 FILTER_SHA256 = "a9ccec3de37954ad3b66c67c2d05e41a4c7ad3a99a4cfd99e184cebb822faf02"

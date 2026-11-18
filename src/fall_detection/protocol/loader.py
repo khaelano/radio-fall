@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from .model import (
     CollectionProtocol,
@@ -78,7 +80,7 @@ def _duration(value: Any, path: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ProtocolError(f"{path}: expected a non-negative number")
     result = float(value)
-    if result < 0 or result != result or result == float("inf"):
+    if result < 0 or not math.isfinite(result):
         raise ProtocolError(f"{path}: expected a finite non-negative number")
     return result
 
@@ -272,11 +274,13 @@ def _ordered_trials(
                     raise ProtocolError(
                         f"{scenario.id}: {name} must be a cardinal direction"
                     )
-            if equipment in ("chair", "chair_and_mattress"):
-                if attributes.get("chair_direction") not in _CARDINAL_ORDER:
-                    raise ProtocolError(
-                        f"{scenario.id}: chair setup requires chair_direction"
-                    )
+            if (
+                equipment in ("chair", "chair_and_mattress")
+                and attributes.get("chair_direction") not in _CARDINAL_ORDER
+            ):
+                raise ProtocolError(
+                    f"{scenario.id}: chair setup requires chair_direction"
+                )
 
         def setup_key(scenario: Scenario) -> tuple[int, int, int, int]:
             attributes = scenario.attributes

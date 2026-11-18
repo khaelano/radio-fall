@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 RAG CLI -- Semantic search across the radio-fall-detection paper library.
 
@@ -17,7 +16,6 @@ Usage:
 
 import json
 import math
-import os
 import re
 import sys
 import time
@@ -122,7 +120,7 @@ def chunk_document(text: str, source: dict) -> list[dict]:
     chunks = []
     section_starts = []
     for i, line in enumerate(lines):
-        if line.startswith("## ") or line.startswith("### "):
+        if line.startswith(("## ", "### ")):
             section_starts.append(i)
 
     if section_starts and section_starts[0] > MIN_CHUNK_LINES:
@@ -277,7 +275,7 @@ def build_index():
         try:
             with open(src["path"], "r", encoding="utf-8", errors="replace") as f:
                 text = f.read()
-        except Exception as e:
+        except OSError as e:
             print(f"  [skip] {src['rel']}: {e}", file=sys.stderr)
             continue
         doc_chunks = chunk_document(text, src)
@@ -359,7 +357,7 @@ def load_index():
 
 def query(search_text: str, top_k: int = TOP_K, show_snippet: bool = True):
     """Search indexed documents, print results."""
-    vec, chunks, matrix, meta = load_index()
+    vec, chunks, matrix, _meta = load_index()
 
     query_vec = vec.transform_query(search_text)
     if query_vec.sum() == 0:
@@ -371,8 +369,7 @@ def query(search_text: str, top_k: int = TOP_K, show_snippet: bool = True):
     scores = scores.flatten()
 
     # Get top-k indices
-    if len(scores) < top_k:
-        top_k = len(scores)
+    top_k = min(top_k, len(scores))
     top_indices = np.argsort(scores)[::-1][:top_k]
 
     # Filter zero-score results
@@ -416,11 +413,11 @@ def query(search_text: str, top_k: int = TOP_K, show_snippet: bool = True):
                             if len(line) > 120:
                                 line = line[:117] + "..."
                             formatted.append(line)
-                        print(f"   Context:")
+                        print("   Context:")
                         for line in formatted[:SNIPPET_LINES]:
                             print(f"     {line}")
-                except Exception:
-                    pass
+                except (OSError, KeyError, TypeError) as e:
+                    print(f"   (snippet unavailable: {e})", file=sys.stderr)
 
         print()
 

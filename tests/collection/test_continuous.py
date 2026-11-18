@@ -78,9 +78,11 @@ def test_resume_keeps_completed_segment_and_retries_partial(tmp_path):
     now = [0.0]
     env = {"receiver_ids": {"00:11:22:33:44:55": "rx-1"}}
     protocol = continuous_protocol(10, 3)
-    options = dict(
-        clock=lambda: now[0], monotonic_ns=lambda: int(now[0] * 1e9), environment=env
-    )
+    options = {
+        "clock": lambda: now[0],
+        "monotonic_ns": lambda: int(now[0] * 1e9),
+        "environment": env,
+    }
     controller = ContinuousController(
         protocol, tmp_path, session_id_factory=lambda: "test", **options
     )

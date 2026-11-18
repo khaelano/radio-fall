@@ -63,7 +63,7 @@ def load_video_timeline(attempt: RecordedAttempt) -> VideoTimeline:
             raise ValueError("Unsupported video artifact filename")
     origin = metadata["attempt_started_monotonic_ns"]
     if not isinstance(origin, int) or isinstance(origin, bool):
-        raise ValueError("Missing video host clock")
+        raise ValueError("Missing video host clock")  # noqa: TRY004 — malformed file metadata
     if attempt.metadata.get("started_monotonic_ns", origin) != origin:
         raise ValueError("Video and attempt start clocks differ")
     observations, presentation = [], []
@@ -218,7 +218,7 @@ class VideoWorker:
                     index = reader.timeline.frame_at(seconds)
                     pixels = reader.read(index) if index is not None else None
                     result = (token, seconds, reader.timeline, index, pixels, "")
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 — worker boundary; shown in the UI
                     result = (token, seconds, None, None, None, str(exc))
                 with self.condition:
                     if not self.stopped:

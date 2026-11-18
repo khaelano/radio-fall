@@ -3,6 +3,7 @@
 import shutil
 import subprocess
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -320,10 +321,18 @@ def test_pairing_verifies_both_usb_identities_before_storing_keys(
 
     inventory = RadioSettings.load().inventory
     statuses = [
-        dict(role="relay", target="esp32c6", mac="10:bd:a3:9c:ee:94", relay_version=1),
-        dict(
-            role="gateway", target="esp32c6", mac=inventory.gateway.mac, relay_version=1
-        ),
+        {
+            "role": "relay",
+            "target": "esp32c6",
+            "mac": "10:bd:a3:9c:ee:94",
+            "relay_version": 1,
+        },
+        {
+            "role": "gateway",
+            "target": "esp32c6",
+            "mac": inventory.gateway.mac,
+            "relay_version": 1,
+        },
     ]
     if wrong_gateway:
         statuses[1]["mac"] = "02:00:00:00:00:ff"
@@ -392,7 +401,7 @@ def test_status_rejects_wrong_gateway_before_forwarding_a_transmitter_request(
     from fall_detection.radio import wireless_control
 
     class WrongGateway:
-        gateway_status = {
+        gateway_status: ClassVar[dict[str, str]] = {
             "role": "gateway",
             "target": "esp32c6",
             "mac": "02:00:00:00:00:ff",

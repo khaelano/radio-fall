@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 pdf2md.py -- PDF -> Markdown converter for the paper library.
 
@@ -28,7 +27,6 @@ import re
 import shutil
 import subprocess
 import sys
-import unicodedata
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -51,6 +49,7 @@ def extract_text_fast(pdf_path: str) -> str:
         capture_output=True,
         text=True,
         timeout=120,
+        check=False,
     )
     return r.stdout if r.returncode == 0 else ""
 
@@ -144,17 +143,16 @@ def promote_headings(lines: list[str]) -> list[str]:
             continue
 
         is_heading = False
-        if SECTION_NUM.match(stripped):
-            is_heading = True
-        elif stripped.lower() in KNOWN_HEADINGS and len(stripped) <= 40:
-            is_heading = True
-        elif _looks_like_heading(stripped):
+        if (
+            SECTION_NUM.match(stripped)
+            or (stripped.lower() in KNOWN_HEADINGS and len(stripped) <= 40)
+            or _looks_like_heading(stripped)
+        ):
             is_heading = True
 
-        if is_heading:
-            # Guard: never promote lines ending with sentence punctuation
-            if stripped.endswith((".", "?", ":", ",", ";")):
-                is_heading = False
+        # Guard: never promote lines ending with sentence punctuation
+        if is_heading and stripped.endswith((".", "?", ":", ",", ";")):
+            is_heading = False
 
         if is_heading:
             out.append(f"## {stripped}")
@@ -191,7 +189,7 @@ def convert_with_docling(pdf_path: str, out_dir: Path, force_ocr: bool = False) 
         f"[docling] converting {Path(pdf_path).name} (OCR={'on' if force_ocr else 'off'})...",
         file=sys.stderr,
     )
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800, check=False)
     if r.returncode != 0:
         print(f"[docling] failed: {r.stderr[-500:]}", file=sys.stderr)
         return False

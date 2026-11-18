@@ -153,7 +153,11 @@ laptop are off-machine backups.
 
 1. **Cache warm-up.** Notebook stage caches and the integrity and phase-motion
    caches rebuild once because their keys hash moved source files. Forcing it
-   would rerun the long preprocessing and rewrite derived datasets.
+   would rerun the long preprocessing and rewrite derived datasets. The
+   18 November import change (package `__init__.py` files no longer re-export
+   names) edited `session_frames.py` and `integrity.py` again, so the integrity
+   and phase-motion caches rebuild once more; the sequence exports do not hash
+   either file and stay valid.
 2. **Historical references left as they are.** `docs/reports/ble-c6-timing-2026-11-01.md`
    and `docs/archive/ble-delivery-policy.md` cite `radio.experiments.ble_timing`,
    which was removed before this work. The "648 Python tests" count in

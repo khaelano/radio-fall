@@ -6,12 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from fall_detection.collection.capture import SessionMetadata
-from fall_detection.protocol import (
-    CollectionProtocol,
-    ProtocolError,
-    Trial,
-    load_protocol,
-)
+from fall_detection.protocol.loader import load_protocol
+from fall_detection.protocol.model import CollectionProtocol, ProtocolError, Trial
 
 
 def choose_protocol(QtWidgets: Any, initial_path: Path) -> CollectionProtocol | None:

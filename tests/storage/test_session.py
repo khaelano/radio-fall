@@ -25,7 +25,7 @@ from fall_detection.apps.session_inspector.review import (
     ReviewError,
     ReviewStore,
 )
-from fall_detection.session import load_session
+from fall_detection.session.models import load_session
 
 SessionResolutionError = StorageError
 

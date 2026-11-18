@@ -221,7 +221,9 @@ The inspector backend (frame loading, review, export, video) lives in
 `apps/session_inspector/` beside its `ui/` package, where the main window is
 split into concern mixins (`ui/window_*.py`). `analysis/` keeps its
 private helpers (`_io`, `_cache_keys`, `_frames`) at the top level, and no
-package `__init__.py` re-exports names; import from the defining module.
+package `__init__.py` re-exports names; import from the defining module
+(`tests/test_architecture.py` enforces this; only the root package sets
+`__version__`).
 Core dependencies exclude pandas and zstandard, which come with the `analysis`
 extra. The grant-timing model is a tool (`tools/radio/grant_timing.py`), not a
 package module.

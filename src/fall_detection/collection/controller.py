@@ -12,7 +12,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Protocol
 
-from ..protocol import CollectionProtocol, Trial
+from ..protocol.model import CollectionProtocol, Trial
 from ..radio.recording_io import RecordingIO
 from ..radio.telemetry import (
     BackhaulTelemetrySnapshot,

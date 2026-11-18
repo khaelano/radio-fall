@@ -11,7 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fall_detection._radio_native import storage_extract_archive
-from fall_detection.session import SessionBundle
+from fall_detection.session.models import SessionBundle
 
 from .review import ReviewDocument
 

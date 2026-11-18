@@ -29,11 +29,8 @@ from fall_detection.collection.continuous import (
 )
 from fall_detection.collection.controller import OperatorCommand, SessionController
 from fall_detection.collection.resume import load_session_resume
-from fall_detection.protocol import (
-    ProtocolError,
-    load_protocol,
-    select_blocks,
-)
+from fall_detection.protocol.loader import load_protocol, select_blocks
+from fall_detection.protocol.model import ProtocolError
 from fall_detection.radio.live import LiveRadio
 from fall_detection.radio.recording_io import RecordingIO
 from fall_detection.radio.settings import DEFAULT_CONFIG, add_live_arguments

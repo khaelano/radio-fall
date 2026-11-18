@@ -20,7 +20,7 @@ from fall_detection.apps.session_inspector.review import (
     ReviewStore,
 )
 from fall_detection.apps.session_inspector.video import VideoReader, load_video_timeline
-from fall_detection.session import load_session
+from fall_detection.session.models import load_session
 
 
 def test_a_review_of_an_archived_session_is_saved_under_annotations(

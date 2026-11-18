@@ -150,3 +150,30 @@ def test_live_acquisition_is_owned_by_rust():
             ):
                 violations.append(f"{relative}:{node.lineno}")
     assert not violations, f"Python live code opens radios directly: {violations}"
+
+
+def test_package_inits_define_no_names():
+    """Package ``__init__.py`` files hold only a docstring; import from modules.
+
+    Re-exporting names from a package hides which module defines them and lets
+    two import paths reach one object. The root package may set ``__version__``.
+    """
+    violations = []
+    for path in sorted(PACKAGE.rglob("__init__.py")):
+        relative = path.relative_to(PACKAGE)
+        body = ast.parse(path.read_text(encoding="utf-8")).body
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+        ):
+            body = body[1:]  # the module docstring
+        for node in body:
+            is_version = (
+                relative == Path("__init__.py")
+                and isinstance(node, ast.Assign)
+                and [getattr(t, "id", None) for t in node.targets] == ["__version__"]
+            )
+            if not is_version:
+                violations.append(f"{relative}:{node.lineno}")
+    assert not violations, f"Package __init__.py defines names: {violations}"

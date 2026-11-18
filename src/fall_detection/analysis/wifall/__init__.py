@@ -2,8 +2,5 @@
 
 Requires the project's ``analysis`` dependency extra. See docs/wifall.md for
 paper fidelity, raw-session preparation and reproducible evaluation commands.
+The detector and its configuration are in ``analysis.wifall.model``.
 """
-
-from .model import WiFallConfig, WiFallDetector
-
-__all__ = ["WiFallConfig", "WiFallDetector"]

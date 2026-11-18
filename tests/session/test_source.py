@@ -5,7 +5,8 @@ import json
 import pytest
 from inspector_sessions import archive_of
 
-from fall_detection.session import SessionSource, load_session, scan_sessions
+from fall_detection.session.models import load_session, scan_sessions
+from fall_detection.session.source import SessionSource
 
 
 def test_source_reads_a_directory_and_its_archive_the_same(session_factory, tmp_path):

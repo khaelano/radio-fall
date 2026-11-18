@@ -24,7 +24,7 @@ from fall_detection.radio.phase import (
     HT20_SLOT_INDICES,
 )
 from fall_detection.radio.records import CSI_HEADER, CsiRecord
-from fall_detection.session import load_session
+from fall_detection.session.models import load_session
 
 
 def test_attempt_data_synthesizes_csv_rows_and_marks_invalid_first_word(

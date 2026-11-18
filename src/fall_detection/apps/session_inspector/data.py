@@ -30,7 +30,7 @@ from fall_detection.radio.phase import (
     HT20_VALID_SUBCARRIERS,
 )
 from fall_detection.radio.records import CSI_HEADER, CsiRecord, format_csi_record
-from fall_detection.session import RecordedAttempt, attempt_indices
+from fall_detection.session.models import RecordedAttempt, attempt_indices
 
 CancellationCallback = Callable[[], bool]
 _FRAME_CACHE_SIZE = 4

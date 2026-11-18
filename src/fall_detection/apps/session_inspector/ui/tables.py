@@ -6,11 +6,7 @@ from typing import Any
 
 from PySide6 import QtCore, QtGui
 
-from fall_detection.session import (
-    RecordedAttempt,
-    RecordedTrial,
-    SessionBundle,
-)
+from fall_detection.session.models import RecordedAttempt, RecordedTrial, SessionBundle
 
 from ..data import (
     TableData,

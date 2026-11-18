@@ -6,11 +6,11 @@ import numpy as np
 import pytest
 from sklearn.exceptions import NotFittedError
 
-from fall_detection.analysis.wifall import WiFallConfig, WiFallDetector
 from fall_detection.analysis.wifall.features import (
     singular_value_features,
     statistical_features,
 )
+from fall_detection.analysis.wifall.model import WiFallConfig, WiFallDetector
 from fall_detection.analysis.wifall.signal import (
     aggregate_streams,
     weighted_moving_average,

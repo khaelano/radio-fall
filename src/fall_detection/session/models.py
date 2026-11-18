@@ -19,12 +19,8 @@ from typing import Any
 import pyarrow as pa
 
 from .._radio_native import FrameStore
-from ..protocol import (
-    CollectionProtocol,
-    ProtocolError,
-    Trial,
-    protocol_from_mapping,
-)
+from ..protocol.loader import protocol_from_mapping
+from ..protocol.model import CollectionProtocol, ProtocolError, Trial
 from .schema import ARTIFACT_SCHEMA_VERSION
 from .source import SessionSource
 

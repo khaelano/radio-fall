@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from fall_detection.protocol import (
-    ProtocolError,
+from fall_detection.protocol.loader import (
     load_protocol,
     protocol_from_mapping,
     select_blocks,
 )
+from fall_detection.protocol.model import ProtocolError
 
 
 def _protocol():

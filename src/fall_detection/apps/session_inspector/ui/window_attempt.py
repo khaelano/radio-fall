@@ -6,10 +6,7 @@ from typing import Any
 
 from PySide6 import QtCore
 
-from fall_detection.session import (
-    RecordedAttempt,
-    RecordedTrial,
-)
+from fall_detection.session.models import RecordedAttempt, RecordedTrial
 
 from ..formatting import _json_text
 from ..review import (

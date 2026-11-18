@@ -740,7 +740,7 @@ explicitly; raw files remain unchanged. See
 from pathlib import Path
 
 from fall_detection.apps.session_inspector.data import load_attempt_data
-from fall_detection.session import scan_sessions
+from fall_detection.session.models import scan_sessions
 
 sessions = scan_sessions(Path("data/raw/sessions"))
 for session in sessions:
@@ -790,7 +790,7 @@ regenerable; do not edit session files to add labels.
 from pathlib import Path
 import json
 
-from fall_detection.session import scan_sessions
+from fall_detection.session.models import scan_sessions
 
 rows = []
 for session in scan_sessions(Path("data/raw/sessions")):

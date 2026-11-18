@@ -27,7 +27,7 @@ from fall_detection.apps.session_inspector.ui.values_panel import (
     ValuesPanel,
 )
 from fall_detection.apps.session_inspector.ui.window import SessionInspectorWindow
-from fall_detection.session import load_session
+from fall_detection.session.models import load_session
 
 
 @pytest.fixture

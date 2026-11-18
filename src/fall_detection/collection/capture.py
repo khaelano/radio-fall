@@ -12,7 +12,7 @@ from threading import RLock
 from typing import Any, TextIO
 
 from .._radio_native import storage_read_file
-from ..protocol import CollectionProtocol, Trial
+from ..protocol.model import CollectionProtocol, Trial
 from ..radio.recording_io import RecordingIO
 from ..session.schema import ARTIFACT_SCHEMA_VERSION
 

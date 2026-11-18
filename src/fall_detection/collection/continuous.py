@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..protocol import protocol_from_mapping
+from ..protocol.loader import protocol_from_mapping
 from .controller import OperatorCommand, SessionController, SessionState
 
 

@@ -7,8 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..protocol import CollectionProtocol, load_protocol
-from ..session import ARTIFACT_SCHEMA_VERSION, SessionSource, read_json_object
+from ..protocol.loader import load_protocol
+from ..protocol.model import CollectionProtocol
+from ..session.models import read_json_object
+from ..session.schema import ARTIFACT_SCHEMA_VERSION
+from ..session.source import SessionSource
 from .capture import SessionMetadata
 
 

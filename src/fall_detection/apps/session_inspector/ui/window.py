@@ -11,11 +11,7 @@ from typing import Any
 
 from PySide6 import QtCore, QtWidgets
 
-from fall_detection.session import (
-    RecordedAttempt,
-    RecordedTrial,
-    SessionBundle,
-)
+from fall_detection.session.models import RecordedAttempt, RecordedTrial, SessionBundle
 
 from ..data import AttemptData
 from ..review import LoadedReview, ReviewDocument, ReviewStore

@@ -8,7 +8,7 @@ from test_controller import FakeClock, protocol, ready_health
 from fall_detection.collection.capture import SessionMetadata
 from fall_detection.collection.controller import OperatorCommand, SessionController
 from fall_detection.collection.resume import load_session_resume
-from fall_detection.protocol import protocol_from_mapping
+from fall_detection.protocol.loader import protocol_from_mapping
 
 ENV = {"receiver_ids": {"00:11:22:33:44:55": "rx-1"}}
 

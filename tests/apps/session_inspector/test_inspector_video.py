@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from inspector_sessions import FrameSpec, attempt_origin
 
 from fall_detection.apps.session_inspector.video import VideoReader, load_video_timeline
-from fall_detection.session import load_session
+from fall_detection.session.models import load_session
 
 
 @pytest.fixture

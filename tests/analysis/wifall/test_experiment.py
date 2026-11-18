@@ -4,13 +4,13 @@ import joblib
 import numpy as np
 import pytest
 
-from fall_detection.analysis.wifall import WiFallConfig
 from fall_detection.analysis.wifall.dataset import WindowDataset
 from fall_detection.analysis.wifall.experiment import (
     grouped_holdout,
     run_experiment,
     save_experiment,
 )
+from fall_detection.analysis.wifall.model import WiFallConfig
 
 
 def dataset():

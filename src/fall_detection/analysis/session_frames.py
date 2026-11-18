@@ -27,7 +27,8 @@ from .._radio_native import (
     FrameStore,
     storage_open_source,
 )
-from ..session import SessionBundle, SessionSource, load_session
+from ..session.models import SessionBundle, load_session
+from ..session.source import SessionSource
 
 ANALYSIS_SCHEMA_VERSION = 1
 """Version of the attempt, phase, and packet semantics defined in this module."""

@@ -6,11 +6,7 @@ from typing import Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from fall_detection.session import (
-    SessionBundle,
-    SessionReadError,
-    scan_sessions,
-)
+from fall_detection.session.models import SessionBundle, SessionReadError, scan_sessions
 
 from ..formatting import REVIEW_FILE, _json_text, _review_state
 from ..review import (

@@ -8,9 +8,7 @@ from threading import Event
 
 from PySide6 import QtCore
 
-from fall_detection.session import (
-    RecordedAttempt,
-)
+from fall_detection.session.models import RecordedAttempt
 
 from ..data import (
     load_attempt_data_for_ui,

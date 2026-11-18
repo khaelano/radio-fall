@@ -6,11 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from fall_detection.protocol import (
-    ProtocolError,
-    load_protocol,
-    protocol_from_mapping,
-)
+from fall_detection.protocol.loader import load_protocol, protocol_from_mapping
+from fall_detection.protocol.model import ProtocolError
 
 
 def protocol(**overrides):

@@ -6,9 +6,7 @@ from pathlib import Path
 
 from PySide6 import QtCore, QtWidgets
 
-from fall_detection.session import (
-    SessionSource,
-)
+from fall_detection.session.source import SessionSource
 
 from ..exporter import ExportCancelled, export_curated_bundle, session_size
 from ..formatting import _human_size

@@ -115,7 +115,10 @@ def test_native_replay_matches_offline_preprocessing(tmp_path):
         detector.stop()
     assert health["state"] == "finished", health
     assert health["error"] is None
-    rows = [json.loads(line) for line in (output / "predictions.jsonl").open()]
+    rows = [
+        json.loads(line)
+        for line in (output / "predictions.jsonl").read_text().splitlines()
+    ]
     # How many windows score depends on host load (late results become
     # unknown); every published row must still be well formed.
     assert rows
@@ -132,7 +135,9 @@ def test_native_replay_matches_offline_preprocessing(tmp_path):
 
     anchor, lowest, signal, presence = _offline_inputs(CAPTURE)
     normalizer = Normalizer.load(MODELS / "cnn/normalizer-4s.npz")
-    index = [json.loads(line) for line in (output / "inputs.jsonl").open()]
+    index = [
+        json.loads(line) for line in (output / "inputs.jsonl").read_text().splitlines()
+    ]
     tensors = np.fromfile(output / "inputs.f32", dtype="<f4").reshape(-1, 480, 1964)
     # Under load a newer window can replace a pending one before inference.
     assert len(index) == len(tensors) >= len(rows)

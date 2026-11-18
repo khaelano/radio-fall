@@ -125,6 +125,10 @@ def synthetic_session(path):
 
 @pytest.mark.parametrize("rate", [96, 120])
 def test_preprocessing_notebook_stages_and_cache(tmp_path, monkeypatch, rate):
+    import matplotlib.pyplot as plt
+
+    # The cells call plt.show() for interactive use; on Agg it only warns.
+    monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
     session = synthetic_session(tmp_path / "source")
     monkeypatch.setattr(SequenceArtifacts, "load_source", lambda self: session)
     original = SequenceArtifacts.output.fget

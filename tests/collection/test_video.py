@@ -45,7 +45,8 @@ def test_video_pts_preserve_elapsed_time_and_frame_sidecar(tmp_path):
     assert [float(f.pts * f.time_base) for f in decoded] == pytest.approx(
         [0.05, 0.09, 0.25], abs=0.0001
     )
-    rows = list(csv.DictReader((tmp_path / "camera_frames.csv").open()))
+    with (tmp_path / "camera_frames.csv").open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
     assert [
         int(row["host_read_completed_monotonic_ns"]) - start for row in rows
     ] == list(offsets)

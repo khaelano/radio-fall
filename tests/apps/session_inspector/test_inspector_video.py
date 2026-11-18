@@ -69,7 +69,8 @@ def test_video_rejects_wrong_clock_and_corrupt_timing(video_attempt):
     metadata["attempt_started_monotonic_ns"] -= 1000
     path.write_text(json.dumps(metadata))
     timing = video_attempt.path / "camera_frames.csv"
-    rows = list(csv.DictReader(timing.open()))
+    with timing.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
     rows[1]["host_read_completed_monotonic_ns"] = rows[0][
         "host_read_completed_monotonic_ns"
     ]

@@ -101,6 +101,9 @@ laptop are off-machine backups.
   13.3 MB (47%) of the 28.1 MB archive. The archive is tracked with DVC under
   `data/experiments/storage-check-20261118/`; Git ignores the 96 MB working
   directory, which duplicates its contents.
+- **Sidecars removed.** The collector no longer writes CSV sidecars (`771abf2`).
+  The full suite passed (637 passed, 2 skipped). The updated collector has not yet
+  recorded on hardware.
 - **Backup.** `dvc push` uploaded the model bundles, the figures, the four
   version-3 session archives (about 6.6 GB), the 12 November detector captures
   and runs, and the storage-check archive. The original pre-migration archives
@@ -112,33 +115,28 @@ laptop are off-machine backups.
 
 ## Not done
 
-### Waiting on a decision
-
-1. **CSV sidecar removal.** The hardware check above passed, so the sidecars
-   can be removed; the collector still writes them by default.
-
 ### Follow-ups found
 
-2. **Equivalence checker gaps.** Given an archive, the checker does not decode
+1. **Equivalence checker gaps.** Given an archive, the checker does not decode
    `.zst` members, so a Rust-era archive reports "no CSV sidecars"; the session
    directory works. It also skips, without counting a mismatch, any receiver
    whose three sidecar files differ in row count. Neither affected the result
    above, where every frame was matched.
-3. **Currency check ignores output hashes.** `tables_current` accepts a table set
+2. **Currency check ignores output hashes.** `tables_current` accepts a table set
    whose `conversion.json` hashes do not match the files, which is how the stale
    manifest above went unnoticed; `storage_verify` detects it in about 0.5 s on
    a 358 MB table. The lock prevents the race through `FrameStore.ensure`, but
    direct `convert_session` calls are not locked. Adding a hash or size check is
    a proposal, not implemented.
-4. **Pre-existing Ruff errors** (36), mostly in `tools/papers/`, the video
+3. **Pre-existing Ruff errors** (36), mostly in `tools/papers/`, the video
    modules and `protocol/loader.py`.
 
 ### Deliberately not done
 
-5. **Cache warm-up.** Notebook stage caches and the integrity and phase-motion
+4. **Cache warm-up.** Notebook stage caches and the integrity and phase-motion
    caches rebuild once because their keys hash moved source files. Forcing it
    would rerun the long preprocessing and rewrite derived datasets.
-6. **Historical references left as they are.** `docs/reports/ble-c6-timing-2026-11-01.md`
+5. **Historical references left as they are.** `docs/reports/ble-c6-timing-2026-11-01.md`
    and `docs/archive/ble-delivery-policy.md` cite `radio.experiments.ble_timing`,
    which was removed before this work. The "648 Python tests" count in
    `docs/amplitude-preprocessing.md` is a dated record.
@@ -152,5 +150,6 @@ laptop are off-machine backups.
 
 ## Suggested order
 
-1. Remove the CSV sidecars from the collector.
+1. Record a short session with the updated collector to confirm it records and
+   archives without sidecars on hardware.
 2. Decide whether `tables_current` should check output hashes.

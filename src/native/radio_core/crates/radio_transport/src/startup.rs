@@ -60,7 +60,9 @@ pub fn with_run(config: &[u8], run: u64) -> Result<Vec<u8>, String> {
 ///
 /// A gateway still configured for an earlier run is stopped. After a failed
 /// run (`recovering`), a faulted relay epoch is restarted when the firmware
-/// supports it. The call then waits a bounded time for relay readiness.
+/// supports it; the gateway reboots to do so. The call then waits a bounded
+/// time for relay readiness and, after a reboot, for the new gateway boot, and
+/// drops retained gateway statuses from the old boot.
 pub fn prepare<T: FrameIo>(
     controller: &mut Controller<T>,
     gateway_mac: &str,
@@ -83,19 +85,39 @@ pub fn prepare<T: FrameIo>(
         controller.command(false, &stop, Duration::from_secs(2))?;
     }
     let faulted = status["relay_fault"] == true;
+    // Relay recovery restarts the gateway, which then reports a new boot_id.
+    let mut restarted_from = None;
     if recovering && faulted {
         if status["relay_recovery_version"] != 1 {
             return Err("gateway firmware lacks automatic relay recovery".into());
         }
+        let boot = status["boot_id"]
+            .as_u64()
+            .ok_or("gateway status lacks its boot identity")?;
         controller.recover_relay(Duration::from_secs(2))?;
+        restarted_from = Some(boot);
     }
     let deadline = std::time::Instant::now() + ready_timeout;
-    while status["relay_ready"] != true || status["relay_fault"] == true {
+    while status["relay_ready"] != true
+        || status["relay_fault"] == true
+        || (restarted_from.is_some() && status["boot_id"].as_u64() == restarted_from)
+    {
         if std::time::Instant::now() >= deadline {
             return Err("wireless reference handshake timed out".into());
         }
         std::thread::sleep(Duration::from_millis(200));
         status = controller.discover(false, Duration::from_secs(2))?;
+    }
+    if let Some(old_boot) = restarted_from {
+        // Acquisition replays retained frames before reading the port, and a
+        // periodic status from before the restart would fail its boot check.
+        // Serial order puts all of them before the new-boot status just read.
+        controller.retain_pending(|relay, frame| {
+            relay
+                || frame.kind != 6
+                || serde_json::from_slice::<serde_json::Value>(&frame.data)
+                    .map_or(true, |status| status["boot_id"].as_u64() != Some(old_boot))
+        });
     }
     Ok(())
 }

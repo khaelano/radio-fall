@@ -67,6 +67,12 @@ impl<T: FrameIo> Controller<T> {
         (self.io, self.pending)
     }
 
+    /// Keep only the retained unsolicited frames, tagged as relayed or not,
+    /// for which `keep` returns true; the rest never reach acquisition.
+    pub fn retain_pending(&mut self, mut keep: impl FnMut(bool, &Frame) -> bool) {
+        self.pending.retain(|(relay, frame)| keep(*relay, frame));
+    }
+
     /// Attempt both stop writes even after a failed transaction; no ACK is promised.
     pub fn stop_run(&mut self, run: u64) -> Result<(), String> {
         if run == 0 {

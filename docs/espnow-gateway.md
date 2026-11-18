@@ -188,9 +188,11 @@ prevent acquisition readiness. Existing v1–v4 policies/fingerprints retain the
 ACK behavior. See [ACK-less implementation and measurements](reports/espnow-ackless-2026-11-02.md).
 
 Each run adds `transport/gateway/<run-id>/manifest.json`, `envelopes.bin`,
-`events.jsonl` and `availability.jsonl`. Attempts add `gateway_timing.jsonl` next
-to the unchanged CSI and timing CSVs. Capture-time attribution and deferred close
-apply to both gateway and historical BLE sessions. Missing clock alignment is
+`events.jsonl` and `availability.jsonl`. Sessions recorded before 18 November
+2026 also have per-attempt `gateway_timing.jsonl` next to the CSI and timing CSVs;
+newer sessions keep the radio data only in the journal. Frames are attributed to
+attempts by capture time. Missing clock alignment is an error, not permission to
+substitute arrival time. Missing clock alignment is
 an error, not permission to substitute arrival time. Derived phase-motion caches
 include the new timing sidecar.
 

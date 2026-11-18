@@ -49,7 +49,7 @@ def running_collection(
     closes it after this context. Every cleanup runs if an earlier one fails.
     """
     with ExitStack() as resources:
-        resources.callback(controller.flush_radio)
+        resources.callback(controller.flush_recording)
         resources.callback(radio.stop)
         resources.callback(_end_session, controller)
         if resume_session is None:

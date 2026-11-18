@@ -72,8 +72,8 @@ class LiveRadio:
         require_four: Require exactly four configured receivers.
         on_status: Receives human-readable radio state changes.
         record_sink: Receives each accepted first-capture record and its host
-            arrival time. Rust has already journaled the record, so the viewer
-            needs no sink.
+            arrival time. Rust has already journaled the record, so neither the
+            viewer nor the collector passes one.
         journal_root: Returns the directory for transport journals at start;
             defaults to ``args.output_dir``.
         on_interruption: Called once per failed run with the failure reason.

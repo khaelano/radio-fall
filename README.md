@@ -147,14 +147,12 @@ Each session writes one directory under `data/raw/sessions/<session-id>/`:
 - `protocol.json` — pinned protocol snapshot used for the trial queue.
 - `events.jsonl` — append-only phase and operator events.
 - `trials/<trial>/attempt_<n>/attempt.json` — attempt disposition and telemetry.
-- `trials/<trial>/attempt_<n>/receivers/<rx>/csi.csv` — one row per sensing
-  frame for that receiver.
-- `trials/<trial>/attempt_<n>/receivers/<rx>/radio_timing.csv` — timing row for
-  each CSI row.
-- `trials/<trial>/attempt_<n>/receivers/<rx>/gateway_timing.jsonl` — mapped sensing
-  times, original receiver timestamps, run/boot identities, and uncertainty.
 - `transport/gateway/<run-id>/` — raw batch envelopes, clock exchanges, round logs,
-  connection/queue events, and immutable availability bins.
+  connection/queue events, and immutable availability bins. This journal is the
+  only raw record of the radio data; conversion assigns frames to attempts by
+  capture time. Sessions recorded before 18 November 2026 also have per-receiver
+  `csi.csv`, `radio_timing.csv` and `gateway_timing.jsonl` sidecars under
+  `trials/<trial>/attempt_<n>/receivers/<rx>/`.
 
 The same transmitted frame appears once under every receiver that heard it; do
 not merge those rows. Historical USB captures can include ambient traffic; gateway firmware verifies the

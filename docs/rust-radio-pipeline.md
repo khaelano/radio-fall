@@ -5,9 +5,8 @@ gateway startup and relay recovery, USB framing, CRC and CSI decoding,
 journal-before-ACK acceptance, clock fitting and capture mapping, availability
 bins, duplicate-capture removal, signal preprocessing and inference. Python
 applications receive accepted records and health snapshots; they display data,
-run the collection workflow. The collector also writes temporary per-attempt CSV
-sidecars from Rust-formatted rows (`--no-csv-sidecars` turns them off); the
-viewer writes none. Firmware and radio settings are unchanged.
+run the collection workflow. Neither the collector nor the viewer writes CSV
+files; the transport journal is the raw record. Firmware and radio settings are unchanged.
 
 | Crate | Responsibility |
 | --- | --- |

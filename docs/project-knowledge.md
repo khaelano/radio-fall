@@ -58,9 +58,9 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   segments, four receivers) passed `tools/processing/check_storage_equivalence.py`:
   all 45,824 frames matched their CSV rows with no mismatch
   ([status report](reports/architecture-rehaul-status-2026-11-13.md#update-18-november)).
-  The collector still writes the CSV sidecars by default (`--no-csv-sidecars`
-  disables them); they are now eligible for removal and made up 47% of that
-  session's archive. Journals in the
+  The collector then stopped writing the sidecars, which made up 47% of that
+  session's archive; the transport journal is now the only raw radio record, and
+  older sessions keep their sidecars. Journals in the
   session directory are included in the finalized archive. See the
   [specification](storage-layout-spec.md) and
   [report](reports/storage-layout-migration-2026-11-13.md).
@@ -70,7 +70,7 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   duplicate-capture removal and restarts for the viewer, collector and detector.
   Python apps receive accepted records and health through `NativeAcquisition`
   and only display and run the collection workflow; the viewer's own CSV
-  recorder was removed. The collector still writes temporary CSV sidecars (see
+  recorder was removed, and the collector no longer writes CSV sidecars (see
   the storage entry above). The Python acquisition modules, Python detector, USB transmitter
   link and `csi-gateway-benchmark` were removed. Phase calibration and clock
   fitting have one Rust implementation; independent NumPy/Python references

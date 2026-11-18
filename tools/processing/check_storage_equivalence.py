@@ -9,8 +9,10 @@ Example:
     uv run python tools/processing/check_storage_equivalence.py \\
         data/raw/sessions/<id>.zip data/interim/frames/<id>/frames.parquet
 
-The first argument may also be a session directory, which is how a freshly
-collected session is checked before the collector stops writing CSV sidecars.
+The first argument may also be a session directory. Use one for sessions whose
+sidecars are stored as ``.zst`` members: the directory reader decodes them, the
+archive reader does not. Collectors since 18 November 2026 write no sidecars, so
+only older sessions can be checked.
 """
 
 from __future__ import annotations

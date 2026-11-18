@@ -68,7 +68,7 @@ def ready_health() -> HealthSnapshot:
 
 
 def make_controller(
-    tmp_path: Path, clock: FakeClock, *, video_recorder=None, csv_sidecars=True
+    tmp_path: Path, clock: FakeClock, *, video_recorder=None
 ) -> SessionController:
     return SessionController(
         protocol_from_mapping(protocol()),
@@ -78,7 +78,6 @@ def make_controller(
         session_id_factory=lambda: "session",
         video_recorder=video_recorder,
         environment={"receiver_ids": {"00:11:22:33:44:55": "rx-1"}},
-        csv_sidecars=csv_sidecars,
     )
 
 
@@ -104,17 +103,6 @@ def test_radio_interruption_invalidates_attempt_before_display_refresh(tmp_path)
         controller.dispatch(OperatorCommand.ACCEPT)
 
 
-def test_controller_passes_the_csv_sidecar_option_to_each_attempt(tmp_path: Path):
-    controller = make_controller(tmp_path, FakeClock(), csv_sidecars=False)
-    start_ready(controller)
-
-    controller.dispatch(OperatorCommand.START_TRIAL)
-
-    attempt_dir = tmp_path / "session" / "trials" / "001_one" / "attempt_01"
-    assert (attempt_dir / "attempt.json").exists()
-    assert not (attempt_dir / "receivers").exists()
-
-
 def test_controller_runs_timed_trial_and_writes_bundle(tmp_path: Path):
     clock = FakeClock()
     controller = make_controller(tmp_path, clock)
@@ -134,8 +122,8 @@ def test_controller_runs_timed_trial_and_writes_bundle(tmp_path: Path):
     controller.dispatch(OperatorCommand.ACCEPT)
     assert controller.state is SessionState.COMPLETE
     attempt_dir = tmp_path / "session" / "trials" / "001_one" / "attempt_01"
-    assert (attempt_dir / "attempt.json").exists()
-    assert (attempt_dir / "receivers" / "rx-1" / "csi.csv").exists()
+    # Radio data lives only in the session's transport journal.
+    assert sorted(p.name for p in attempt_dir.iterdir()) == ["attempt.json"]
     session_manifest = json.loads((tmp_path / "session" / "session.json").read_text())
     attempt_manifest = json.loads((attempt_dir / "attempt.json").read_text())
     assert session_manifest["artifact_schema_version"] == 2
@@ -255,74 +243,6 @@ def test_attempt_persists_boot_aware_radio_telemetry_delta(tmp_path: Path):
     )
     assert payload["radio_telemetry_delta"]["complete"]
     assert payload["radio_telemetry_delta"]["values"]["records"] == 5
-
-
-def test_ble_delayed_records_route_by_capture_time_across_attempts(tmp_path: Path):
-
-    from fall_detection.radio.records import CsiRecord
-
-    clock = FakeClock()
-    controller = SessionController(
-        protocol_from_mapping(protocol()),
-        tmp_path,
-        clock=clock,
-        monotonic_ns=lambda: int(clock.value * 1_000_000_000),
-        session_id_factory=lambda: "ble-session",
-        environment={
-            "receiver_ids": {"00:11:22:33:44:55": "rx-1"},
-            "transport": "ble",
-            "ble_transport": {"drain_ms": 300},
-        },
-    )
-    start_ready(controller)
-    controller.dispatch(OperatorCommand.START_TRIAL)
-    clock.advance(1)
-    controller.dispatch(OperatorCommand.ABORT)
-    controller.dispatch(OperatorCommand.RETRY)
-    clock.advance(0.01)
-    controller.dispatch(OperatorCommand.START_TRIAL)
-    record = CsiRecord(
-        1,
-        "00:11:22:33:44:66",
-        -40,
-        -95,
-        100,
-        (1 + 2j,),
-        receiver_mac="00:11:22:33:44:55",
-        run_id=123,
-        transmitter_boot_id=11,
-        receiver_boot_id=21,
-        capture_host_monotonic_ns=900_000_000,
-    )
-    controller.write_radio(record, 1_050_000_000)
-    controller.write_radio(
-        record.replace(sequence=2, capture_host_monotonic_ns=1_020_000_000),
-        1_060_000_000,
-    )
-    # Alignment failures and arrivals beyond the previous attempt's drain
-    # deadline cannot become fresh observations in the new attempt.
-    controller.write_radio(
-        record.replace(sequence=3, capture_host_monotonic_ns=None), 1_070_000_000
-    )
-    clock.advance(0.4)
-    controller.tick()
-    controller.write_radio(record.replace(sequence=4), 1_410_000_000)
-    controller.dispatch(OperatorCommand.ABORT)
-    controller.flush_radio()
-    root = controller.session_root / "trials" / "001_one"
-    first = (
-        (root / "attempt_01" / "receivers" / "rx-1" / "csi.csv")
-        .read_text()
-        .splitlines()
-    )
-    second = (
-        (root / "attempt_02" / "receivers" / "rx-1" / "csi.csv")
-        .read_text()
-        .splitlines()
-    )
-    assert len(first) == 2 and first[1].startswith("CSI_DATA,1,")
-    assert len(second) == 2 and second[1].startswith("CSI_DATA,2,")
-    controller.dispatch(OperatorCommand.END_SESSION)
 
 
 class FakeVideo:

@@ -29,26 +29,24 @@ The inventory and profile are read-only session inputs. Use a profile matching
 the provisioned hardware; band/channel/profile changes require provisioning.
 The operator confirms the planned activity during ACTION and accepts, retries
 or skips each attempt after recovery. The session manifest pins the inventory,
-profile, transport policy and receiver identities. CSI attempts remain artifact
-schema 2 with immutable receiver-specific recordings and timing sidecars.
+profile, transport policy and receiver identities. Attempts remain artifact
+schema 2; each attempt directory holds only `attempt.json` (and video files when
+a camera is enabled).
 
-During recording, the native writer compresses CSI, timing and transport/session
-journals directly into complete Zstandard frames in `.zst` files. Compression
+During recording, the native writer compresses the session event log directly
+into complete Zstandard frames in `.zst` files. Compression
 happens on the disk worker at each configured flush; no plain stream copy is
 written. Small mutable JSON metadata and video frame indexes remain plain.
 
-The Rust transport journal in the session directory is the canonical raw record
-and is included in the archive. By default the collector also writes the
-per-receiver `csi.csv`, `radio_timing.csv`, `usb_clock_sync.csv` and
-`gateway_timing.jsonl` sidecars. They are a temporary safety net until one
-Rust-era hardware session has been verified with
-`tools/processing/check_storage_equivalence.py`; they will then be removed.
-Pass `--no-csv-sidecars` to skip them (the session manifest records
-`environment.csv_sidecars`; resuming a session with a different sidecar mode is
-rejected). With sidecars off there are no attempt streams to close, so Accept no
-longer waits for the `drain_ms` window; late frames reach the attempt only
-through the transport journal, which assigns them by capture time during
-conversion. The journal writes and flushes each envelope to the operating system
+The Rust transport journal in the session directory is the only raw record of
+the radio data and is included in the archive. Conversion assigns its frames to
+attempts by capture time, so frames that arrive after an attempt ends still
+belong to it. Collectors before 18 November 2026 also wrote per-receiver
+`csi.csv`, `radio_timing.csv`, `usb_clock_sync.csv` and `gateway_timing.jsonl`
+sidecars; they were removed after a hardware session matched them frame for frame
+with `tools/processing/check_storage_equivalence.py`, which made new archives
+about half as large. The session manifest records `environment.csv_sidecars:
+false`. Older sessions keep their sidecars and can still be resumed. The journal writes and flushes each envelope to the operating system
 before the gateway ACK (no fsync), so a process crash loses no accepted frame.
 The CSI viewer keeps no recording of its own.
 

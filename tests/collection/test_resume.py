@@ -24,7 +24,7 @@ def test_resume_reads_and_appends_compressed_events(tmp_path):
     old._recording_io = writer
     old.start_session(SessionMetadata("p01"))
     old.dispatch(OperatorCommand.END_SESSION)
-    old.flush_radio()
+    old.flush_recording()
     writer.close()
     root = tmp_path / "session"
     assert not (root / "events.jsonl").exists()
@@ -34,7 +34,7 @@ def test_resume_reads_and_appends_compressed_events(tmp_path):
     new._recording_io = writer
     new.resume_session(root)
     new.dispatch(OperatorCommand.END_SESSION)
-    new.flush_radio()
+    new.flush_recording()
     writer.close()
     assert read_bytes(root / "events.jsonl").startswith(before)
     load_session_resume(root)
@@ -70,7 +70,7 @@ def test_resume_retains_accepted_trial_and_uses_new_attempt_number(tmp_path):
     old.dispatch(OperatorCommand.START_TRIAL)
     old.interrupt_radio("gateway USB receive buffer age exceeded")
     old.dispatch(OperatorCommand.END_SESSION)
-    old.flush_radio()
+    old.flush_recording()
     root = tmp_path / "session"
     first = root / "trials/001_one/attempt_01"
     preserved = {p: p.read_bytes() for p in first.rglob("*") if p.is_file()}
@@ -90,7 +90,7 @@ def test_resume_retains_accepted_trial_and_uses_new_attempt_number(tmp_path):
         assert (root / "events.jsonl").read_bytes().startswith(previous_events)
     finally:
         new.dispatch(OperatorCommand.END_SESSION)
-        new.flush_radio()
+        new.flush_recording()
 
 
 def test_resume_refuses_concurrent_writer(tmp_path):
@@ -118,47 +118,16 @@ def test_resume_rejects_radio_identity_changes_without_mutating_files(tmp_path):
     assert all(p.read_bytes() == data for p, data in before.items())
 
 
-@pytest.mark.parametrize("saved_sidecars", [True, False])
-def test_resume_rejects_csv_sidecar_mode_change_without_mutating_files(
-    tmp_path, saved_sidecars
-):
-    clock = FakeClock()
-
-    def make(sidecars):
-        source = protocol()
-        return SessionController(
-            protocol_from_mapping(source),
-            tmp_path,
-            clock=clock,
-            monotonic_ns=lambda: int(clock.value * 1e9),
-            session_id_factory=lambda: "session",
-            environment={**ENV, "csv_sidecars": sidecars},
-            csv_sidecars=sidecars,
-        )
-
-    old = make(saved_sidecars)
-    old.start_session(SessionMetadata("p01"))
-    old.dispatch(OperatorCommand.END_SESSION)
-    root = tmp_path / "session"
-    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
-    with pytest.raises(ValueError, match="CSV sidecar mode"):
-        make(not saved_sidecars).resume_session(root)
-    assert all(p.read_bytes() == data for p, data in before.items())
-    make(saved_sidecars).resume_session(root)
-
-
 def test_resume_invalidates_crash_orphan_without_reopening_its_streams(tmp_path):
     clock = FakeClock()
     old = controller(tmp_path, clock)
     old.start_session(SessionMetadata("p01"))
     old.update_health(ready_health())
     old.dispatch(OperatorCommand.START_TRIAL)
-    old._capture.close_streams()
     old._store._event_file.close()  # Simulate process exit without final metadata.
     root = tmp_path / "session"
     attempt = root / "trials/001_one/attempt_01"
     original = (attempt / "attempt.json").read_bytes()
-    raw = {p: p.read_bytes() for p in attempt.rglob("*.csv")}
     new = controller(tmp_path, clock)
     try:
         assert new.resume_session(root).trial.ordinal == 1
@@ -167,10 +136,9 @@ def test_resume_invalidates_crash_orphan_without_reopening_its_streams(tmp_path)
         new.update_health(ready_health())
         new.dispatch(OperatorCommand.START_TRIAL)
         assert (root / "trials/001_one/attempt_02/attempt.json").exists()
-        assert all(p.read_bytes() == data for p, data in raw.items())
     finally:
         new.dispatch(OperatorCommand.END_SESSION)
-        new.flush_radio()
+        new.flush_recording()
 
 
 def test_resume_uses_saved_protocol_and_rejects_corruption(tmp_path):
@@ -199,35 +167,6 @@ def test_resume_rejects_a_file_named_like_an_attempt(tmp_path):
     stray.write_text("not a directory")
     with pytest.raises(ValueError, match="invalid saved attempt path"):
         load_session_resume(root)
-
-
-def test_accept_queues_while_saving_and_advances_without_another_click(tmp_path):
-    from fall_detection.radio.recording_io import RecordingIO
-
-    clock = FakeClock()
-    c = controller(tmp_path, clock)
-    writer = RecordingIO(interval_s=60)
-    c._recording_io = writer
-    c._environment["transport"] = "espnow_gateway"
-    c.start_session(SessionMetadata("p01"))
-    c.update_health(ready_health())
-    try:
-        c.dispatch(OperatorCommand.START_TRIAL)
-        for step in (1, 2, 1):
-            clock.advance(step)
-            c.tick()
-        queued = c.dispatch(OperatorCommand.ACCEPT)
-        assert queued.accept_pending
-        assert queued.trial.ordinal == 1
-        assert queued.attempt_status == "pending_review"
-        clock.advance(2)
-        c.tick()
-        writer.flush()
-        assert c.tick().trial.ordinal == 2
-    finally:
-        c.dispatch(OperatorCommand.END_SESSION)
-        c.flush_radio()
-        writer.close()
 
 
 def test_resume_recovers_explicit_acceptance_before_resolution_event(tmp_path):

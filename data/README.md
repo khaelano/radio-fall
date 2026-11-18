@@ -20,7 +20,8 @@ data/
 │   │   ├── protocol.json
 │   │   ├── events.jsonl
 │   │   ├── session_review.json      optional review overlay
-│   │   └── trials/<trial>/attempt_<n>/receivers/<rx>/
+│   │   ├── transport/gateway/<run>/  raw radio journal (the radio record)
+│   │   └── trials/<trial>/attempt_<n>/receivers/<rx>/   legacy sessions only
 │   │       ├── csi.csv
 │   │       ├── radio_timing.csv
 │   │       └── usb_clock_sync.csv

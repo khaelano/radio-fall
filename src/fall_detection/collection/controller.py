@@ -14,7 +14,6 @@ from typing import Any, Protocol
 
 from ..protocol import CollectionProtocol, Trial
 from ..radio.recording_io import RecordingIO
-from ..radio.records import CsiRecord
 from ..radio.telemetry import (
     BackhaulTelemetrySnapshot,
     telemetry_delta,
@@ -96,14 +95,6 @@ class SessionSnapshot:
         return f"{self.trial.ordinal}/{self.total_trials}"
 
 
-class CaptureSink(Protocol):
-    """Callback seam used by the radio adapter."""
-
-    def write_radio(
-        self, record: CsiRecord, host_receive_monotonic_ns: int
-    ) -> None: ...
-
-
 class AttemptVideoRecorder(Protocol):
     """Nonblocking attempt markers; camera/encoding I/O belongs to an adapter."""
 
@@ -115,7 +106,7 @@ class AttemptVideoRecorder(Protocol):
 class SessionController:
     """Own protocol progression, quality gates, and trial artifact lifecycle.
 
-    Adapters only call ``write_radio``, ``record_event`` and ``update_health``;
+    Adapters only call ``record_event``, ``interrupt_radio`` and ``update_health``;
     windows only dispatch commands and render snapshots. The controller's
     implementation hides file naming, phase timing, retries, and interruption
     semantics behind that small interface.
@@ -135,7 +126,6 @@ class SessionController:
         manual_confirmation_required: bool = False,
         video_recorder: AttemptVideoRecorder | None = None,
         recording_io: RecordingIO | None = None,
-        csv_sidecars: bool = True,
     ) -> None:
         self.protocol = protocol
         self.output_dir = output_dir
@@ -147,14 +137,12 @@ class SessionController:
         self._manual_confirmation_required = manual_confirmation_required
         self._video = video_recorder
         self._recording_io = recording_io
-        self._csv_sidecars = csv_sidecars
         self._lock = RLock()
         self._subscribers: list[Callable[[SessionSnapshot], None]] = []
         self._store: SessionArtifactStore | None = None
         self._capture: TrialCapture | None = None
         self._last_capture: TrialCapture | None = None
         self._capture_start_ns = 0
-        self._draining_captures: list[tuple[TrialCapture, int, int, int]] = []
         self._state = SessionState.SETUP
         self._session_id: str | None = None
         self._trial_index = 0
@@ -187,33 +175,16 @@ class SessionController:
             return self._health
 
     @property
-    def capture_sink(self) -> CaptureSink:
-        """Return the adapter callback seam."""
-
-        return self
-
-    @property
     def session_root(self) -> Path:
         """Return the active session directory for additive transport journals."""
         if self._store is None:
             raise RuntimeError("session has not started")
         return self._store.root
 
-    def flush_radio(self) -> None:
-        """Close deferred writers after the transport has finished draining."""
-        with self._lock:
-            self._expire_draining_locked(self._monotonic_ns(), force=True)
+    def flush_recording(self) -> None:
+        """Flush buffered session writes, such as the event log, to disk."""
         if self._recording_io:
             self._recording_io.flush()
-
-    def _expire_draining_locked(self, now_ns: int, *, force: bool = False) -> None:
-        remaining = []
-        for capture, start, end, deadline in self._draining_captures:
-            if force or now_ns >= deadline:
-                capture.close_streams()
-            else:
-                remaining.append((capture, start, end, deadline))
-        self._draining_captures = remaining
 
     def update_environment(self, values: dict[str, Any]) -> None:
         """Add runtime bindings before the session manifest is created."""
@@ -257,7 +228,6 @@ class SessionController:
                         session_id,
                         self._environment,
                         recording_io=self._recording_io,
-                        csv_sidecars=self._csv_sidecars,
                     )
                     break
                 except FileExistsError:
@@ -298,7 +268,7 @@ class SessionController:
             if self._state is not SessionState.SETUP:
                 raise RuntimeError("session has already started")
             store, saved = SessionArtifactStore.reopen(
-                root, self._environment, self._recording_io, self._csv_sidecars
+                root, self._environment, self._recording_io
             )
             try:
                 if self.protocol.source_hash != saved.protocol.source_hash:
@@ -356,7 +326,6 @@ class SessionController:
         """Advance timed phases using an injected monotonic clock."""
 
         with self._lock:
-            self._expire_draining_locked(self._monotonic_ns())
             if self._accept_requested:
                 try:
                     self._accept_locked()
@@ -437,28 +406,6 @@ class SessionController:
         if not health.clock_sync_ready:
             return "clock synchronization is not ready"
         return "unknown readiness failure"
-
-    def write_radio(self, record: CsiRecord, host_receive_monotonic_ns: int) -> None:
-        """Receive radio data from an adapter and write it if a trial is active."""
-
-        with self._lock:
-            if record.run_id is None:
-                if self._capture is not None:
-                    self._capture.write_radio(record, host_receive_monotonic_ns)
-                return
-            # BLE attribution uses capture time. Unaligned or very late data
-            # remains in the session journal rather than another attempt.
-            captured = record.capture_host_monotonic_ns
-            if captured is None:
-                return
-            self._expire_draining_locked(host_receive_monotonic_ns)
-            if self._capture is not None and captured >= self._capture_start_ns:
-                self._capture.write_radio(record, host_receive_monotonic_ns)
-                return
-            for capture, start, end, deadline in self._draining_captures:
-                if start <= captured < end and host_receive_monotonic_ns < deadline:
-                    capture.write_radio(record, host_receive_monotonic_ns)
-                    return
 
     @property
     def _current_trial(self) -> Trial | None:
@@ -763,25 +710,7 @@ class SessionController:
             except Exception as exc:  # noqa: BLE001 — any video failure invalidates the attempt
                 status = "invalid"
                 updates["interruption_reason"] = f"video end failed: {exc}"
-        deferred = self._environment.get("transport") in {"ble", "espnow_gateway"}
-        capture.finish(
-            status, defer_close=deferred, ended_monotonic_ns=ended_ns, **updates
-        )
-        if deferred:
-            drain_ms = self._environment.get(
-                "gateway_transport"
-                if self._environment.get("transport") == "espnow_gateway"
-                else "ble_transport",
-                {},
-            ).get("drain_ms", 1000)
-            self._draining_captures.append(
-                (
-                    capture,
-                    self._capture_start_ns,
-                    ended_ns,
-                    ended_ns + drain_ms * 1_000_000,
-                )
-            )
+        capture.finish(status, ended_monotonic_ns=ended_ns, **updates)
         self._last_capture = capture
         self._capture = None
         self._attempt_telemetry_start = None

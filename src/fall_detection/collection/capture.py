@@ -14,18 +14,7 @@ from typing import Any, TextIO
 from .._radio_native import storage_read_file
 from ..protocol import CollectionProtocol, Trial
 from ..radio.recording_io import RecordingIO
-from ..radio.records import CSI_HEADER, CsiRecord, format_csi_record
 from ..session.schema import ARTIFACT_SCHEMA_VERSION
-
-TIMING_HEADER = (
-    "sequence,receiver_mac,transport_sequence,tx_enqueue_timestamp_us,"
-    "rx_radio_timestamp_us,rx_callback_timestamp_us,host_receive_monotonic_ns"
-)
-CLOCK_SYNC_HEADER = (
-    "host_receive_monotonic_ns,receiver_mac,sync_id,sensing_sequence,receiver_boot_id,"
-    "tx_t1_us,rx_t2_us,rx_t3_us,tx_t4_us,rx_radio_t2_us,tx_radio_t4_us,"
-    "round_trip_us,receiver_minus_transmitter_us,drift_ppm,uncertainty_us"
-)
 
 
 def _slug(value: str) -> str:
@@ -68,15 +57,13 @@ def _lock_events(stream: TextIO) -> None:
 
 
 class TrialCapture:
-    """Thread-safe, receiver-split writers for one trial attempt.
+    """Metadata of one trial attempt.
 
-    The Rust transport journal in the session directory is the canonical record
-    of the radio data. With ``csv_sidecars`` the capture also writes per-receiver
-    ``csi.csv``, ``radio_timing.csv``, ``usb_clock_sync.csv`` and
-    ``gateway_timing.jsonl`` files. They are a temporary safety net until one
-    Rust-era hardware session has been verified with
-    ``tools/processing/check_storage_equivalence.py``; they will then be removed.
-    Without them the capture only keeps ``attempt.json``.
+    The radio data of every attempt lives in the Rust transport journal in the
+    session directory; conversion assigns frames to attempts by capture time. The
+    capture only keeps ``attempt.json``. The per-receiver CSV and timing sidecars
+    that earlier collectors wrote beside it were removed after a hardware session
+    matched them frame for frame (see ``tools/processing/check_storage_equivalence.py``).
     """
 
     def __init__(
@@ -84,12 +71,8 @@ class TrialCapture:
         path: Path,
         initial_metadata: dict[str, Any],
         *,
-        receiver_ids: dict[str, str],
         recording_io: RecordingIO | None = None,
-        csv_sidecars: bool = True,
     ) -> None:
-        if not receiver_ids:
-            raise ValueError("TrialCapture requires at least one receiver binding")
         self.path = path
         self.path.mkdir(parents=True, exist_ok=False)
         self._lock = RLock()
@@ -97,140 +80,30 @@ class TrialCapture:
         self._metadata["artifact_schema_version"] = ARTIFACT_SCHEMA_VERSION
         self._metadata["status"] = "recording"
         self._io = recording_io
-        self._csv_sidecars = csv_sidecars
         _write_json(self.path / "attempt.json", self._metadata)
-        self.receiver_ids = {
-            mac.lower(): receiver_id for mac, receiver_id in receiver_ids.items()
-        }
-        self._receiver_streams: dict[str, tuple[TextIO, TextIO]] = {}
-        self._gateway_streams: dict[str, TextIO] = {}
-        self._clock_streams: dict[str, TextIO] = {}
-        for receiver_id in sorted(set(self.receiver_ids.values())):
-            if not csv_sidecars:
-                break
-            receiver_path = self.path / "receivers" / _slug(receiver_id)
-            receiver_path.mkdir(parents=True, exist_ok=True)
-            csi_file = self._open(
-                receiver_path / "csi.csv", "w", encoding="utf-8", newline=""
-            )
-            timing_file = self._open(
-                receiver_path / "radio_timing.csv", "w", encoding="utf-8", newline=""
-            )
-            csi_file.write(CSI_HEADER + "\n")
-            timing_file.write(TIMING_HEADER + "\n")
-            clock = self._clock_streams[receiver_id] = self._open(
-                receiver_path / "usb_clock_sync.csv", "w", encoding="utf-8", buffering=1
-            )
-            clock.write(CLOCK_SYNC_HEADER + "\n")
-            self._receiver_streams[receiver_id] = (csi_file, timing_file)
-
-    def _open(self, path: Path, mode: str, **kwargs):
-        return (
-            self._io.open(path, mode, **kwargs)
-            if self._io
-            else path.open(mode, **kwargs)
-        )
 
     @property
     def writes_complete(self) -> bool:
-        """Return true once all closed attempt streams have reached file buffers."""
+        """Return true once background session writes have not failed.
+
+        Raises:
+            OSError: If the background writer reported a failed write.
+        """
         if self._io:
             self._io.check()
-        streams = [s for pair in self._receiver_streams.values() for s in pair]
-        streams += list(self._clock_streams.values()) + list(
-            self._gateway_streams.values()
-        )
-        return all(getattr(s, "saved", s.closed) for s in streams)
+        return True
 
-    def write_radio(self, record: CsiRecord, host_receive_monotonic_ns: int) -> None:
-        """Append one decoded radio record and its timing sidecar row.
-
-        Does nothing when the CSV sidecars are disabled; the transport journal
-        already holds the record.
-        """
-
-        if not self._csv_sidecars:
-            return
-        with self._lock:
-            receiver_id = self.receiver_ids.get(record.receiver_mac.lower())
-            if receiver_id is None:
-                return
-            tx_timestamp = (
-                "" if record.tx_timestamp_us is None else record.tx_timestamp_us
-            )
-            rx_callback = (
-                ""
-                if record.rx_callback_timestamp_us is None
-                else record.rx_callback_timestamp_us
-            )
-            csi_file, timing_file = self._receiver_streams[receiver_id]
-            csi_file.write(format_csi_record(record).rstrip("\r\n") + "\n")
-            timing_file.write(
-                f"{record.sequence},{record.receiver_mac},{record.transport_sequence},"
-                f"{tx_timestamp},{record.timestamp_us},{rx_callback},"
-                f"{host_receive_monotonic_ns}\n"
-            )
-            if record.run_id is not None:
-                self._write_gateway_timing(
-                    receiver_id, record, host_receive_monotonic_ns
-                )
-
-    def _write_gateway_timing(
-        self, receiver_id: str, record: CsiRecord, arrival_ns: int
-    ) -> None:
-        if receiver_id not in self._gateway_streams:
-            path = self.path / "receivers" / _slug(receiver_id) / "gateway_timing.jsonl"
-            self._gateway_streams[receiver_id] = self._open(path, "x", encoding="utf-8")
-        value = {
-            "schema_version": 1,
-            "sequence": record.sequence,
-            "receiver_mac": record.receiver_mac,
-            "run_id": str(record.run_id),
-            "transmitter_boot_id": record.transmitter_boot_id,
-            "receiver_boot_id": record.receiver_boot_id,
-            "rx_radio_timestamp_us": record.timestamp_us,
-            "tx_enqueue_timestamp_us": record.tx_timestamp_us,
-            "capture_host_monotonic_ns": record.capture_host_monotonic_ns,
-            "clock_uncertainty_us": record.capture_clock_uncertainty_us,
-            "host_receive_monotonic_ns": arrival_ns,
-        }
-        self._gateway_streams[receiver_id].write(
-            json.dumps(value, separators=(",", ":")) + "\n"
-        )
-
-    def close_streams(self) -> None:
-        """Close writers after the optional radio drain interval."""
-        with self._lock:
-            for csi_file, timing_file in self._receiver_streams.values():
-                if not csi_file.closed:
-                    csi_file.flush()
-                    timing_file.flush()
-                    csi_file.close()
-                    timing_file.close()
-
-            for stream in (
-                *self._gateway_streams.values(),
-                *self._clock_streams.values(),
-            ):
-                if not stream.closed:
-                    stream.flush()
-                    stream.close()
-
-    def finish(
-        self, status: str, *, defer_close: bool = False, **updates: Any
-    ) -> dict[str, Any]:
-        """Publish final metadata, optionally deferring stream closure during radio drain."""
+    def finish(self, status: str, **updates: Any) -> dict[str, Any]:
+        """Publish final metadata."""
 
         with self._lock:
-            if not defer_close:
-                self.close_streams()
             self._metadata.update(updates)
             self._metadata["status"] = status
             _write_json(self.path / "attempt.json", self._metadata)
             return dict(self._metadata)
 
     def update_status(self, status: str, **updates: Any) -> dict[str, Any]:
-        """Update disposition independently of the optional file-drain interval."""
+        """Update the attempt disposition without finishing it."""
 
         with self._lock:
             self._metadata.update(updates)
@@ -260,10 +133,8 @@ class SessionArtifactStore:
         session_id: str,
         environment: dict[str, Any] | None = None,
         recording_io: RecordingIO | None = None,
-        csv_sidecars: bool = True,
     ) -> None:
-        self._receiver_ids = _receiver_bindings(environment)
-        self._csv_sidecars = csv_sidecars
+        _receiver_bindings(environment)
         self.root = output_dir / _slug(session_id)
         self.root.mkdir(parents=True, exist_ok=False)
         self.protocol = protocol
@@ -299,7 +170,6 @@ class SessionArtifactStore:
         root: Path,
         environment: dict[str, Any],
         recording_io=None,
-        csv_sidecars: bool = True,
     ):
         """Lock and validate an existing session before allowing any mutation."""
         from .resume import load_session_resume
@@ -322,8 +192,6 @@ class SessionArtifactStore:
                     raise ValueError(f"cannot resume with changed {key}")
             if bool(old.get("video")) != bool(environment.get("video")):
                 raise ValueError("resume must retain the session's enabled video mode")
-            if bool(old.get("csv_sidecars", True)) != bool(csv_sidecars):
-                raise ValueError("resume must retain the session's CSV sidecar mode")
             store = cls.__new__(cls)
             store.root, store.protocol, store.metadata = (
                 saved.root,
@@ -332,10 +200,8 @@ class SessionArtifactStore:
             )
             store.session_id = saved.manifest["session_id"]
             store._session = dict(saved.manifest)
-            store._receiver_ids = _receiver_bindings(environment)
             store._event_file, store._closed = stream, False
             store._io = recording_io
-            store._csv_sidecars = csv_sidecars
             return store, saved
         except BaseException:
             stream.close()
@@ -403,13 +269,7 @@ class SessionArtifactStore:
             scenario_id=trial.scenario.id,
             attempt=attempt_number,
         )
-        return TrialCapture(
-            attempt_dir,
-            metadata,
-            receiver_ids=self._receiver_ids,
-            recording_io=self._io,
-            csv_sidecars=self._csv_sidecars,
-        )
+        return TrialCapture(attempt_dir, metadata, recording_io=self._io)
 
     def finish(self, status: str, monotonic_ns: int, **updates: Any) -> None:
         """Close the session manifest and its event stream."""

@@ -3,7 +3,8 @@
 **Status:** living draft. The Rust `radio_storage` crate, its Python bindings,
 the version-3 archive writer, and the analysis loaders are implemented and were
 verified on real sessions ([section 11.8](#118-implementation-gates)). The
-collector still writes the legacy CSV sidecars, and the inspector and
+collector stopped writing the legacy CSV sidecars on 18 November 2026, after a
+hardware session matched them frame for frame; the inspector and
 integrity-analysis migrations are tracked in [section 12](#12-consumers-and-migration).
 The document is finalized only after those remaining steps are verified.
 [Dataset format](dataset-format.md) remains the authority for data that exists
@@ -652,7 +653,7 @@ There is no Python storage package: Python calls the crate through
 | Notebooks `01_exploration`, `01_01`, `01_02`, `02_preprocess` (`02_preprocess_old` later removed) | edited in the editor buffers through the notebook bridge; they must be saved |
 | `phase_signals`, `phase_motion`, `integrity` | see the change log for the current state |
 | `session_inspector` | see the change log for the current state |
-| Collector (`collection/capture.py`) | still writes the CSV sidecars next to the journal |
+| Collector (`collection/capture.py`) | writes no CSV sidecars since 18 November 2026; the journal is the raw record |
 
 **Preprocessing checkpoints and exports.** Source fingerprints changed, so
 exports under `data/interim/parquet` and `data/processed` are invalidated once
@@ -701,3 +702,4 @@ archives need a `dvc push`.
 | 2026-11-13 | Implemented the crate, bindings, analysis loaders, inspector and integrity migrations, and version-3 archives. Default scope changed to frames inside attempts (D13) after the 17-run and 31-run archives showed 55 and 68 percent of frames outside attempts. Added `run_index` and `transmitter_mac`, the run-major order (D14), the directory fingerprint rule, and the real-data gates (section 11.8). Fixed a ZIP64 read-back defect in archive migration. |
 | 2026-11-13 | Moved the version-3 archives to `data/raw/sessions` and the older ones to `data/old_raw/sessions`. Added the review resolver (section 4.3, D15): `radio_storage::review` and `resolve`, bindings, the `fall_detection.storage` facade, and `data/annotations`. OQ-7 resolved. |
 | 2026-11-13 | Retired the Python `fall_detection.storage` package. The crate gained `write_archive` (version-3 archives from session directories, used by the collector; sidecars kept until the Rust-era journal is validated), `extract_archive`, `read_file` (logical reads of the collector's Zstandard streams), `FrameStore` and `ensure_frames`, and the PyO3 module exposes them directly with `StorageError` and Arrow PyCapsule tables. The archive gate found that `attempts.parquet` recorded the `original/` prefix for archives, so directory and archive sources gave different tables; the column is now relative to the session. |
+| 2026-11-18 | A hardware collector session (two 60 s segments, four receivers) passed `check_storage_equivalence.py`: 45,824 frames, no mismatch. The collector stopped writing CSV sidecars; they made up 47% of that session's archive. |

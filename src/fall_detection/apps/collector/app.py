@@ -84,15 +84,6 @@ def _parser() -> argparse.ArgumentParser:
         help="interval between background recording writes (default: 5 s)",
     )
     parser.add_argument(
-        "--no-csv-sidecars",
-        action="store_true",
-        help=(
-            "skip the per-receiver CSV and timing sidecars; the native transport "
-            "journal remains the only raw record (the sidecars are a temporary "
-            "safety net and will be removed)"
-        ),
-    )
-    parser.add_argument(
         "--resume-session",
         type=Path,
         help="resume a saved session directory using its protocol and remaining trials",
@@ -223,9 +214,6 @@ def _run(
                 message=message,
                 connected=connected,
             ),
-            record_sink=lambda record, arrival_ns: controller.write_radio(
-                record, arrival_ns
-            ),
             journal_root=lambda: controller.session_root,
             on_interruption=lambda reason: controller.interrupt_radio(reason),
         )
@@ -250,7 +238,7 @@ def _run(
         environment={
             **radio.environment(),
             "video": video.config.metadata() if video else None,
-            "csv_sidecars": not args.no_csv_sidecars,
+            "csv_sidecars": False,
             "recording_io": {
                 "flush_interval_s": args.recording_flush_seconds,
                 "compression": "zstd" if recording_io.compressed else "none",
@@ -260,7 +248,6 @@ def _run(
         telemetry_provider=lambda: radio.telemetry_snapshot(),
         video_recorder=video,
         recording_io=recording_io,
-        csv_sidecars=not args.no_csv_sidecars,
         manual_confirmation_required=not args.continuous,
     )
     args._archive_controller = controller

@@ -30,7 +30,7 @@ def test_collection_cleans_partial_startup_and_continues_after_cleanup_failure(f
         state=SessionState.READY,
         start_session=lambda metadata: step("session"),
         dispatch=lambda command: step("end"),
-        flush_radio=lambda: step("flush"),
+        flush_recording=lambda: step("flush"),
     )
     radio = SimpleNamespace(start=lambda: step("radio"), stop=lambda: step("stop"))
     video = SimpleNamespace(

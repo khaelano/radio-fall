@@ -89,7 +89,7 @@ data/
 │   │                   ├── camera.mp4                 optional synchronized video
 │   │                   ├── camera_frames.csv          optional frame timing
 │   │                   ├── video.json                 optional video status/settings
-│   │                   └── receivers/
+│   │                   └── receivers/                 legacy sessions only (see 3.3)
 │   │                       └── <receiver-id>/
 │   │                           ├── csi.csv
 │   │                           ├── radio_timing.csv
@@ -479,6 +479,12 @@ In curated exports, an attempt can additionally contain `original_activity_label
 and a `review` object (see [2.5](#25-curated-exports)).
 
 ### 3.3 Receiver directories
+
+Collectors before 18 November 2026 wrote these per-receiver CSV sidecars. Newer
+sessions have no `receivers/` directory (`session.json` records
+`environment.csv_sidecars: false`); their radio data is only in the transport
+journal and is read through the converted frame tables. The formats below still
+describe older sessions that kept their sidecars.
 
 ```text
 attempt_01/receivers/rx-1/
@@ -1065,10 +1071,9 @@ journals determine. Journals and event logs are stored as Zstandard members
 migration proves that tables converted from the new archive equal those from the
 source before publishing it, and never modifies the source.
 `storage_archive_session(directory, destination)` writes a version-3 archive from
-a session directory; the collector calls it when a session finishes. It keeps the
-per-receiver sidecars (`drop_derived=False`) until the journal conversion of
-newly collected sessions is validated on real data, stores logs and sidecars as
-Zstandard members, and publishes only after the tables converted from the
+a session directory; the collector calls it when a session finishes. It keeps
+any per-receiver sidecars (`drop_derived=False`), which only sessions recorded
+before 18 November 2026 have, stores logs and sidecars as Zstandard members, and publishes only after the tables converted from the
 archive equal those converted from the directory. Sessions without journals skip
 that check.
 
@@ -1092,8 +1097,9 @@ ten-second minimum baseline for reference-clock drift fitting. See the
 qualification limits. Gateway USB arrival is never a sensing timestamp.
 
 Gateway sessions use `environment.transport = espnow_gateway` and snapshot the
-ordered inventory, sensing profile and gateway policy. Attempt CSV formats are
-unchanged; `gateway_timing.jsonl` records run/boot identities, transmitter enqueue
+ordered inventory, sensing profile and gateway policy. In sessions recorded
+before 18 November 2026, attempt CSV formats are unchanged and
+`gateway_timing.jsonl` records run/boot identities, transmitter enqueue
 reference, mapped host capture time and clock uncertainty alongside each CSI row.
 Readers require that sidecar for capture-time alignment and do not fall back to
 USB arrival times. Historical BLE timing sidecars are not supported by the current analysis tools.

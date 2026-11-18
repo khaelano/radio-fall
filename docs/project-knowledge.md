@@ -34,6 +34,15 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
 
 ## Implemented
 
+- **WiFall adaptation:** `analysis/wifall/` reads preserved 120 Hz sessions and
+  implements weighted amplitude smoothing, training-only resting LOF profiles,
+  separate statistical/SVD representations, random forest and fall-inlier
+  one-class SVM, with grouped holdout evaluation. Countdown stillness and cue
+  labels are assumptions; feature formulas and hyperparameters resolve paper
+  omissions explicitly. This is a separate baseline, not a selected production
+  representation or a claim of reproduced detection results. See the
+  [implementation guide](wifall.md).
+
 - **Reviews and archive resolution (13 November 2026):** the mutable review
   lives at `data/annotations/<session-id>/session_review.json`, tracked in Git.
   The `radio_storage` crate resolves the archive in `data/raw/sessions` (checking

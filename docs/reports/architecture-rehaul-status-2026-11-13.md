@@ -113,10 +113,25 @@ laptop are off-machine backups.
   session. Python no longer touches records before they are journaled, so the
   change cannot reduce delivery; the cause, probably placement or interference,
   was not investigated.
-- **Backup.** `dvc push` uploaded the model bundles, the figures, the four
-  version-3 session archives (about 6.6 GB), the 12 November detector captures
-  and runs, and the storage-check archive. The original pre-migration archives
-  (11.9 GB) were already complete on `laptop-remote`.
+- **Backup.** `dvc push` uploaded the four version-3 session archives (about
+  6.6 GB), the 12 November detector captures and runs, and both 18 November
+  hardware sessions. The original pre-migration archives (11.9 GB) were already
+  complete on `laptop-remote`; they were then removed from the local cache with
+  `dvc gc --workspace` (local cache 18 GB to 6.3 GB) and can be restored with
+  `dvc pull` at `5ab3758`. The working directories of the two test sessions were
+  deleted after their archives verified.
+- **Artifacts were skipped by DVC.** That push did not include the model bundles
+  or the figures, and `dvc status -c` without targets did not check them. DVC
+  skips any `.dvc` file or directory that its Git library (`dulwich`) reports as
+  ignored, and it treated the root rule `/artifacts/*`, despite its
+  `!/artifacts/*.dvc` negation, as ignoring `artifacts/model.dvc` and
+  `artifacts/notebooks.dvc`; it also treats `/artifacts/*/` as ignoring the
+  `artifacts/` directory. `dvc gc --workspace` therefore removed their cache
+  objects as unused. The files were still on disk; `dvc commit` restored the
+  cache, and pushing both `.dvc` files by name uploaded all 21 model files and 7
+  figures, confirmed on the remote. `.gitignore` now names `/artifacts/model/`
+  and `/artifacts/notebooks/`, so commands without targets include both outputs.
+  New artifact directories need their own line.
 - **Merge.** `main` was fast-forwarded to the branch locally; nothing was pushed
   to `origin`.
 - **Storage.** The working tree is on btrfs, and DVC's cache shares extents with

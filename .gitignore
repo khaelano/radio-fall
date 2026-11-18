@@ -27,10 +27,13 @@ src/*.egg-info/
 # Regenerable figures
 /docs/figures/
 
-# Artifact subdirectories are DVC outputs; retain their metadata in Git.
-/artifacts/*
-!/artifacts/*.dvc
-!/artifacts/.gitignore
+# Artifact subdirectories are DVC outputs; their .dvc files stay in Git. Name
+# each output: DVC skips any .dvc file or directory its Git library reports as
+# ignored, and that library treats both `/artifacts/*` (despite a negation) and
+# `/artifacts/*/` as ignoring the .dvc files, so DVC commands without targets
+# skipped these outputs. Add a line for each new artifact directory.
+/artifacts/model/
+/artifacts/notebooks/
 
 # Codex artifacts
 .codex-build/

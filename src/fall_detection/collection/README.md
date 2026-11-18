@@ -44,8 +44,10 @@ attempts by capture time, so frames that arrive after an attempt ends still
 belong to it. Collectors before 18 November 2026 also wrote per-receiver
 `csi.csv`, `radio_timing.csv`, `usb_clock_sync.csv` and `gateway_timing.jsonl`
 sidecars; they were removed after a hardware session matched them frame for frame
-with `tools/processing/check_storage_equivalence.py`, which made new archives
-about half as large. The session manifest records `environment.csv_sidecars:
+([status report](../../../docs/reports/architecture-rehaul-status-2026-11-13.md#update-18-november)),
+which made new archives about half as large. The comparison tool,
+`tools/processing/check_storage_equivalence.py`, was then retired (last present
+at commit `af07916`). The session manifest records `environment.csv_sidecars:
 false`. Older sessions keep their sidecars and can still be resumed. The journal writes and flushes each envelope to the operating system
 before the gateway ACK (no fsync), so a process crash loses no accepted frame.
 The CSI viewer keeps no recording of its own.

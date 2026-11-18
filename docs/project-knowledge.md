@@ -59,8 +59,9 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   do not. The analysis
   pipeline, phase and integrity analysis, and the session inspector read the
   tables. One Rust-era hardware session (18 November, two one-minute collector
-  segments, four receivers) passed `tools/processing/check_storage_equivalence.py`:
-  all 45,824 frames matched their CSV rows with no mismatch
+  segments, four receivers) passed `tools/processing/check_storage_equivalence.py`
+  (retired afterwards; last present at `af07916`): all 45,824 frames matched
+  their CSV rows with no mismatch
   ([status report](reports/architecture-rehaul-status-2026-11-13.md#update-18-november)).
   The collector then stopped writing the sidecars, which made up 47% of that
   session's archive; the transport journal is now the only raw radio record, and

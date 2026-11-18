@@ -63,7 +63,8 @@ class TrialCapture:
     session directory; conversion assigns frames to attempts by capture time. The
     capture only keeps ``attempt.json``. The per-receiver CSV and timing sidecars
     that earlier collectors wrote beside it were removed after a hardware session
-    matched them frame for frame (see ``tools/processing/check_storage_equivalence.py``).
+    matched them frame for frame (see
+    ``docs/reports/architecture-rehaul-status-2026-11-13.md``).
     """
 
     def __init__(

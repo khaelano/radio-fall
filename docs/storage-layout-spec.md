@@ -612,7 +612,8 @@ the final schema and the default attempts scope.
 - The comparison covers payload bytes, the header fields, `rssi`, `noise_floor`,
   `sig_len`, `rx_state`, the transmitter MAC, radio and enqueue timestamps,
   capture time, clock uncertainty and run and boot ids, for every CSV row of
-  every attempt and receiver ([check_storage_equivalence.py](../tools/processing/check_storage_equivalence.py)).
+  every attempt and receiver (`tools/processing/check_storage_equivalence.py`,
+  retired on 18 November 2026; last present at commit `af07916`).
   The 31-run archive was compared in four slices that add up to the full table.
 - The table holds no frame that a CSV did not hold, so the capture-time
   membership rule reproduces the old per-attempt sets exactly.
@@ -703,3 +704,4 @@ archives need a `dvc push`.
 | 2026-11-13 | Moved the version-3 archives to `data/raw/sessions` and the older ones to `data/old_raw/sessions`. Added the review resolver (section 4.3, D15): `radio_storage::review` and `resolve`, bindings, the `fall_detection.storage` facade, and `data/annotations`. OQ-7 resolved. |
 | 2026-11-13 | Retired the Python `fall_detection.storage` package. The crate gained `write_archive` (version-3 archives from session directories, used by the collector; sidecars kept until the Rust-era journal is validated), `extract_archive`, `read_file` (logical reads of the collector's Zstandard streams), `FrameStore` and `ensure_frames`, and the PyO3 module exposes them directly with `StorageError` and Arrow PyCapsule tables. The archive gate found that `attempts.parquet` recorded the `original/` prefix for archives, so directory and archive sources gave different tables; the column is now relative to the session. |
 | 2026-11-18 | A hardware collector session (two 60 s segments, four receivers) passed `check_storage_equivalence.py`: 45,824 frames, no mismatch. The collector stopped writing CSV sidecars; they made up 47% of that session's archive. |
+| 2026-11-18 | Retired `check_storage_equivalence.py` (last present at `af07916`): new sessions have no CSV sidecars to compare against. |

@@ -110,8 +110,12 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   Recurrent models exceed the 250 ms hop on the Vega 7
   ([GPU report](reports/native-webgpu-smoke-2026-11-12.md)). Ten-second
   hardware captures are in the [capture report](reports/native-capture-2026-11-12.md).
-  Unverified: live gateway operation of the full pipeline, radio-failure
-  restart, sustained operation, and detection accuracy. See the
+  On 18 November, live sessions of up to ten minutes ran on the gateway and
+  recovered from gateway USB loss and companion relay power loss
+  ([hardware check](automatic-radio-recovery.md#hardware-check-18-november-2026));
+  35–78% of windows per session were unknown because receiver coverage,
+  mainly `rx-3` and `rx-4`, fell below 70% (cause undiagnosed).
+  Unverified: sustained operation and detection accuracy. See the
   [detector guide](live-fall-detection.md).
 
 - **Collection:** the desktop collector supports protocol-driven trials,

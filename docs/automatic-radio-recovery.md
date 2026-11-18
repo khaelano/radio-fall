@@ -18,15 +18,19 @@ is never treated as a valid packet. Recovery then:
    An active collection attempt becomes invalid and its partial CSI/video files
    are retained. The operator must retry or skip it.
 2. Closes the serial port, sending best-effort stop commands to the gateway and
-   relayed transmitter. Reconnection starts after three seconds and backs off
+   relayed transmitter. Reconnection starts after three seconds (two in
+   `fall-detect`) and backs off
    linearly to at most 30 seconds while hardware remains unavailable; a run that
    accepted data resets the backoff. Stopping the application cancels retries.
 3. Discovers the configured gateway identity. A gateway still configured for an
    older run receives that run's stop command. After a failure, a faulted relay
    epoch is restarted with USB frame type 31 and payload `CRRC`; firmware without
-   `relay_recovery_version` 1 makes the session stop. The session then waits up
-   to eight seconds for relay readiness. Pairing keys and radio profiles remain
-   in NVS.
+   `relay_recovery_version` 1 makes the session stop. The gateway reboots to
+   restart the epoch. The session then waits up to eight seconds for relay
+   readiness and, after that reboot, for the new gateway `boot_id`. It drops
+   queued gateway statuses from the old boot: acquisition replays queued
+   startup frames before reading the port, and an old-boot status would fail
+   its boot check. Pairing keys and radio profiles remain in NVS.
 4. Reconnects the paired C6s. An inactive companion can discard its ended stream
    and clear a recoverable fault when it receives a new authenticated peer boot
    epoch. Active runs still fail on a peer restart.
@@ -49,9 +53,11 @@ journal already holds every acknowledged envelope, and `LiveRadio` reports the
 failure and invalidates the attempt.
 
 The retry and classification logic is covered offline by
-`tests/radio/test_native_session.py` against a fake gateway. Automatic recovery
-on the current hardware after the move to the native session has not been
-re-qualified; the hardware evidence below predates it.
+`tests/radio/test_native_session.py` against a fake gateway, which neither
+reboots nor faults its relay. The
+[18 November hardware check](#hardware-check-18-november-2026) exercised the
+native session's USB-loss and relay-recovery paths through `fall-detect`; the
+3 November validation predates the native session.
 
 ## Resume a saved collection session
 
@@ -127,6 +133,37 @@ Session protocol selection, sensing profile `8b28a906a0fbcd1f`, channel-11 backh
 unchanged. Recovery requires the updated C5 and both C6 applications; C6 discovery
 advertises `relay_recovery_version: 1`. Receiver firmware needs no additional
 change for this feature.
+
+## Hardware check, 18 November 2026
+
+Headless `fall-detect` sessions (`cnn-4s`) ran on the gateway, companion relay,
+C5 transmitter and four receivers. The journals are in
+`data/experiments/detector/recovery-20261118/` (DVC); its README maps each
+directory to the case below.
+
+In an ordinary detector session, the relay faulted after about seven minutes
+(`peer_uart_fault`), and the run ended with `reference failed or stale`.
+Recovery sent `CRRC` and the gateway rebooted, but the replacement run stopped
+as fatal with `gateway status identity/boot/readiness mismatch`. During startup
+the controller had queued periodic statuses from the old gateway boot, and
+acquisition replayed them against the new `boot_id`. The rejected frame is not
+journaled; because the firmware fixes every other checked field, the boot ID is
+the inferred mismatch. The old-boot filtering in step 3 is the resulting fix.
+
+With the fix, the following interruptions were applied by hand during scoring:
+
+| Interruption | Recovery | Result |
+| --- | --- | --- |
+| Gateway USB unplugged for about 30 s | Failed port-open retries, then a run on the new gateway boot | Scoring resumed |
+| Companion relay power removed for about 30 s (`packet_expired`) | `CRRC` rebooted the gateway; that attempt and the next timed out waiting for the relay; the third started normally | Scoring resumed |
+| Companion relay power removed for about 8 s (`packet_expired`) | One attempt: `CRRC`, gateway reboot, relay readiness, acquisition 8.3 s after the fault status | Scoring resumed about 20 s after the fault |
+
+Durations are approximate: the operator counted them, and the journals bound
+them only by status and run timestamps. The 8-second case repeats the sequence
+that failed before the fix. Dropped frames are not journaled, so the check
+cannot show how many old-boot statuses that attempt discarded. No kernel USB
+disconnect accompanied the `CRRC` reboots. The cause of the original
+`peer_uart_fault` is unknown, and detection accuracy was not assessed.
 
 ## Hardware validation, 3 November 2026
 

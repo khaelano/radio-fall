@@ -80,8 +80,11 @@ transport session also used by the viewer and collector. After a recoverable
 radio failure it waits `restart_delay_ms` (2 s), increasing linearly up to
 30 s while the radio stays unavailable, and configures a fresh run; identity,
 configuration and storage failures stop the detector. See
-[automatic radio recovery](automatic-radio-recovery.md). The session is tested
-against a fake gateway; this recovery path has not been exercised on hardware.
+[automatic radio recovery](automatic-radio-recovery.md). On 18 November, live
+sessions recovered from a gateway USB unplug and from companion relay power
+loss; the first relay recovery had exposed a stale-status replay that stopped
+the detector, which is now fixed. See the
+[hardware check](automatic-radio-recovery.md#hardware-check-18-november-2026).
 
 On the Vega 7, `cnn-4s` inference took about 15 ms on WebGPU and 4 ms on the
 CPU during replay. Four-second LSTM and GRU calls took roughly 1.1–1.2 s, so
@@ -90,8 +93,12 @@ These are runtime measurements, not detection-accuracy results. See the
 [GPU report](reports/native-webgpu-smoke-2026-11-12.md) and
 [native acquisition report](reports/native-capture-2026-11-12.md).
 
-Live gateway operation of the complete pipeline, sustained operation and
-detection usefulness still require validation.
+Live gateway sessions of up to ten minutes ran on 18 November. Many `cnn-4s`
+windows were unknown because a receiver's coverage fell below 70%: 35–37% in
+two uninterrupted five-minute sessions and 76–78% in a ten-minute session. The
+dropouts came mainly from `rx-3` (below 70% in 30–63% of windows) and `rx-4`
+(4–41%); `rx-1` and `rx-2` stayed near 0.8. Their cause is undiagnosed.
+Sustained operation and detection usefulness still require validation.
 
 ## Retired Python detector
 

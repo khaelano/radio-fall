@@ -136,31 +136,25 @@ laptop are off-machine backups.
   to `origin`.
 - **Storage.** The working tree is on btrfs, and DVC's cache shares extents with
   the tracked files, so the cache does not duplicate them on disk.
+- **Follow-ups resolved.** `FrameStore.ensure` now reuses tables only if every
+  table matches the size and SHA-256 in `conversion.json`, rebuilding tables
+  that do not; `verified.json` remembers checked files by size, modification
+  time and inode, so each written file is hashed once (first open of the three
+  sessions 0.6–1.35 s, later opens 0.01–0.15 s). `storage_convert` and
+  `radio_storage convert` take the same lock (`af07916`). The equivalence
+  checker was retired rather than fixed, since new sessions have no sidecars
+  (`bb9774b`; last present at `af07916`). The remaining Ruff findings in
+  `src`, `tests` and `tools` were cleared (`bed0b4e`). The full suite passed
+  (637 passed, 2 skipped).
 
 ## Not done
 
-### Follow-ups found
-
-1. **Equivalence checker gaps.** Given an archive, the checker does not decode
-   `.zst` members, so a Rust-era archive reports "no CSV sidecars"; the session
-   directory works. It also skips, without counting a mismatch, any receiver
-   whose three sidecar files differ in row count. Neither affected the result
-   above, where every frame was matched.
-2. **Currency check ignores output hashes.** `tables_current` accepts a table set
-   whose `conversion.json` hashes do not match the files, which is how the stale
-   manifest above went unnoticed; `storage_verify` detects it in about 0.5 s on
-   a 358 MB table. The lock prevents the race through `FrameStore.ensure`, but
-   direct `convert_session` calls are not locked. Adding a hash or size check is
-   a proposal, not implemented.
-3. **Pre-existing Ruff errors** (36), mostly in `tools/papers/`, the video
-   modules and `protocol/loader.py`.
-
 ### Deliberately not done
 
-4. **Cache warm-up.** Notebook stage caches and the integrity and phase-motion
+1. **Cache warm-up.** Notebook stage caches and the integrity and phase-motion
    caches rebuild once because their keys hash moved source files. Forcing it
    would rerun the long preprocessing and rewrite derived datasets.
-5. **Historical references left as they are.** `docs/reports/ble-c6-timing-2026-11-01.md`
+2. **Historical references left as they are.** `docs/reports/ble-c6-timing-2026-11-01.md`
    and `docs/archive/ble-delivery-policy.md` cite `radio.experiments.ble_timing`,
    which was removed before this work. The "648 Python tests" count in
    `docs/amplitude-preprocessing.md` is a dated record.
@@ -176,4 +170,3 @@ laptop are off-machine backups.
 
 1. Check rx-3 and rx-4 placement and delivery before the next participant
    session.
-2. Decide whether `tables_current` should check output hashes.

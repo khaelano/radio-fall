@@ -1,11 +1,10 @@
-#!/usr/bin/env python3
 """Report and remove recording data the current pipeline no longer uses.
 
 Default mode is a dry run: it prints what would be deleted and how much space
 that frees. Pass --apply to actually delete.
 
 Categories:
-  empty-session    session directories under data/raw/sessions with no CSI rows
+  empty-session    session directories under data/raw/sessions with no radio data
   legacy-session   sessions that are not artifact schema 2 (obsolete layout)
   viewer-capture   data/raw/receivers (ad-hoc captures, opt-in only)
 
@@ -31,17 +30,36 @@ VIEWER = ROOT / "data" / "raw" / "receivers"
 ARTIFACT_SCHEMA_VERSION = 2
 
 
-def count_csi_rows(session: Path) -> int:
-    """Return the number of CSI data rows in a session directory."""
+def has_radio_data(session: Path) -> bool:
+    """Return whether a session directory holds any radio data.
 
-    rows = 0
+    Current sessions keep radio data only in the transport journal
+    (``transport/**/envelopes.bin``); older ones also have per-receiver
+    ``csi.csv`` sidecars, plain or Zstandard-compressed. Unreadable files and any
+    non-empty journal or compressed sidecar count as data, so the check errs
+    toward keeping a session.
+    """
+
+    for path in session.rglob("envelopes.bin"):
+        try:
+            if path.stat().st_size > 0:
+                return True
+        except OSError:
+            return True
+    for path in session.rglob("csi.csv.zst"):
+        try:
+            if path.stat().st_size > 0:
+                return True
+        except OSError:
+            return True
     for path in session.rglob("csi.csv"):
         try:
             with path.open("r", encoding="utf-8", errors="ignore") as handle:
-                rows += max(0, sum(1 for _ in handle) - 1)
+                if sum(1 for _ in handle) > 1:
+                    return True
         except OSError:
-            continue
-    return rows
+            return True
+    return False
 
 
 def artifact_schema(session: Path) -> object:
@@ -96,9 +114,11 @@ def collect(args: argparse.Namespace) -> list[tuple[str, Path, int, str]]:
         for session in sorted(SESSIONS.iterdir()):
             if not session.is_dir() or not older_than(session, args.keep_days):
                 continue
-            if count_csi_rows(session) == 0:
+            if not has_radio_data(session):
                 empty.add(session)
-                found.append(("empty-session", session, size_of(session), "0 CSI rows"))
+                found.append(
+                    ("empty-session", session, size_of(session), "no radio data")
+                )
 
     if args.legacy_sessions and SESSIONS.is_dir():
         for session in sorted(SESSIONS.iterdir()):

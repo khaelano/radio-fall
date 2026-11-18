@@ -963,7 +963,7 @@ python3 tools/processing/prune_data.py --viewer-captures --keep-days 0 --apply
 
 Categories:
 
-- `empty-session` — session directories with zero CSI rows.
+- `empty-session` — session directories with no radio data: no non-empty transport journal (`envelopes.bin`), compressed `csi.csv.zst`, or `csi.csv` with data rows.
 - `legacy-session` — sessions whose artifact schema is not 2.
 - `viewer-capture` — ad-hoc `data/raw/receivers/` captures (opt-in only).
 

@@ -28,5 +28,7 @@ pub use resolve::{
 };
 pub use review::{AttemptReview, EffectiveAttempt, Review, effective_attempts};
 pub use source::{extract_session_file, read_session_file, session_files};
-pub use store::{EnsureStage, FrameStore, Table, ensure_frames, tables_current};
+pub use store::{
+    EnsureStage, FrameStore, Table, convert_session_locked, ensure_frames, tables_current,
+};
 pub use verify::{VerifyReport, verify_against_source, verify_dir};

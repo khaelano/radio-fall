@@ -51,8 +51,12 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   version-3 archives in `data/raw/sessions/` (the pre-schema-3 originals moved to `data/old_raw/sessions/`). On the three non-empty
   archives 4,527,879 CSV rows matched the tables with no mismatch, and the
   archives shrank from 11.9 GB to 6.63 GB (video unchanged). `FrameStore.ensure`
-  holds an advisory lock on `<frames_dir>.lock`, so concurrent conversions of
-  one session run one at a time and later callers reuse the result. The analysis
+  holds an advisory lock on `<frames_dir>.lock` (as do `storage_convert` and
+  `radio_storage convert`), so concurrent conversions of one session run one at a
+  time and later callers reuse the result. It reuses tables only if they still
+  match the sizes and SHA-256 hashes in `conversion.json`, hashing each written
+  file once (`verified.json` remembers checked files), and rebuilds tables that
+  do not. The analysis
   pipeline, phase and integrity analysis, and the session inspector read the
   tables. One Rust-era hardware session (18 November, two one-minute collector
   segments, four receivers) passed `tools/processing/check_storage_equivalence.py`:

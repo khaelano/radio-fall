@@ -1030,11 +1030,16 @@ pairs with the imaginary byte first. Amplitude and phase decoding happen in
 `driver_valid` (`rx_state == 0`) is derived when
 packets are read.
 
-Convert or reuse tables with `FrameStore.ensure(source, frames_dir)`, which
-converts only when the source fingerprint changed. The check and the
-conversion hold an exclusive advisory lock on the sibling file
-`<frames_dir>.lock`, so concurrent processes serialise and a waiting one reuses
-the tables the first one published (the lock file is left in place).
+Convert or reuse tables with `FrameStore.ensure(source, frames_dir)`. It reuses
+the tables only when `conversion.json` names the current source fingerprint and
+schema version and every table still has the size and SHA-256 recorded there;
+otherwise it converts again, which also repairs damaged tables. The hash runs
+once per written file: `verified.json` remembers each checked table's size,
+modification time and inode, and later calls rehash only a table whose identity
+changed. The check and any conversion hold an exclusive advisory lock on the
+sibling file `<frames_dir>.lock`, so concurrent processes serialise and a waiting
+one reuses the tables the first one published (the lock file is left in place).
+`storage_convert` and `radio_storage convert` take the same lock.
 `FrameStore.frames(
 receiver_id=..., capture_start_ns=..., capture_end_ns=..., columns=...)` prunes
 row groups by statistics, and `attempts()`, `phases()` and

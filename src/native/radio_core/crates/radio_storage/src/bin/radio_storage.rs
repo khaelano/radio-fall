@@ -1,6 +1,6 @@
 //! Command-line access to session conversion and verification.
 use radio_storage::{
-    ConvertOptions, FrameScope, MigrateOptions, convert_session, migrate_archive,
+    ConvertOptions, FrameScope, MigrateOptions, convert_session_locked, migrate_archive,
     verify_against_source, verify_archive, verify_dir, vfs,
 };
 use std::path::PathBuf;
@@ -30,7 +30,10 @@ fn convert(source: &str, output: &str, scope: FrameScope) -> radio_storage::Resu
         scope,
         ..ConvertOptions::default()
     };
-    let report = convert_session(source.as_ref(), &PathBuf::from(output), &options)?;
+    let output = PathBuf::from(output);
+    let report = convert_session_locked(source.as_ref(), &output, &options, &mut |_| {
+        eprintln!("waiting for another conversion of {}", output.display());
+    })?;
     println!("{}", serde_json::to_string_pretty(&report.to_json())?);
     Ok(())
 }

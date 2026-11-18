@@ -127,6 +127,21 @@ def test_ensure_frames_reuses_current_tables_and_reconverts_stale_ones(tmp_path)
     assert FrameStore.open(frames).manifest["protocol_hash"] == "deadbeef"
 
 
+def test_direct_conversion_takes_the_lock_and_records_verified_tables(tmp_path):
+    source = build_session(tmp_path / "session", batches=4)
+    frames = tmp_path / "frames"
+    storage_convert(source, frames)
+    assert (tmp_path / "frames.lock").is_file()
+    record = json.loads((frames / "verified.json").read_text())
+    outputs = FrameStore.open(frames).manifest["outputs"]
+    assert {name: entry["sha256"] for name, entry in record.items()} == {
+        name: entry["sha256"] for name, entry in outputs.items()
+    }
+    messages: list[str] = []
+    FrameStore.ensure(str(source), str(frames), progress=messages.append)
+    assert messages == []  # verified tables are reused without converting
+
+
 def test_concurrent_ensure_from_two_processes_publishes_consistent_tables(tmp_path):
     import multiprocessing
 

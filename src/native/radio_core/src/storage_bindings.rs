@@ -14,9 +14,9 @@ use radio_storage::arrow_array::{RecordBatch, RecordBatchIterator};
 use radio_storage::arrow_schema::SchemaRef;
 use radio_storage::{
     ArchiveOptions, ConvertOptions, EnsureStage, FrameQuery, FrameScope, MigrateOptions,
-    OpenedSession, Table, annotation_path, annotations_dir_for, archive_manifest, convert_session,
-    ensure_frames, extract_archive, extract_session_file, frame_counts, migrate_archive,
-    open_session, open_source, read_session_file, resolve_source, session_files,
+    OpenedSession, Table, annotation_path, annotations_dir_for, archive_manifest,
+    convert_session_locked, ensure_frames, extract_archive, extract_session_file, frame_counts,
+    migrate_archive, open_session, open_source, read_session_file, resolve_source, session_files,
     verify_against_source, verify_archive, verify_dir, vfs, write_archive,
 };
 use serde_json::Value;
@@ -378,8 +378,9 @@ fn storage_convert<'py>(
                 scope,
                 ..ConvertOptions::default()
             };
+            // Same lock as FrameStore.ensure, so the two cannot interleave.
             Ok::<_, radio_storage::Error>(
-                convert_session(source.as_ref(), &out_dir, &options)?.to_json(),
+                convert_session_locked(source.as_ref(), &out_dir, &options, &mut |_| {})?.to_json(),
             )
         })
         .map_err(failure)?;

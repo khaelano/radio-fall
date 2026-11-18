@@ -54,10 +54,13 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   holds an advisory lock on `<frames_dir>.lock`, so concurrent conversions of
   one session run one at a time and later callers reuse the result. The analysis
   pipeline, phase and integrity analysis, and the session inspector read the
-  tables; the collector still writes the CSV sidecars by default
-  (`--no-csv-sidecars` disables them) as a safety net until one Rust-era hardware
-  session passes `tools/processing/check_storage_equivalence.py`, and the
-  Rust-era journal path is verified on synthetic journals only. Journals in the
+  tables. One Rust-era hardware session (18 November, two one-minute collector
+  segments, four receivers) passed `tools/processing/check_storage_equivalence.py`:
+  all 45,824 frames matched their CSV rows with no mismatch
+  ([status report](reports/architecture-rehaul-status-2026-11-13.md#update-18-november)).
+  The collector still writes the CSV sidecars by default (`--no-csv-sidecars`
+  disables them); they are now eligible for removal and made up 47% of that
+  session's archive. Journals in the
   session directory are included in the finalized archive. See the
   [specification](storage-layout-spec.md) and
   [report](reports/storage-layout-migration-2026-11-13.md).
@@ -76,7 +79,8 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   (`analysis/preprocessing/sequence_preprocessing.py`) remains Python and is mirrored by the
   live Rust window builder, guarded by the replay parity test; moving it would
   change published preprocessing. Tested offline against a fake gateway on a
-  pseudo-terminal; not yet exercised on radio hardware, and the 300 s
+  pseudo-terminal and, on 18 November, in one two-minute four-receiver collector
+  session on radio hardware; sustained operation is unverified, and the 300 s
   qualification evaluator has not been ported. See
   [native processing](rust-radio-pipeline.md) and
   [automatic recovery](automatic-radio-recovery.md).

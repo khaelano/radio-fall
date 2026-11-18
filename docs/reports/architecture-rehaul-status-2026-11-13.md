@@ -76,70 +76,81 @@ construction; with HE20 they no longer reach the cold-preview path they test.
   through the bridge, found only an import-order issue in each first code cell;
   it was fixed through the bridge before the notebooks were saved.
 
+## Update, 18 November
+
+The data laptop (`laptop-fd`) is the source of truth; the other device is used
+only for training. `laptop-remote` is on a separate host, so pushes from the
+laptop are off-machine backups.
+
+- **Notebook run history.** The 179 files (113 MB, directory hash `65fd3c14…`)
+  that `artifacts/notebooks.dvc` recorded on 12 November were in neither
+  machine's cache nor on `laptop-remote`; a push from the training device
+  reported nothing to send. The pointer was re-recorded to the seven figures on
+  disk (`25b492a1…`, 4.4 MB). The old record remains in commit `7ad7d7c` and can
+  be checked out if the data turns up.
+- **Model bundles.** `dvc commit artifacts/model.dvc` stored the 21 files in
+  the cache without changing the `.dvc` file.
+- **Hardware storage check.** A collector session recorded on radio hardware
+  (`20261118T061506921397Z`: continuous mode, two 60 s segments, CSV sidecars
+  on) finished with both attempts accepted. All four receivers delivered for
+  the whole 121 s, at 91.7–98.0 frames/s each. The archive verified, its
+  45,824 converted frames re-verified against the source, and
+  `check_storage_equivalence.py` on the session directory matched every CSV row
+  to exactly one frame with no mismatch in payload, PHY header, MAC, signal,
+  radio timestamps, capture time or clock uncertainty. The sidecars made up
+  13.3 MB (47%) of the 28.1 MB archive. The archive is tracked with DVC under
+  `data/experiments/storage-check-20261118/`; Git ignores the 96 MB working
+  directory, which duplicates its contents.
+- **Backup.** `dvc push` uploaded the model bundles, the figures, the four
+  version-3 session archives (about 6.6 GB), the 12 November detector captures
+  and runs, and the storage-check archive. The original pre-migration archives
+  (11.9 GB) were already complete on `laptop-remote`.
+- **Merge.** `main` was fast-forwarded to the branch locally; nothing was pushed
+  to `origin`.
+- **Storage.** The working tree is on btrfs, and DVC's cache shares extents with
+  the tracked files, so the cache does not duplicate them on disk.
+
 ## Not done
 
 ### Waiting on a decision
 
-1. **Merge into `main`.** `main` is an ancestor of the branch, so a
-   fast-forward is possible. Nothing has been pushed.
-2. **DVC data that exists only on this machine.** A `dvc pull` from
-   `laptop-remote` did not change any of the following:
-   - **Notebook run history.** `artifacts/notebooks.dvc` records 179 files
-     (113 MB, directory hash `65fd3c14…`) added on 12 November. They are not
-     on disk, in the local cache or on `laptop-remote`; the other configured
-     remote, `local` (`/home/fall-detector/dvcstore`), does not exist on this
-     machine. The folder now holds only the seven figures written by the latest
-     `01_01` run (4.4 MB). Running `dvc add artifacts/notebooks` would replace the
-     179-file record with those seven figures, so it should wait until the
-     history is found or deliberately abandoned.
-   - **Model bundles.** The 21 files in `artifacts/model/` hash to the tracked
-     directory (`808ee653…`), but that version is in neither the local cache nor
-     `laptop-remote`. `dvc commit artifacts/model.dvc` followed by `dvc push`
-     would back it up without changing the `.dvc` file.
-   - **Raw sessions and detector captures.** `dvc status -c` lists 47 cache
-     objects missing from `laptop-remote`: the four version-3 session archives
-     tracked since `0142e5c` (about 6.6 GB) and the 12 November detector
-     captures and runs. They exist only in this machine's cache and working
-     tree.
-
-### Waiting on hardware
-
-3. **CSV sidecar removal** needs one hardware session checked with
-   `tools/processing/check_storage_equivalence.py`.
+1. **CSV sidecar removal.** The hardware check above passed, so the sidecars
+   can be removed; the collector still writes them by default.
 
 ### Follow-ups found
 
-4. **Currency check ignores output hashes.** `tables_current` accepts a table set
+2. **Equivalence checker gaps.** Given an archive, the checker does not decode
+   `.zst` members, so a Rust-era archive reports "no CSV sidecars"; the session
+   directory works. It also skips, without counting a mismatch, any receiver
+   whose three sidecar files differ in row count. Neither affected the result
+   above, where every frame was matched.
+3. **Currency check ignores output hashes.** `tables_current` accepts a table set
    whose `conversion.json` hashes do not match the files, which is how the stale
    manifest above went unnoticed; `storage_verify` detects it in about 0.5 s on
    a 358 MB table. The lock prevents the race through `FrameStore.ensure`, but
    direct `convert_session` calls are not locked. Adding a hash or size check is
    a proposal, not implemented.
-5. **Pre-existing Ruff errors** (36), mostly in `tools/papers/`, the video
+4. **Pre-existing Ruff errors** (36), mostly in `tools/papers/`, the video
    modules and `protocol/loader.py`.
 
 ### Deliberately not done
 
-6. **Cache warm-up.** Notebook stage caches and the integrity and phase-motion
+5. **Cache warm-up.** Notebook stage caches and the integrity and phase-motion
    caches rebuild once because their keys hash moved source files. Forcing it
    would rerun the long preprocessing and rewrite derived datasets.
-7. **Historical references left as they are.** `docs/reports/ble-c6-timing-2026-11-01.md`
+6. **Historical references left as they are.** `docs/reports/ble-c6-timing-2026-11-01.md`
    and `docs/archive/ble-delivery-policy.md` cite `radio.experiments.ble_timing`,
    which was removed before this work. The "648 Python tests" count in
    `docs/amplitude-preprocessing.md` is a dated record.
 
 ## Verification limits
 
-- The GUI applications have been exercised only by offscreen tests and the
-  window-free inspector script above.
-- Nothing in this work has been run on radio hardware.
+- Apart from the collector session above, the GUI applications have been
+  exercised only by offscreen tests and the window-free inspector script.
+- On radio hardware, this work has been run only in that two-minute collector
+  session; sustained operation and radio-failure recovery are unverified.
 
 ## Suggested order
 
-1. Back up the model bundles, raw session archives and detector data with
-   `dvc commit artifacts/model.dvc` and `dvc push`.
-2. Look for the 12 November notebook history on the machine that recorded it
-   and push it from there, or decide to replace it.
-3. Fast-forward `main`.
-4. Record one hardware session and run the CSV sidecar equivalence check.
-5. Decide whether `tables_current` should check output hashes.
+1. Remove the CSV sidecars from the collector.
+2. Decide whether `tables_current` should check output hashes.

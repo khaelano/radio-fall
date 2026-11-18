@@ -102,8 +102,17 @@ laptop are off-machine backups.
   `data/experiments/storage-check-20261118/`; Git ignores the 96 MB working
   directory, which duplicates its contents.
 - **Sidecars removed.** The collector no longer writes CSV sidecars (`771abf2`).
-  The full suite passed (637 passed, 2 skipped). The updated collector has not yet
-  recorded on hardware.
+  The full suite passed (637 passed, 2 skipped). A 60 s session with the updated
+  collector (`20261118T090516246988Z`, tracked under
+  `data/experiments/collector-check-20261118/`) finished with the attempt
+  accepted, only `attempt.json` in the attempt directory, `csv_sidecars: false`
+  in the manifest and a 6.5 MB archive that verified; its 18,036 frames
+  re-verified against the source. rx-1 and rx-2 delivered at their usual median
+  of 95–96 frames/s, but rx-3 and rx-4 fell to medians of 54 and 69 frames/s
+  with eight to nine gaps over 0.5 s each, against 96 frames/s in the earlier
+  session. Python no longer touches records before they are journaled, so the
+  change cannot reduce delivery; the cause, probably placement or interference,
+  was not investigated.
 - **Backup.** `dvc push` uploaded the model bundles, the figures, the four
   version-3 session archives (about 6.6 GB), the 12 November detector captures
   and runs, and the storage-check archive. The original pre-migration archives
@@ -150,6 +159,6 @@ laptop are off-machine backups.
 
 ## Suggested order
 
-1. Record a short session with the updated collector to confirm it records and
-   archives without sidecars on hardware.
+1. Check rx-3 and rx-4 placement and delivery before the next participant
+   session.
 2. Decide whether `tables_current` should check output hashes.

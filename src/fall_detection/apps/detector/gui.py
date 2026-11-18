@@ -110,8 +110,12 @@ def build_config(args: Any, models: list[str] | None = None) -> dict:
         return config
     from fall_detection.radio.settings import resolve_settings
 
+    # Resolving first fills an omitted --gateway-port from the settings file.
+    settings = resolve_settings(args)
+    if not args.gateway_port:
+        raise ValueError("a gateway USB port is required (--gateway-port)")
     config["serial_path"] = str(args.gateway_port)
-    config["radio_config"] = resolve_settings(args).native_radio_config()
+    config["radio_config"] = settings.native_radio_config()
     return config
 
 

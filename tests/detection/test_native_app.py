@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from fall_detection.apps.detector import app, gui
+from fall_detection.radio.settings import RadioSettings
 
 
 def test_parser_selects_current_four_second_models_on_webgpu():
@@ -55,6 +56,10 @@ def test_native_config_uses_model_files_and_wire_configuration_only(
     )
     configuration = gui.build_config(args)
     assert len(configuration["radio_config"]) == 108
+    assert (
+        configuration["serial_path"]
+        == (RadioSettings.load().connection["gateway_port"])
+    )
     assert configuration["models"] == list(gui.DEFAULT_MODELS)
     assert configuration["core_library"] == str(core.resolve())
     assert configuration["model_root"] == str(Path("artifacts/model").resolve())

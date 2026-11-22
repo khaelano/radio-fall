@@ -1,0 +1,6 @@
+outs:
+- md5: d6d2bb380031591c88d33314741b1280.dir
+  size: 351317
+  nfiles: 3
+  hash: md5
+  path: subset-20261109-adapted-attempt-seed42

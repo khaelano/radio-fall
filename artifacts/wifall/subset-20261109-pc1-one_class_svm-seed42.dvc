@@ -1,0 +1,6 @@
+outs:
+- md5: 178900eeb497f5acb55e57ced737da39.dir
+  size: 16148854
+  nfiles: 3
+  hash: md5
+  path: subset-20261109-pc1-one_class_svm-seed42

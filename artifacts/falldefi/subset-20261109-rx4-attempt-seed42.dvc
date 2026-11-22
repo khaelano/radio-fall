@@ -1,0 +1,6 @@
+outs:
+- md5: 7c88a33293f70681b1a98e14605434d0.dir
+  size: 230934
+  nfiles: 3
+  hash: md5
+  path: subset-20261109-rx4-attempt-seed42

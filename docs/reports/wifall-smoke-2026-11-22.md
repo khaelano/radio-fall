@@ -1,6 +1,6 @@
 # WiFall smoke runs on one session, 22 November 2026
 
-These runs checked the rewritten [WiFall adaptation](../wifall.md) end to end
+These runs checked the rewritten [WiFall adaptation](../baselines/wifall.md) end to end
 on the same subset as the [FallDeFi smoke runs](falldefi-smoke-2026-11-22.md).
 They are not an evaluation: one session, an attempt holdout and correlated
 windows cannot establish detection performance, and the session informed the
@@ -17,7 +17,7 @@ design.
 - Random forest (200 trees, balanced class weights) and fall-inlier one-class
   SVM (`ν = 0.1`); attempt holdout, test fraction 0.25, seed 42.
 - Code at the working tree on top of commit `67e5039`; hashes are in each
-  run's `report.json`. Outputs under `artifacts/wifall/`, not versioned.
+  run's `report.json`. Outputs under `artifacts/baselines/wifall/`, tracked with DVC.
 
 ## Data
 
@@ -39,7 +39,7 @@ predictions found no falls.
 | Random forest | 18 / 62 | 107 / 147 | 0.509 |
 | One-class SVM | 57 / 62 | 25 / 147 | 0.545 |
 
-Outputs: `artifacts/wifall/subset-20261109-adapted-{random_forest,one_class_svm}-seed42/`.
+Outputs: `artifacts/baselines/wifall/subset-20261109-adapted-{random_forest,one_class_svm}-seed42/`.
 
 ## Diagnosis
 
@@ -76,7 +76,7 @@ Counting an attempt as a fall when any of its windows is classified as one,
 the random forest found 14 of 21 fall attempts and flagged 28 of 35 non-fall
 attempts; the one-class SVM flagged all 56.
 
-Outputs: `artifacts/wifall/subset-20261109-pc1-{random_forest,one_class_svm}-seed42/`.
+Outputs: `artifacts/baselines/wifall/subset-20261109-pc1-{random_forest,one_class_svm}-seed42/`.
 
 ## Interpretation and limits
 

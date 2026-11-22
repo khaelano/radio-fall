@@ -34,7 +34,7 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
 
 ## Implemented
 
-- **WiFall adaptation (rewritten 22 November):** `analysis/wifall/` keeps
+- **WiFall adaptation (rewritten 22 November):** `analysis/baselines/wifall/` keeps
   WiFall's structure (smoothing, LOF activity gate on training countdowns,
   seven statistics and singular values, random forest or fall-inlier one-class
   SVM) adapted to the C5 receivers like FallDeFi: receivers judged per 2 s
@@ -45,10 +45,10 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   (134 before) but the gate passed no held-out window and the classifiers
   alone were near chance (balanced accuracy 0.52–0.56)
   ([report](reports/wifall-smoke-2026-11-22.md)). See the
-  [implementation guide](wifall.md). Session reading, gap filling,
+  [implementation guide](baselines/wifall.md). Session reading, gap filling,
   per-receiver checks and the grouped holdout are shared with FallDeFi
-  (`analysis/_recorded_attempts.py`, `analysis/_grouped_holdout.py`).
-- **FallDeFi adaptation:** `analysis/falldefi/` keeps FallDeFi's structure
+  (`analysis/baselines/_recorded_attempts.py`, `analysis/baselines/_grouped_holdout.py`).
+- **FallDeFi adaptation:** `analysis/baselines/falldefi/` keeps FallDeFi's structure
   (one trace per action cue ± 1 s, STFT spectrograms, power-burst events, RBF
   SVM on duration, two spectral entropies and fractal dimension) but adapts it
   to the C5 receivers rather than reproducing the paper: receivers are judged
@@ -60,7 +60,7 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   design, so it is development data
   ([report](reports/falldefi-smoke-2026-11-22.md)). Unverified: other
   sessions, participants and continuous monitoring. See the
-  [implementation guide](falldefi.md).
+  [implementation guide](baselines/falldefi.md).
 - **Receiver gap schedule (measured 22 November on the 9 November 13:15
   session):** each receiver loses a 0.1 s burst about every 0.57 s (about
   18 % of samples), staggered across receivers; all four are complete only
@@ -114,7 +114,7 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
   fitting have one Rust implementation; independent NumPy/Python references
   remain in tests only. ACKs now certify the native envelope journal rather
   than the CSV write. Offline sequence alignment for training
-  (`analysis/preprocessing/sequence_preprocessing.py`) remains Python and is mirrored by the
+  (`analysis/sequence/alignment.py`) remains Python and is mirrored by the
   live Rust window builder, guarded by the replay parity test; moving it would
   change published preprocessing. Tested offline against a fake gateway on a
   pseudo-terminal and, on 18 November, in one two-minute four-receiver collector
@@ -242,7 +242,7 @@ modules in live application code.
 | `radio/` | settings, profiles, live delivery, records, buffers, provisioning, Rust-backed `phase.py` | none |
 | `session/` | session manifests, directory/archive reader, schema version | `protocol` |
 | `collection/` | collection controller, capture, resume, video | `protocol`, `radio`, `session` |
-| `analysis/` | `session_frames.py` plus `preprocessing/`, `diagnostics/`, `training/` | `protocol`, `radio`, `session` |
+| `analysis/` | `session_frames.py` plus `preprocessing/` (shared amplitude), `sequence/` (our approach), `baselines/`, `diagnostics/` | `protocol`, `radio`, `session` |
 | `apps/` | collector, CSI viewer, session inspector, detector, and `common/` shared Qt code | all of the above |
 
 The inspector backend (frame loading, review, export, video) lives in

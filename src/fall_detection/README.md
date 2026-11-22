@@ -22,9 +22,12 @@ the dependency order up:
   schema version). Imports `protocol`.
 - `collection/`: collection workflow (controller, capture, resume, video).
   Imports `protocol`, `radio` and `session`.
-- `analysis/`: shared data access (`session_frames.py`) with `preprocessing/`,
-  `diagnostics/` and `training/` groups. Imports `protocol`, `radio` and
-  `session`.
+- `analysis/`: shared data access (`session_frames.py`) and four groups:
+  `preprocessing/` (shared amplitude kernels and loading), `sequence/` (our
+  sequence approach: alignment, difference transforms, export and training
+  inputs, driven by the notebooks), `baselines/` (adaptations of prior
+  research: WiFall, FallDeFi) and `diagnostics/`. Imports `protocol`, `radio`
+  and `session`.
 
 `tests/test_architecture.py` enforces this order (`ALLOWED_DEPENDENCIES`);
 adding a top-level package requires adding it there. Experimental

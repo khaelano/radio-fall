@@ -1,6 +1,6 @@
 # FallDeFi smoke runs on one session, 22 November 2026
 
-These runs checked the [FallDeFi adaptation](../falldefi.md) end to end on a
+These runs checked the [FallDeFi adaptation](../baselines/falldefi.md) end to end on a
 deliberately small subset on the data laptop. They are not an evaluation: one
 session and 30–46 held-out traces cannot establish detection performance, and
 the second run's design was informed by this same session.
@@ -15,7 +15,7 @@ the second run's design was informed by this same session.
   `walk_to_sit`, `walk_to_stand`.
 - Traces of action cue ± 1 s; attempt holdout, test fraction 0.25, seed 42.
 - Code at the working tree on top of commit `67e5039`; hashes are in each
-  run's `report.json`. Outputs under `artifacts/falldefi/`, not versioned.
+  run's `report.json`. Outputs under `artifacts/baselines/falldefi/`, tracked with DVC.
 
 ## Receiver gaps in this session
 
@@ -43,11 +43,11 @@ The grid search then selected `C = γ = 2⁻⁵` with cross-validation accuracy
 0.75, the non-fall share: on 30 held-out traces it predicted no falls
 (0 of 11 falls, 19 of 19 non-falls correct).
 
-Output: `artifacts/falldefi/subset-20261109-rx4-attempt-seed42/`.
+Output: `artifacts/baselines/falldefi/subset-20261109-rx4-attempt-seed42/`.
 
 ## Run 2: adapted to the receivers
 
-Settings are the current defaults (see the [guide](../falldefi.md#pipeline)):
+Settings are the current defaults (see the [guide](../baselines/falldefi.md#pipeline)):
 120 tones, coverage 0.7 and gaps up to 0.25 s judged per receiver with at
 least two receivers per trace, relative amplitude, per-receiver whitening by
 the resting spectrum, region ranked by 5–25 Hz magnitude, `k` calibrated to a
@@ -85,7 +85,7 @@ Median features of held-out main events:
 | Spectral entropy 10–30 Hz (nats) | 2.27 | 2.11 |
 | Fractal dimension | 1.17 | 1.30 |
 
-Output: `artifacts/falldefi/subset-20261109-adapted-attempt-seed42/`.
+Output: `artifacts/baselines/falldefi/subset-20261109-adapted-attempt-seed42/`.
 
 ## Interpretation and limits
 
@@ -112,7 +112,7 @@ uv run python -m fall_detection.analysis.falldefi \
   --non-fall-label sit_to_stand --non-fall-label sit_to_walk \
   --non-fall-label stand_to_sit --non-fall-label stand_to_walk \
   --non-fall-label walk_to_sit --non-fall-label walk_to_stand \
-  --output artifacts/falldefi/<new-run>
+  --output artifacts/baselines/falldefi/<new-run>
 ```
 
 Run 1 used code from before the adaptation; its settings cannot be recreated

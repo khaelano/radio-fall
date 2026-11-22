@@ -5,7 +5,7 @@
 [`02_preprocess.ipynb`](../notebooks/latest/02_preprocess.ipynb) defines the
 experiment directly: source sessions, attempt selection, sampling rate, filtering,
 squared differences, cue labels, windows, export transformation, and figures.
-`analysis/preprocessing/sequence_preprocessing.py` provides alignment primitives and verified
+`analysis/sequence/alignment.py` provides alignment primitives and verified
 source/export access. The notebook calls the shared Rust-backed magnitude and
 Hampel operations; moving orchestration does not move these kernels to Python.
 
@@ -28,6 +28,12 @@ scaled-MAD factor 1.4826, and at least five finite values. Zero MAD leaves the
 center unchanged. Consecutive squared differences propagate missingness and
 never cross segment boundaries. Centered filtering uses future samples; this
 representation is exploratory and offline.
+
+`analysis/sequence/transforms.py` holds `squared_difference` and
+`absolute_difference`, a variant that keeps each
+change's magnitude instead of squaring it. It is not yet used: the notebook
+export, the trained models and the Rust live detector all use the squared
+difference, so a model on the variant needs its own export and training run.
 
 The notebook defines 2-, 4-, and 6-second windows with 50% overlap. Complete
 windows must fit within the recorded attempt. Fall windows receive target 1

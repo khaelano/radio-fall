@@ -424,7 +424,7 @@ def test_empty_and_populated_recordings_share_a_schema(capture):
 
 
 def test_notebook_sequence_columns_are_all_available(capture):
-    from fall_detection.analysis.preprocessing.sequence_preprocessing import (
+    from fall_detection.analysis.sequence.alignment import (
         SEQUENCE_COLUMNS,
     )
 

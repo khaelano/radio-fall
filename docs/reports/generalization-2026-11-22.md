@@ -148,6 +148,33 @@ Rerunning the holdout from the committed notebooks (`HELD_OUT_SESSION` in
 `06_comparison/20261122T145709625213Z` (test `khaelano`), which name their
 `03`, `04` and `05` runs.
 
+## Continuous data held out with `akmal`
+
+`continuous_non_fall` was recorded three hours after `akmal` on the same day,
+so the holdouts above still trained on 8 of its 12 segments. Holding out both
+(`HELD_OUT_SESSION = ("akmal", "continuous_non_fall")`) trains on `khaelano`
+alone (186 training, 46 validation attempts) and tests on all 231 `akmal`
+attempts and all 12 continuous segments (1.0 h). Runs:
+`06_comparison/20261122T162421842557Z`, which names its `03`, `04` and `05`
+runs; `continuous_false_alarms.csv` there gives alarms per hour.
+
+| Approach | Attempt balanced accuracy (243 attempts) | Continuous units flagged | Alarms per hour of continuous data |
+| --- | --- | --- | --- |
+| FallDeFi SVM | 0.732 (194 scored) | 21 of 285 traces (7.4 %) | 21 |
+| GRU 2 s | 0.585 | 38.6 % of 2 s windows | 414 |
+| LSTM 2 s | 0.573 | 63.4 % | 316 |
+| CNN 2 s / 4 s / 6 s | 0.529 / 0.535 / 0.515 | 100 % / 98.7 % / 99.9 % | 12 / 20 / 12 (flagged throughout) |
+| WiFall random forest, gated / classifier only | 0.442 | 0.3 % / 54.3 % of windows | 6 / 341 |
+| WiFall one-class SVM, gated / classifier only | 0.457 | 0.1 % / 46.3 % | 2 / 305 |
+
+Alarms merge overlapping or adjacent flagged windows within a segment, so a
+detector that flags a whole segment counts one alarm; the CNN rows are such
+cases. Without same-day continuous data in training, every sequence model
+flagged 39–100 % of idle continuous time as falls, while the earlier holdouts,
+which trained on part of that recording, flagged none of it. FallDeFi kept the
+best attempt score and flagged 7.4 % of continuous traces; WiFall's gate kept
+its alarms low only because it rarely passes any window.
+
 ## Interpretation and limits
 
 - Under the random split, the sequence models' advantage over FallDeFi came
@@ -166,6 +193,8 @@ Rerunning the holdout from the committed notebooks (`HELD_OUT_SESSION` in
   so cross-session scores can still contain setup effects; FallDeFi left 9–21 %
   of test attempts unscored; one seed; threshold 0.5 for the sequence models;
   attempt metrics use the any-unit rule.
+- One hour of continuous data from one session is too little for a reliable
+  false-alarm rate; the numbers show orders of magnitude, not rates.
 - Implications: evaluate on held-out sessions rather than random attempt
   splits, and collect non-fall activity with the mattress in place (or
   interleave trial order) before comparing representations.

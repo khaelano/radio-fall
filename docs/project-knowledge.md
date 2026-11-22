@@ -77,8 +77,12 @@ on their hardware and data, and are not reproduced here.
   fell to attempt balanced accuracy 0.45–0.52 (median of nine), while FallDeFi
   kept 0.68–0.71 and was the best approach in both directions
   ([generalization report](reports/generalization-2026-11-22.md)).
-  `HELD_OUT_SESSION` in `03`–`06` now runs that holdout from the committed
-  notebooks; `06` matches baseline runs to the training split by hash.
+  `HELD_OUT_SESSION` in `03`–`06` (one dataset or a tuple) runs that holdout
+  from the committed notebooks; `06` matches baseline runs to the training
+  split by hash. Holding out `akmal` together with the same-day
+  `continuous_non_fall` (training on `khaelano` only), FallDeFi reached 0.73
+  and flagged 7 % of continuous traces (21 alarms in 1.0 h); the sequence
+  models flagged 39–100 % of idle continuous time.
 - **Speed from CSI (considered 22 November, not pursued):** DeFall
   ([text](../resources/Papers/md/defall-2022.md)) and FallDar
   ([text](../resources/Papers/md/falldar-2023.md)) estimate movement speed

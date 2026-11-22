@@ -149,6 +149,50 @@ def split_sequence_attempts(
     return result
 
 
+def hold_out_dataset(
+    split: pl.DataFrame, dataset: str, *, keep_split: tuple[str, ...] = ()
+) -> pl.DataFrame:
+    """Test on every attempt of one dataset instead of a random attempt share.
+
+    The held-out dataset's attempts all become test attempts. The other
+    datasets' test attempts join training, except datasets in ``keep_split``,
+    which keep their split (for example, continuous non-fall data that should
+    stay represented in the test set). Validation attempts outside the held-out
+    dataset are unchanged, so early stopping never sees it.
+
+    Args:
+        split: Output of :func:`split_sequence_attempts`.
+        dataset: Dataset whose attempts are all held out.
+        keep_split: Datasets whose original split is retained.
+
+    Returns:
+        The split with reassigned ``split`` labels.
+
+    Raises:
+        ValueError: If the dataset is absent or kept, or a split lacks a class.
+    """
+    if dataset not in set(split["dataset"]):
+        raise ValueError(f"Unknown held-out dataset: {dataset}")
+    if dataset in keep_split:
+        raise ValueError("The held-out dataset cannot keep its split")
+    result = split.with_columns(
+        pl.when(pl.col("dataset") == dataset)
+        .then(pl.lit("test"))
+        .when(~pl.col("dataset").is_in(list(keep_split)) & (pl.col("split") == "test"))
+        .then(pl.lit("train"))
+        .otherwise(pl.col("split"))
+        .alias("split")
+    )
+    for duration in sorted(result["duration"].unique()):
+        for label in ("train", "validation", "test"):
+            subset = result.filter(
+                (pl.col("duration") == duration) & (pl.col("split") == label)
+            )
+            if set(subset["target"].unique()) != {0, 1}:
+                raise ValueError(f"Both classes required in {duration}s {label}")
+    return result
+
+
 class SegmentStore:
     """Map segment NPY files without a second Python signal cache."""
 

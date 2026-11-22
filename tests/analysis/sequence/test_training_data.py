@@ -9,6 +9,7 @@ from fall_detection.analysis.sequence.training_data import (
     SegmentStore,
     SequenceDataset,
     fit_normalizer,
+    hold_out_dataset,
     load_sequence_index,
     prefetched_batches,
     split_sequence_attempts,
@@ -53,6 +54,37 @@ def test_split_keeps_attempts_and_durations_together():
         360,
         120,
     ]
+
+
+def test_hold_out_dataset_tests_one_dataset_and_keeps_listed_splits():
+    rows = [
+        {
+            "group": f"{dataset}-{target}-{attempt}",
+            "dataset": dataset,
+            "activity_label": f"activity-{target}",
+            "target": target,
+            "duration": 2,
+        }
+        for dataset in ("a", "b", "continuous_non_fall")
+        for target in ((0,) if dataset == "continuous_non_fall" else (0, 1))
+        for attempt in range(20)
+    ]
+    split = split_sequence_attempts(
+        pl.DataFrame(rows), seed=42, test_fraction=0.2, validation_fraction=0.2
+    )
+    held = hold_out_dataset(split, "a", keep_split=("continuous_non_fall",))
+    assert set(held.filter(pl.col("dataset") == "a")["split"]) == {"test"}
+    other = held.filter(pl.col("dataset") == "b")
+    assert "test" not in set(other["split"])
+    assert other.filter(pl.col("split") == "validation").equals(
+        split.filter((pl.col("dataset") == "b") & (pl.col("split") == "validation"))
+    )
+    continuous = pl.col("dataset") == "continuous_non_fall"
+    assert held.filter(continuous).equals(split.filter(continuous))
+    with pytest.raises(ValueError, match="Unknown"):
+        hold_out_dataset(split, "missing")
+    with pytest.raises(ValueError, match="cannot keep"):
+        hold_out_dataset(split, "a", keep_split=("a",))
 
 
 def test_streaming_normalization_masks_labels_and_training_isolation(tmp_path):

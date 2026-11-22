@@ -8,6 +8,7 @@ import pytest
 from fall_detection.analysis.comparison import (
     baseline_group,
     latest_run,
+    latest_split_run,
     latest_training_run,
     split_assignment,
     split_labels,
@@ -84,3 +85,28 @@ def test_latest_training_run_skips_other_representations(tmp_path):
     assert latest_training_run(tmp_path, "full").name == "20261101T000000Z"
     with pytest.raises(FileNotFoundError, match="absent"):
         latest_training_run(tmp_path, "full", representation="absent")
+    (tmp_path / "20261104T000000Z" / "full").mkdir(parents=True)
+    (tmp_path / "20261104T000000Z" / "manifest.json").write_text(
+        json.dumps({"held_out_session": "akmal"})
+    )
+    assert latest_training_run(tmp_path, "full").name == "20261101T000000Z"
+    assert (
+        latest_training_run(tmp_path, "full", held_out_session="akmal").name
+        == "20261104T000000Z"
+    )
+
+
+def test_latest_split_run_selects_by_split_hash(tmp_path):
+    for name, digest in (
+        ("20261101T000000Z", "a" * 64),
+        ("20261102T000000Z", "b" * 64),
+        ("20261103T000000Z", "a" * 64),
+    ):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "manifest.json").write_text(
+            json.dumps({"split_sha256": digest})
+        )
+    assert latest_split_run(tmp_path, "a" * 64).name == "20261103T000000Z"
+    assert latest_split_run(tmp_path, "b" * 64).name == "20261102T000000Z"
+    with pytest.raises(FileNotFoundError, match="cccccccccccc"):
+        latest_split_run(tmp_path, "c" * 64)

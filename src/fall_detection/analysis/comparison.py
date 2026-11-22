@@ -124,38 +124,79 @@ def latest_run(directory: Path, required: str) -> Path:
 
 
 def latest_training_run(
-    directory: Path, required: str, *, representation: str = DEFAULT_REPRESENTATION
+    directory: Path,
+    required: str,
+    *,
+    representation: str = DEFAULT_REPRESENTATION,
+    held_out_session: str | None = None,
 ) -> Path:
-    """Return the newest ``03_training`` run of one signal representation.
+    """Return the newest ``03_training`` run of one representation and split.
 
-    Runs recorded before ``03_training`` stored its representation have none in
-    their manifest and count as the default.
+    Runs recorded before ``03_training`` stored these settings have neither in
+    their manifest; they count as the default representation and a random
+    attempt split.
 
     Args:
         directory: ``artifacts/notebooks/03_training``.
         required: Relative path that a usable run must contain.
         representation: Sequence signal the run must have been trained on.
+        held_out_session: Dataset held out entirely, or None for the random
+            attempt split.
 
     Returns:
         The newest qualifying run directory.
 
     Raises:
-        FileNotFoundError: No run has the file and the representation.
+        FileNotFoundError: No run has the file, representation and split.
+    """
+
+    def matches(path: Path) -> bool:
+        manifest_path = path / "manifest.json"
+        if not (path / required).exists() or not manifest_path.is_file():
+            return False
+        manifest = json.loads(manifest_path.read_text())
+        return (
+            manifest.get("representation", DEFAULT_REPRESENTATION) == representation
+            and manifest.get("held_out_session") == held_out_session
+        )
+
+    runs = sorted(
+        path for path in directory.glob("*") if path.is_dir() and matches(path)
+    )
+    if not runs:
+        split = held_out_session or "random-split"
+        raise FileNotFoundError(
+            f"No {representation} {split} run under {directory} contains {required}"
+        )
+    return runs[-1]
+
+
+def latest_split_run(directory: Path, split_sha256: str) -> Path:
+    """Return the newest baseline run fitted on one ``03_training`` split.
+
+    Args:
+        directory: Baseline notebook run directory such as
+            ``artifacts/notebooks/05_falldefi``.
+        split_sha256: SHA-256 of the split file the run must have used, as
+            recorded in its ``manifest.json``.
+
+    Returns:
+        The newest run directory with that split.
+
+    Raises:
+        FileNotFoundError: No run used the split.
     """
     runs = sorted(
         path
         for path in directory.glob("*")
-        if path.is_dir()
-        and (path / required).exists()
-        and (path / "manifest.json").is_file()
-        and json.loads((path / "manifest.json").read_text()).get(
-            "representation", DEFAULT_REPRESENTATION
-        )
-        == representation
+        if (path / "manifest.json").is_file()
+        and json.loads((path / "manifest.json").read_text()).get("split_sha256")
+        == split_sha256
     )
     if not runs:
         raise FileNotFoundError(
-            f"No {representation} run under {directory} contains {required}"
+            f"No run under {directory} used split {split_sha256[:12]}; "
+            "run the baseline notebook on that 03_training run first"
         )
     return runs[-1]
 

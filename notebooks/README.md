@@ -26,12 +26,18 @@ excluded from Git. Recordings and reusable derived datasets remain in `data/`.
   `REPRESENTATION` selects the default export or a variant and is recorded in
   the run manifest; variant models are not copied to `artifacts/model/`,
   because the live detector computes only the default signal.
+  `HELD_OUT_SESSION` tests on every attempt of one participant session instead
+  of a random attempt share (`hold_out_dataset`); such runs are evaluation runs
+  and are not copied to `artifacts/model/` either. Prefer it for comparisons:
+  random attempt splits are confounded by the equipment-ordered protocol
+  ([report](../docs/reports/generalization-2026-11-22.md)).
 - `04_wifall.ipynb` and `05_falldefi.ipynb` run the WiFall and FallDeFi
   baselines ([guides](../docs/baselines/)) on the attempt split of a
   `03_training` run: validation attempts join training, and the test attempts
   are the sequence models' test attempts.
-- `06_comparison.ipynb` collects the newest 03 (default representation), 04
-  and 05 runs, checks that they share one split, and scores every approach on
+- `06_comparison.ipynb` collects the newest default-representation 03 run for
+  its `HELD_OUT_SESSION` and the newest 04 and 05 runs fitted on that run's
+  split (matched by split hash; set the same `HELD_OUT_SESSION` in 03–06), and scores every approach on
   its own unit and per attempt (an attempt is predicted a fall when any of its
   units is). `EXTRA_TRAINING_RUNS` adds sequence runs on the same windows and
   attempts, such as a representation variant.

@@ -1,6 +1,6 @@
 # FallDeFi adapted to the ESP32-C5 receivers
 
-`src/fall_detection/analysis/falldefi/` is a time-frequency fall detector
+`src/fall_detection/analysis/baselines/falldefi/` is a time-frequency fall detector
 built on FallDeFi ([paper](../../resources/Papers/md/falldefi-2017.md),
 [DOI](https://doi.org/10.1145/3161183)): spectrograms of CSI amplitude,
 power-burst event detection, and an RBF support vector machine (SVM) on event
@@ -146,11 +146,11 @@ holds region selection, events and features; `model.py` owns whitening,
 fusion, threshold calibration and the classifier; `dataset.py` adapts
 preserved sessions; `experiment.py` owns grouped evaluation and output;
 `__main__.py` supplies the command. Session reading and gap filling are shared
-with WiFall in `analysis/_recorded_attempts.py`, and the grouped holdout and
-metrics in `analysis/_grouped_holdout.py`.
+with WiFall in `analysis/baselines/_recorded_attempts.py`, and the grouped holdout and
+metrics in `analysis/baselines/_grouped_holdout.py`.
 
 ```bash
-uv run ruff format src/fall_detection/analysis/falldefi tests/analysis/falldefi
-uv run ruff check src/fall_detection/analysis/falldefi tests/analysis/falldefi
+uv run ruff format src/fall_detection/analysis/baselines/falldefi tests/analysis/baselines/falldefi
+uv run ruff check src/fall_detection/analysis/baselines/falldefi tests/analysis/baselines/falldefi
 uv run pytest
 ```

@@ -32,6 +32,44 @@ snapshot/cache for replay. Their cache was retained during cleanup.
 Use the safe-prune utility to inspect eligible local cleanup candidates. See
 the [data layout](../data/README.md) and [dataset format](dataset-format.md).
 
+## Prior research used as baselines
+
+Two published Wi-Fi CSI fall detectors are adapted as comparison points for
+our sequence approach. Both papers used commodity 802.11n cards reporting 30
+subcarriers per antenna pair, with several antennas on one card (FallDeFi
+names the Intel 5300; WiFall does not name its card). Their reported results are the authors' own, measured
+on their hardware and data, and are not reproduced here.
+
+| Paper | Method | Reported by the authors |
+| --- | --- | --- |
+| WiFall: Wang, Wu and Ni, IEEE TMC 16(2), 2017 ([text](../resources/Papers/md/wifall-2017.md), [DOI](https://doi.org/10.1109/TMC.2016.2557792)) | Time domain: smoothed amplitude, LOF activity detection, window statistics and singular values, one-class SVM or random forest | 90 % precision with a 15 % false-alarm rate (one-class SVM) and 94 % with 13 % (random forest), averaged over three indoor scenarios |
+| FallDeFi: Palipana, Rojas, Agrawal and Pesch, PACM IMWUT 1(4) 155, 2017 ([text](../resources/Papers/md/falldefi-2017.md), [DOI](https://doi.org/10.1145/3161183), [code](https://github.com/dmsp123/FallDeFi)) | Time-frequency: STFT spectrograms at 1000 Hz, power-burst events, features chosen by sequential forward selection, SVM | 93 % accuracy when trained in the test environment; close to 80 % on average after the environment changed |
+
+- **Where they live:** code in `analysis/baselines/{wifall,falldefi}/`,
+  guides in [`docs/baselines/`](baselines/), and run outputs in
+  `artifacts/baselines/<name>/<run>/` (DVC). They run as modules
+  (`uv run python -m fall_detection.analysis.baselines.<name>`); no baseline
+  notebook exists yet. Our adaptations and their smoke results are listed
+  under [Implemented](#implemented).
+- **Why adapted rather than reproduced:** the C5 receivers sample at 120 Hz
+  (FallDeFi lost accuracy below 400 Hz), are four separate single-antenna
+  radios with their own gain and noise, report 245 tones instead of 30, and
+  each loses a 0.1 s burst about every 0.57 s. Each adaptation keeps the
+  paper's structure and changes only what this hardware requires; the guides
+  list every deviation.
+- **Comparison with our approach (code only, not yet run):**
+  `analysis/comparison.py` and the baselines' `assignment` option put every
+  approach on the attempt split of a `03_training` run, with validation
+  attempts joining baseline training. Each approach is scored on its own unit
+  (sequence window, WiFall window, FallDeFi trace) and per attempt, where an
+  attempt is predicted a fall when any of its units is. This any-unit rule
+  favours approaches with more units per attempt in recall and penalises them
+  in false alarms.
+- **Speed from CSI (considered 22 November, not pursued):** DeFall
+  ([text](../resources/Papers/md/defall-2022.md)) and FallDar
+  ([text](../resources/Papers/md/falldar-2023.md)) estimate movement speed
+  from the autocorrelation of CSI magnitude. No implementation is planned.
+
 ## Implemented
 
 - **WiFall adaptation (rewritten 22 November):** `analysis/baselines/wifall/` keeps

@@ -106,7 +106,7 @@ against the video.
 ## Reproduce
 
 ```bash
-uv run python -m fall_detection.analysis.falldefi \
+uv run python -m fall_detection.analysis.baselines.falldefi \
   --session data/raw/sessions/20261109T131546367822Z.zip \
   --fall-label walk_to_fall --fall-label sit_to_fall --fall-label stand_to_fall \
   --non-fall-label sit_to_stand --non-fall-label sit_to_walk \

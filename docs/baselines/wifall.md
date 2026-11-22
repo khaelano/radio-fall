@@ -1,6 +1,6 @@
 # WiFall adapted to the ESP32-C5 receivers
 
-`src/fall_detection/analysis/wifall/` is a window-level fall detector built on
+`src/fall_detection/analysis/baselines/wifall/` is a window-level fall detector built on
 WiFall ([paper](../../resources/Papers/md/wifall-2017.md),
 [DOI](https://doi.org/10.1109/TMC.2016.2557792)): smoothed CSI amplitude, a
 Local Outlier Factor (LOF) activity detector trained on resting data, window
@@ -164,12 +164,12 @@ statistics; `model.py` owns the profiles, gate, pooling and classifiers;
 `dataset.py` adapts preserved sessions; `experiment.py` owns grouped
 evaluation and output; `__main__.py` supplies the command. Session reading,
 gap filling and per-receiver checks are shared with FallDeFi in
-`analysis/_recorded_attempts.py`, and the grouped holdout and metrics in
-`analysis/_grouped_holdout.py`. Existing preprocessing, training, and live
+`analysis/baselines/_recorded_attempts.py`, and the grouped holdout and metrics in
+`analysis/baselines/_grouped_holdout.py`. Existing preprocessing, training, and live
 detection do not use this package.
 
 ```bash
-uv run ruff format src/fall_detection/analysis/wifall tests/analysis/wifall
-uv run ruff check src/fall_detection/analysis/wifall tests/analysis/wifall
+uv run ruff format src/fall_detection/analysis/baselines/wifall tests/analysis/baselines/wifall
+uv run ruff check src/fall_detection/analysis/baselines/wifall tests/analysis/baselines/wifall
 uv run pytest
 ```

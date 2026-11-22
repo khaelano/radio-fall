@@ -1,0 +1,188 @@
+"""Put the sequence models and the baselines on the same held-out attempts.
+
+``03_training`` splits attempts once; the baseline notebooks reuse that split
+through :func:`split_assignment`, and the comparison notebook scores every
+approach with :func:`summarize`. Each approach decides on its own unit (a
+sequence window, a WiFall window or a FallDeFi trace), so the common unit is
+the attempt: an attempt is a fall when any of its units is, and it is
+predicted as a fall when any of its units is predicted as one.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import polars as pl
+
+from .baselines._grouped_holdout import binary_metrics
+
+SEQUENCE_GROUP_SEPARATOR = "::"
+"""Separator between session and attempt in the sequence export's ``group``."""
+
+
+def baseline_group(group: str) -> str:
+    """Return an attempt identity in the baselines' ``<session>/<attempt>`` form.
+
+    Args:
+        group: Sequence ``<session>::<attempt>`` or baseline identity.
+
+    Returns:
+        The identity with ``/`` between session and attempt key.
+
+    Raises:
+        ValueError: An identity without a session part.
+    """
+    session, separator, attempt = group.partition(SEQUENCE_GROUP_SEPARATOR)
+    if separator:
+        if not session or not attempt:
+            raise ValueError(f"Malformed sequence group: {group!r}")
+        return f"{session}/{attempt}"
+    if "/" not in group:
+        raise ValueError(f"Group has no session part: {group!r}")
+    return group
+
+
+def split_assignment(split: pl.DataFrame) -> dict[str, str]:
+    """Return each attempt's split from a ``03_training`` window split.
+
+    Args:
+        split: ``window_split.parquet`` with ``group`` and ``split`` columns.
+
+    Returns:
+        Baseline attempt identity to ``train``, ``validation`` or ``test``.
+
+    Raises:
+        ValueError: An attempt assigned to more than one split.
+    """
+    pairs = split.select("group", "split").unique()
+    if pairs["group"].n_unique() != len(pairs):
+        raise ValueError("An attempt appears in more than one split")
+    return {baseline_group(group): name for group, name in pairs.iter_rows()}
+
+
+def split_labels(split: pl.DataFrame) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return the activity labels the sequence export mapped to fall and non-fall.
+
+    Args:
+        split: Window split with ``activity_label`` and ``target`` columns.
+
+    Returns:
+        Sorted fall labels and sorted non-fall labels.
+
+    Raises:
+        ValueError: A label with windows of both targets.
+    """
+    targets = split.group_by("activity_label").agg(pl.col("target").unique())
+    fall, non_fall = [], []
+    for label, values in targets.iter_rows():
+        if set(values) == {1}:
+            fall.append(label)
+        elif set(values) == {0}:
+            non_fall.append(label)
+        else:
+            raise ValueError(f"Label {label!r} has windows of both targets")
+    return tuple(sorted(fall)), tuple(sorted(non_fall))
+
+
+def split_sessions(split: pl.DataFrame) -> list[str]:
+    """Return the sorted session identities that a window split covers."""
+    return sorted(
+        {baseline_group(group).split("/", 1)[0] for group in split["group"].unique()}
+    )
+
+
+def latest_run(directory: Path, required: str) -> Path:
+    """Return the newest run directory that contains a required file.
+
+    Run directories are named by UTC timestamp, so the newest sorts last.
+
+    Args:
+        directory: Notebook run directory such as ``artifacts/notebooks/03_training``.
+        required: Relative path that a usable run must contain.
+
+    Returns:
+        The newest qualifying run directory.
+
+    Raises:
+        FileNotFoundError: No run contains the required file.
+    """
+    runs = sorted(
+        path
+        for path in directory.glob("*")
+        if path.is_dir() and (path / required).exists()
+    )
+    if not runs:
+        raise FileNotFoundError(f"No run under {directory} contains {required}")
+    return runs[-1]
+
+
+def attempt_outcomes(rows: Iterable[dict[str, Any]]) -> pl.DataFrame:
+    """Reduce unit predictions to one target and prediction per attempt.
+
+    Args:
+        rows: Units with ``group``, binary ``target`` and binary ``prediction``.
+
+    Returns:
+        One row per attempt (baseline identity), with the any-unit target and
+        prediction and the number of units scored.
+    """
+    frame = pl.DataFrame(
+        [
+            {
+                "group": baseline_group(str(row["group"])),
+                "target": int(row["target"]),
+                "prediction": int(row["prediction"]),
+            }
+            for row in rows
+        ],
+        schema={"group": pl.String, "target": pl.Int64, "prediction": pl.Int64},
+    )
+    return (
+        frame.group_by("group")
+        .agg(
+            pl.col("target").max(),
+            pl.col("prediction").max(),
+            pl.len().alias("units"),
+        )
+        .sort("group")
+    )
+
+
+def summarize(
+    approach: str, unit: str, rows: list[dict[str, Any]], test_attempts: set[str]
+) -> dict[str, Any]:
+    """Score one approach on its own unit and on the shared attempt level.
+
+    Args:
+        approach: Display name, such as ``CNN 2s`` or ``WiFall random forest``.
+        unit: What one prediction covers, such as ``2 s window`` or ``trace``.
+        rows: Held-out units with ``group``, ``target`` and ``prediction``.
+        test_attempts: Baseline identities of the split's test attempts.
+
+    Returns:
+        Unit and attempt metrics with their denominators, and the test
+        attempts this approach could not score.
+
+    Raises:
+        ValueError: Units from attempts outside the test split.
+    """
+    attempts = attempt_outcomes(rows)
+    outside = set(attempts["group"]) - test_attempts
+    if outside:
+        raise ValueError(f"{approach} scored attempts outside the test split")
+    target = np.array([int(row["target"]) for row in rows])
+    prediction = np.array([int(row["prediction"]) for row in rows])
+    return {
+        "approach": approach,
+        "unit": unit,
+        "units": len(rows),
+        "unit_metrics": binary_metrics(target, prediction),
+        "attempts": len(attempts),
+        "attempt_metrics": binary_metrics(
+            attempts["target"].to_numpy(), attempts["prediction"].to_numpy()
+        ),
+        "unscored_test_attempts": sorted(test_attempts - set(attempts["group"])),
+    }

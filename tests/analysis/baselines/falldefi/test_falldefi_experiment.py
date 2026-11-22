@@ -87,3 +87,16 @@ def test_run_experiment_refuses_without_training_rest():
     )
     with pytest.raises(ValueError, match="training attempts"):
         run_experiment(no_rest, CONFIG)
+
+
+def test_run_experiment_follows_an_explicit_assignment():
+    source = dataset()
+    groups = source.groups.tolist()
+    assignment = {group: "train" for group in groups[:12]}
+    assignment |= {groups[12]: "test", groups[13]: "test"}
+    result = run_experiment(source, CONFIG, assignment=assignment)
+    split = result.report["split"]
+    assert split["by"] == "assignment"
+    assert split["test_attempts"] == sorted(groups[12:14])
+    assert split["unassigned_attempts"] == sorted(groups[14:])
+    assert len(result.predictions) == 2

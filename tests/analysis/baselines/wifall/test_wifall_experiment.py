@@ -78,3 +78,17 @@ def test_run_experiment_refuses_resting_data_from_test_attempts():
         run_experiment(only_elsewhere, config)
     with pytest.raises(ValueError, match="sampling rate"):
         run_experiment(dataset(), WiFallConfig(sample_rate_hz=5))
+
+
+def test_run_experiment_follows_an_explicit_assignment():
+    source = dataset()
+    config = WiFallConfig(sample_rate_hz=10, lof_neighbors=5, forest_trees=10)
+    assignment = {f"attempt-{i}": "train" for i in range(5)}
+    assignment |= {"attempt-5": "validation", "attempt-6": "test"}
+    assignment["attempt-7"] = "test"
+    result = run_experiment(source, config, assignment=assignment)
+    split = result.report["split"]
+    assert split["by"] == "assignment"
+    assert split["test_attempts"] == ["attempt-6", "attempt-7"]
+    assert "attempt-5" in split["train_attempts"]
+    assert split["unassigned_attempts"] == []

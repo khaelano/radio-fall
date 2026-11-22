@@ -69,6 +69,48 @@ def grouped_holdout(
     )
 
 
+ASSIGNMENT_SPLITS = ("train", "validation", "test")
+"""Split names accepted in an explicit attempt assignment."""
+
+
+def assigned_holdout(
+    targets: np.ndarray, groups: np.ndarray, assignment: dict[str, str]
+) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """Split examples by an attempt assignment made by another experiment.
+
+    Reusing the sequence models' split puts every approach on the same held-out
+    attempts. Validation attempts join training, because the baselines select
+    their settings on training data only.
+
+    Args:
+        targets: Binary label per example, with fall equal to one.
+        groups: Attempt identity per example.
+        assignment: Attempt identity to ``train``, ``validation`` or ``test``.
+
+    Returns:
+        Training indices, test indices, and the sorted attempts present in the
+        examples but absent from the assignment (left out of both sides).
+
+    Raises:
+        ValueError: Unknown split names, or a side without both classes.
+    """
+    unknown = sorted(set(assignment.values()) - set(ASSIGNMENT_SPLITS))
+    if unknown:
+        raise ValueError(f"Unknown split names in assignment: {unknown}")
+    targets = np.asarray(targets)
+    groups = np.asarray(groups)
+    if len(groups) != len(targets):
+        raise ValueError("Every example needs a target and a group")
+    split = np.array([assignment.get(str(group), "") for group in groups])
+    train = np.flatnonzero((split == "train") | (split == "validation"))
+    test = np.flatnonzero(split == "test")
+    for name, index in (("training", train), ("test", test)):
+        if set(targets[index].tolist()) != {0, 1}:
+            raise ValueError(f"The assigned {name} attempts need both classes")
+    unassigned = sorted({str(group) for group in groups[split == ""]})
+    return train, test, unassigned
+
+
 def binary_metrics(target: np.ndarray, prediction: np.ndarray) -> dict[str, Any]:
     """Return the confusion matrix and fall-class metrics.
 

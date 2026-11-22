@@ -155,6 +155,7 @@ def test_preprocessing_notebook_stages_and_cache(tmp_path, monkeypatch, rate):
             "CPU_WORKERS": 1,
             "ENABLE_PLOTS": True,
             "MAX_PLOT_POINTS": 16,
+            "SAMPLE": False,
         }
         if target.id in values:
             node.value = ast.parse(repr(values[target.id]), mode="eval").body

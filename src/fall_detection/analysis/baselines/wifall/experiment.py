@@ -12,7 +12,7 @@ import numpy as np
 
 from ..._cache_keys import file_hash
 from ..._io import atomic_json, temporary_sibling
-from .._grouped_holdout import binary_metrics, grouped_holdout
+from .._grouped_holdout import assigned_holdout, binary_metrics, grouped_holdout
 from .dataset import WindowSet
 from .model import WiFallConfig, WiFallDetector
 
@@ -32,6 +32,7 @@ def run_experiment(
     *,
     split_by: str = "attempt",
     test_fraction: float = 0.25,
+    assignment: dict[str, str] | None = None,
     max_stable_windows: int = 128,
 ) -> ExperimentResult:
     """Fit on training attempts and evaluate once on held-out windows.
@@ -41,6 +42,10 @@ def run_experiment(
         config: Activity profile and classifier settings.
         split_by: Identity level kept disjoint across the holdout.
         test_fraction: Held-out group fraction.
+        assignment: Optional attempt identity to ``train``, ``validation`` or
+            ``test`` from another experiment, replacing the seeded holdout;
+            ``split_by`` and ``test_fraction`` are then unused. Validation
+            attempts train, and unassigned attempts are left out.
         max_stable_windows: Seeded cap on training-only resting chunks.
 
     Returns:
@@ -55,14 +60,20 @@ def run_experiment(
         config.sample_rate_hz
     ):
         raise ValueError("Dataset sampling rate differs from config")
-    train, test = grouped_holdout(
-        dataset.targets,
-        dataset.groups,
-        dataset.metadata,
-        split_by=split_by,
-        test_fraction=test_fraction,
-        seed=config.random_seed,
-    )
+    unassigned: list[str] = []
+    if assignment is None:
+        train, test = grouped_holdout(
+            dataset.targets,
+            dataset.groups,
+            dataset.metadata,
+            split_by=split_by,
+            test_fraction=test_fraction,
+            seed=config.random_seed,
+        )
+    else:
+        train, test, unassigned = assigned_holdout(
+            dataset.targets, dataset.groups, assignment
+        )
     train_groups = set(dataset.groups[train].tolist())
     stable = np.flatnonzero(np.isin(dataset.resting_groups, list(train_groups)))
     if not len(stable):
@@ -120,9 +131,10 @@ def run_experiment(
         "profiled_receivers": [profile is not None for profile in detector.profiles_],
         "dataset": dataset.provenance,
         "split": {
-            "by": split_by,
-            "test_fraction": test_fraction,
-            "seed": config.random_seed,
+            "by": "assignment" if assignment is not None else split_by,
+            "test_fraction": None if assignment is not None else test_fraction,
+            "seed": None if assignment is not None else config.random_seed,
+            "unassigned_attempts": unassigned,
             "train_windows": len(train),
             "test_windows": len(test),
             "train_attempts": sorted(train_groups),

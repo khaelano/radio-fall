@@ -12,7 +12,7 @@ import numpy as np
 
 from ..._cache_keys import file_hash
 from ..._io import atomic_json, temporary_sibling
-from .._grouped_holdout import binary_metrics, grouped_holdout
+from .._grouped_holdout import assigned_holdout, binary_metrics, grouped_holdout
 from .dataset import TraceDataset
 from .events import FEATURE_NAMES
 from .model import FallDeFiConfig, FallDeFiDetector
@@ -33,6 +33,7 @@ def run_experiment(
     *,
     split_by: str = "attempt",
     test_fraction: float = 0.25,
+    assignment: dict[str, str] | None = None,
 ) -> ExperimentResult:
     """Fit on training attempts and evaluate once on held-out traces.
 
@@ -41,6 +42,10 @@ def run_experiment(
         config: Signal, event and classifier settings.
         split_by: Identity level kept disjoint across the holdout.
         test_fraction: Held-out group fraction.
+        assignment: Optional attempt identity to ``train``, ``validation`` or
+            ``test`` from another experiment, replacing the seeded holdout;
+            ``split_by`` and ``test_fraction`` are then unused. Validation
+            attempts train, and unassigned attempts are left out.
 
     Returns:
         Detector, report, and predictions. No files are written by this function.
@@ -53,14 +58,20 @@ def run_experiment(
         config.sample_rate_hz
     ):
         raise ValueError("Dataset sampling rate differs from config")
-    train, test = grouped_holdout(
-        dataset.targets,
-        dataset.groups,
-        dataset.metadata,
-        split_by=split_by,
-        test_fraction=test_fraction,
-        seed=config.random_seed,
-    )
+    unassigned: list[str] = []
+    if assignment is None:
+        train, test = grouped_holdout(
+            dataset.targets,
+            dataset.groups,
+            dataset.metadata,
+            split_by=split_by,
+            test_fraction=test_fraction,
+            seed=config.random_seed,
+        )
+    else:
+        train, test, unassigned = assigned_holdout(
+            dataset.targets, dataset.groups, assignment
+        )
     train_groups = set(dataset.groups[train].tolist())
     resting = [
         index
@@ -150,9 +161,10 @@ def run_experiment(
         },
         "dataset": dataset.provenance,
         "split": {
-            "by": split_by,
-            "test_fraction": test_fraction,
-            "seed": config.random_seed,
+            "by": "assignment" if assignment is not None else split_by,
+            "test_fraction": None if assignment is not None else test_fraction,
+            "seed": None if assignment is not None else config.random_seed,
+            "unassigned_attempts": unassigned,
             "train_traces": len(train),
             "test_traces": len(test),
             "train_attempts": sorted(train_groups),

@@ -57,7 +57,7 @@ on their hardware and data, and are not reproduced here.
   each loses a 0.1 s burst about every 0.57 s. Each adaptation keeps the
   paper's structure and changes only what this hardware requires; the guides
   list every deviation.
-- **Comparison with our approach (written, not yet run):**
+- **Comparison with our approach:**
   `analysis/comparison.py`, the baselines' `assignment` option and
   `06_comparison.ipynb` put every approach on the attempt split of a
   `03_training` run, with validation
@@ -65,7 +65,13 @@ on their hardware and data, and are not reproduced here.
   (sequence window, WiFall window, FallDeFi trace) and per attempt, where an
   attempt is predicted a fall when any of its units is. This any-unit rule
   favours approaches with more units per attempt in recall and penalises them
-  in false alarms.
+  in false alarms. First full run (22 November, all three sessions, one
+  seed-42 split of 475 attempts, 95 held out): CNN attempt F1 0.85–0.88 at
+  every duration, GRU 0.68–0.71, LSTM 2 s 0.71 (4 s and 6 s training
+  collapsed), FallDeFi 0.64 with an attempt false-positive rate of 0.44, and
+  WiFall near zero because its gate passed under 2 % of windows
+  ([report](reports/detector-comparison-2026-11-22.md)). Held-out attempts
+  come from the training sessions; session generalization is untested.
 - **Speed from CSI (considered 22 November, not pursued):** DeFall
   ([text](../resources/Papers/md/defall-2022.md)) and FallDar
   ([text](../resources/Papers/md/falldar-2023.md)) estimate movement speed

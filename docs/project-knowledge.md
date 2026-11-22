@@ -48,18 +48,19 @@ on their hardware and data, and are not reproduced here.
 - **Where they live:** code in `analysis/baselines/{wifall,falldefi}/`,
   guides in [`docs/baselines/`](baselines/), and run outputs in
   `artifacts/baselines/<name>/<run>/` (DVC). They run as modules
-  (`uv run python -m fall_detection.analysis.baselines.<name>`); no baseline
-  notebook exists yet. Our adaptations and their smoke results are listed
-  under [Implemented](#implemented).
+  (`uv run python -m fall_detection.analysis.baselines.<name>`) or through
+  `notebooks/latest/04_wifall.ipynb` and `05_falldefi.ipynb`. Our adaptations
+  and their smoke results are listed under [Implemented](#implemented).
 - **Why adapted rather than reproduced:** the C5 receivers sample at 120 Hz
   (FallDeFi lost accuracy below 400 Hz), are four separate single-antenna
   radios with their own gain and noise, report 245 tones instead of 30, and
   each loses a 0.1 s burst about every 0.57 s. Each adaptation keeps the
   paper's structure and changes only what this hardware requires; the guides
   list every deviation.
-- **Comparison with our approach (code only, not yet run):**
-  `analysis/comparison.py` and the baselines' `assignment` option put every
-  approach on the attempt split of a `03_training` run, with validation
+- **Comparison with our approach (written, not yet run):**
+  `analysis/comparison.py`, the baselines' `assignment` option and
+  `06_comparison.ipynb` put every approach on the attempt split of a
+  `03_training` run, with validation
   attempts joining baseline training. Each approach is scored on its own unit
   (sequence window, WiFall window, FallDeFi trace) and per attempt, where an
   attempt is predicted a fall when any of its units is. This any-unit rule

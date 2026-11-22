@@ -19,6 +19,19 @@ excluded from Git. Recordings and reusable derived datasets remain in `data/`.
 - `03_training.ipynb` runs PyTorch sequence models on CPU or NVIDIA
   CUDA, with independent pilot and full-data training sections. Its final cell
   exports available checkpoints to ONNX and verifies logits with ONNX Runtime.
+  It also saves each model's per-window test predictions for the comparison.
+- `04_wifall.ipynb` and `05_falldefi.ipynb` run the WiFall and FallDeFi
+  baselines ([guides](../docs/baselines/)) on the attempt split of a
+  `03_training` run: validation attempts join training, and the test attempts
+  are the sequence models' test attempts.
+- `06_comparison.ipynb` collects the newest 03, 04 and 05 runs, checks that
+  they share one split, and scores every approach on its own unit and per
+  attempt (an attempt is predicted a fall when any of its units is).
+
+`SAMPLE = True` in `02_preprocess` and `03_training` limits a run to the Akmal
+session (9 November 13:15) and, in training, to 2 s windows with automatic
+device choice, so the chain 02 → 06 can be smoke-tested on a laptop. Set it to
+`False` for full runs on the training device.
 
 For CPU PyTorch, run `uv sync --inexact --extra analysis --extra train`. For the
 CUDA 13.0 wheel on Linux or Windows, use

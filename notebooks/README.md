@@ -15,18 +15,26 @@ excluded from Git. Recordings and reusable derived datasets remain in `data/`.
 - `01_01_amplitude_exp.ipynb` and `01_02_phase_exp.ipynb` compare amplitude
   and phase inputs.
 - `02_preprocess.ipynb` directly defines dataset selection, filtering, squared
-  differences, cue labels, windows, exports, and stage figures.
+  differences, cue labels, windows, exports, and stage figures. Its
+  `EXPORT_VARIANTS` also write alternative signals for the same windows to
+  `amplitude_sequence/<rate>hz-<variant>/`; `filtered_amplitude` is the
+  Hampel-filtered amplitude without difference or log1p.
 - `03_training.ipynb` runs PyTorch sequence models on CPU or NVIDIA
   CUDA, with independent pilot and full-data training sections. Its final cell
   exports available checkpoints to ONNX and verifies logits with ONNX Runtime.
   It also saves each model's per-window test predictions for the comparison.
+  `REPRESENTATION` selects the default export or a variant and is recorded in
+  the run manifest; variant models are not copied to `artifacts/model/`,
+  because the live detector computes only the default signal.
 - `04_wifall.ipynb` and `05_falldefi.ipynb` run the WiFall and FallDeFi
   baselines ([guides](../docs/baselines/)) on the attempt split of a
   `03_training` run: validation attempts join training, and the test attempts
   are the sequence models' test attempts.
-- `06_comparison.ipynb` collects the newest 03, 04 and 05 runs, checks that
-  they share one split, and scores every approach on its own unit and per
-  attempt (an attempt is predicted a fall when any of its units is).
+- `06_comparison.ipynb` collects the newest 03 (default representation), 04
+  and 05 runs, checks that they share one split, and scores every approach on
+  its own unit and per attempt (an attempt is predicted a fall when any of its
+  units is). `EXTRA_TRAINING_RUNS` adds sequence runs on the same windows and
+  attempts, such as a representation variant.
 
 `SAMPLE = True` in `02_preprocess` and `03_training` limits a run to the Akmal
 session (9 November 13:15) and, in training, to 2 s windows with automatic

@@ -10,6 +10,7 @@ predicted as a fall when any of its units is predicted as one.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,9 @@ import numpy as np
 import polars as pl
 
 from .baselines._grouped_holdout import binary_metrics
+
+DEFAULT_REPRESENTATION = "log1p_squared_difference"
+"""Sequence signal the live detector computes; ``03_training`` runs default to it."""
 
 SEQUENCE_GROUP_SEPARATOR = "::"
 """Separator between session and attempt in the sequence export's ``group``."""
@@ -116,6 +120,43 @@ def latest_run(directory: Path, required: str) -> Path:
     )
     if not runs:
         raise FileNotFoundError(f"No run under {directory} contains {required}")
+    return runs[-1]
+
+
+def latest_training_run(
+    directory: Path, required: str, *, representation: str = DEFAULT_REPRESENTATION
+) -> Path:
+    """Return the newest ``03_training`` run of one signal representation.
+
+    Runs recorded before ``03_training`` stored its representation have none in
+    their manifest and count as the default.
+
+    Args:
+        directory: ``artifacts/notebooks/03_training``.
+        required: Relative path that a usable run must contain.
+        representation: Sequence signal the run must have been trained on.
+
+    Returns:
+        The newest qualifying run directory.
+
+    Raises:
+        FileNotFoundError: No run has the file and the representation.
+    """
+    runs = sorted(
+        path
+        for path in directory.glob("*")
+        if path.is_dir()
+        and (path / required).exists()
+        and (path / "manifest.json").is_file()
+        and json.loads((path / "manifest.json").read_text()).get(
+            "representation", DEFAULT_REPRESENTATION
+        )
+        == representation
+    )
+    if not runs:
+        raise FileNotFoundError(
+            f"No {representation} run under {directory} contains {required}"
+        )
     return runs[-1]
 
 

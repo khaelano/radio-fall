@@ -1,11 +1,14 @@
 """Shared held-out attempts and attempt-level scoring across approaches."""
 
+import json
+
 import polars as pl
 import pytest
 
 from fall_detection.analysis.comparison import (
     baseline_group,
     latest_run,
+    latest_training_run,
     split_assignment,
     split_labels,
     split_sessions,
@@ -60,3 +63,24 @@ def test_summarize_reduces_units_to_attempts_and_reports_unscored(tmp_path):
     assert latest_run(tmp_path, "metrics.json").name == "20261102T000000Z"
     with pytest.raises(FileNotFoundError):
         latest_run(tmp_path, "missing.json")
+
+
+def test_latest_training_run_skips_other_representations(tmp_path):
+    for name, manifest in (
+        ("20261101T000000Z", {}),
+        ("20261102T000000Z", {"representation": "log1p_squared_difference"}),
+        ("20261103T000000Z", {"representation": "filtered_amplitude"}),
+    ):
+        (tmp_path / name / "full").mkdir(parents=True)
+        (tmp_path / name / "manifest.json").write_text(json.dumps(manifest))
+    assert latest_training_run(tmp_path, "full").name == "20261102T000000Z"
+    assert (
+        latest_training_run(tmp_path, "full", representation="filtered_amplitude").name
+        == "20261103T000000Z"
+    )
+    (tmp_path / "20261102T000000Z" / "manifest.json").write_text(
+        json.dumps({"representation": "other"})
+    )
+    assert latest_training_run(tmp_path, "full").name == "20261101T000000Z"
+    with pytest.raises(FileNotFoundError, match="absent"):
+        latest_training_run(tmp_path, "full", representation="absent")

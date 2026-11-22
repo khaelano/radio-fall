@@ -79,6 +79,9 @@ the random forest and 0.609 for the one-class SVM).
 - The WiFall gate failed on all sessions as on the
   [smoke subset](wifall-smoke-2026-11-22.md), so its gated rows do not measure
   its classifiers.
+- The random attempt split is confounded by the collection order, and the
+  ranking reversed when whole participant sessions were held out: FallDeFi
+  then led ([generalization report](generalization-2026-11-22.md)).
 - One seed and one split; the attempt rule favours approaches with more units
   per attempt in recall. Collection cues are not measured fall times. The
   `akmal` session informed both baseline adaptations.

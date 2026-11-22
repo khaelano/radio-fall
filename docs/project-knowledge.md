@@ -70,8 +70,13 @@ on their hardware and data, and are not reproduced here.
   every duration, GRU 0.68–0.71, LSTM 2 s 0.71 (4 s and 6 s training
   collapsed), FallDeFi 0.64 with an attempt false-positive rate of 0.44, and
   WiFall near zero because its gate passed under 2 % of windows
-  ([report](reports/detector-comparison-2026-11-22.md)). Held-out attempts
-  come from the training sessions; session generalization is untested.
+  ([report](reports/detector-comparison-2026-11-22.md)). That split is
+  confounded: the equipment-ordered protocol records every fall late in the
+  session with the mattress in the room, and static levels identify that block.
+  Holding out a whole participant session (22 November), the sequence models
+  fell to attempt balanced accuracy 0.45–0.52 (median of nine), while FallDeFi
+  kept 0.68–0.71 and was the best approach in both directions
+  ([generalization report](reports/generalization-2026-11-22.md)).
 - **Speed from CSI (considered 22 November, not pursued):** DeFall
   ([text](../resources/Papers/md/defall-2022.md)) and FallDar
   ([text](../resources/Papers/md/falldar-2023.md)) estimate movement speed
@@ -89,7 +94,10 @@ on their hardware and data, and are not reproduced here.
   load time. A smoke run on the 9 November 13:15 session kept 848 windows
   (134 before) but the gate passed no held-out window and the classifiers
   alone were near chance (balanced accuracy 0.52–0.56)
-  ([report](reports/wifall-smoke-2026-11-22.md)). See the
+  ([report](reports/wifall-smoke-2026-11-22.md)). On all sessions the gate
+  passed under 2 % of held-out windows, and the features separate activity
+  from idle data but not falls from sit/stand transitions (ROC AUC 0.54–0.60)
+  ([generalization report](reports/generalization-2026-11-22.md)). See the
   [implementation guide](baselines/wifall.md). Session reading, gap filling,
   per-receiver checks and the grouped holdout are shared with FallDeFi
   (`analysis/baselines/_recorded_attempts.py`, `analysis/baselines/_grouped_holdout.py`).
@@ -103,8 +111,11 @@ on their hardware and data, and are not reproduced here.
   the 9 November 13:15 session (attempt holdout, 46 held-out traces) detected
   13 of 16 falls with 9 of 30 non-falls flagged; that session informed the
   design, so it is development data
-  ([report](reports/falldefi-smoke-2026-11-22.md)). Unverified: other
-  sessions, participants and continuous monitoring. See the
+  ([report](reports/falldefi-smoke-2026-11-22.md)). Across the two
+  participant sessions it kept attempt balanced accuracy 0.68–0.71, with
+  false-positive rates of 0.42–0.45 driven by sit/stand transitions; it scored
+  79–91 % of test attempts ([generalization report](reports/generalization-2026-11-22.md)).
+  Unverified: other rooms, participants and continuous monitoring. See the
   [implementation guide](baselines/falldefi.md).
 - **Receiver gap schedule (measured 22 November on the 9 November 13:15
   session):** each receiver loses a 0.1 s burst about every 0.57 s (about
@@ -228,6 +239,13 @@ on their hardware and data, and are not reproduced here.
   The training notebook exports checkpoints to ONNX with normalizer sidecars and
   verifies CPU-runtime logits against PyTorch at batch sizes 1 and 2. ONNX takes
   prepared model inputs; it does not embed signal preprocessing.
+  `02_preprocess` `EXPORT_VARIANTS` write alternative signals for the same
+  windows to `amplitude_sequence/<rate>hz-<variant>/`, and `03_training`
+  `REPRESENTATION` selects one; only the default log1p squared difference is
+  published to `artifacts/model/`. The `filtered_amplitude` variant (no
+  difference transform) scored higher on the random split only through static
+  levels and failed across sessions
+  ([generalization report](reports/generalization-2026-11-22.md)).
   Both 96 Hz and 120 Hz exports remain current; version-1 exports are retired.
   Notebooks must record dataset versions, split policy, and seeds. See
   [amplitude preprocessing](amplitude-preprocessing.md) and the notebook index.
@@ -245,6 +263,10 @@ on their hardware and data, and are not reproduced here.
 - Existing model results do not establish independent-session or
   participant-level generalization. Collection cues are not measured movement
   onset times.
+- Random attempt splits within a session are confounded by the
+  equipment-ordered protocol (all falls follow all non-falls and share the
+  mattress setup) and by slow signal drift; compare approaches on held-out
+  sessions ([generalization report](reports/generalization-2026-11-22.md)).
 - Preserve raw CSI. Treat derived caches as reproducible outputs, and record
   parameters, dataset version, split definition, and random seed for each
   experiment.
@@ -257,7 +279,11 @@ on their hardware and data, and are not reproduced here.
 - Does gateway performance repeat across room placements, power supplies, and
   fault conditions?
 - Which signal representation and temporal filtering generalize to new
-  sessions without erasing short fall-related motion?
+  sessions without erasing short fall-related motion? Neither the log1p
+  squared difference nor the filtered amplitude did across the two current
+  participant sessions; FallDeFi's event features did best.
+- How should collection separate falls from setup, for example non-fall
+  activity with the mattress in place or interleaved trial order?
 - How should irregular timestamps and packet loss shape model windows?
 - How should multiple receivers be combined while retaining receiver-specific
   quality and avoiding data leakage?

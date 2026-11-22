@@ -81,6 +81,9 @@ def test_hold_out_dataset_tests_one_dataset_and_keeps_listed_splits():
     )
     continuous = pl.col("dataset") == "continuous_non_fall"
     assert held.filter(continuous).equals(split.filter(continuous))
+    both = hold_out_dataset(split, ("a", "continuous_non_fall"))
+    assert set(both.filter(pl.col("dataset") != "b")["split"]) == {"test"}
+    assert "test" not in set(both.filter(pl.col("dataset") == "b")["split"])
     with pytest.raises(ValueError, match="Unknown"):
         hold_out_dataset(split, "missing")
     with pytest.raises(ValueError, match="cannot keep"):

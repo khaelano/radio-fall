@@ -11,7 +11,7 @@ predicted as a fall when any of its units is predicted as one.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -128,7 +128,7 @@ def latest_training_run(
     required: str,
     *,
     representation: str = DEFAULT_REPRESENTATION,
-    held_out_session: str | None = None,
+    held_out_session: str | Sequence[str] | None = None,
 ) -> Path:
     """Return the newest ``03_training`` run of one representation and split.
 
@@ -140,8 +140,8 @@ def latest_training_run(
         directory: ``artifacts/notebooks/03_training``.
         required: Relative path that a usable run must contain.
         representation: Sequence signal the run must have been trained on.
-        held_out_session: Dataset held out entirely, or None for the random
-            attempt split.
+        held_out_session: Dataset or datasets held out entirely (order
+            ignored), or None for the random attempt split.
 
     Returns:
         The newest qualifying run directory.
@@ -155,20 +155,29 @@ def latest_training_run(
         if not (path / required).exists() or not manifest_path.is_file():
             return False
         manifest = json.loads(manifest_path.read_text())
-        return (
-            manifest.get("representation", DEFAULT_REPRESENTATION) == representation
-            and manifest.get("held_out_session") == held_out_session
-        )
+        return manifest.get(
+            "representation", DEFAULT_REPRESENTATION
+        ) == representation and _held_out_key(
+            manifest.get("held_out_session")
+        ) == _held_out_key(held_out_session)
 
     runs = sorted(
         path for path in directory.glob("*") if path.is_dir() and matches(path)
     )
     if not runs:
-        split = held_out_session or "random-split"
+        key = _held_out_key(held_out_session)
+        split = "+".join(key) if key else "random-split"
         raise FileNotFoundError(
             f"No {representation} {split} run under {directory} contains {required}"
         )
     return runs[-1]
+
+
+def _held_out_key(value: str | Sequence[str] | None) -> tuple[str, ...]:
+    """Normalize a held-out setting: None, one dataset, or several in any order."""
+    if value is None:
+        return ()
+    return (value,) if isinstance(value, str) else tuple(sorted(value))
 
 
 def latest_split_run(directory: Path, split_sha256: str) -> Path:

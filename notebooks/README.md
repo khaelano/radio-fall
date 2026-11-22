@@ -26,7 +26,8 @@ excluded from Git. Recordings and reusable derived datasets remain in `data/`.
   `REPRESENTATION` selects the default export or a variant and is recorded in
   the run manifest; variant models are not copied to `artifacts/model/`,
   because the live detector computes only the default signal.
-  `HELD_OUT_SESSION` tests on every attempt of one participant session instead
+  `HELD_OUT_SESSION` tests on every attempt of one dataset, or of a tuple such
+  as `("akmal", "continuous_non_fall")`, instead
   of a random attempt share (`hold_out_dataset`); such runs are evaluation runs
   and are not copied to `artifacts/model/` either. Prefer it for comparisons:
   random attempt splits are confounded by the equipment-ordered protocol

@@ -94,6 +94,20 @@ def test_latest_training_run_skips_other_representations(tmp_path):
         latest_training_run(tmp_path, "full", held_out_session="akmal").name
         == "20261104T000000Z"
     )
+    (tmp_path / "20261105T000000Z" / "full").mkdir(parents=True)
+    (tmp_path / "20261105T000000Z" / "manifest.json").write_text(
+        json.dumps({"held_out_session": ["continuous_non_fall", "akmal"]})
+    )
+    assert (
+        latest_training_run(
+            tmp_path, "full", held_out_session=("akmal", "continuous_non_fall")
+        ).name
+        == "20261105T000000Z"
+    )
+    assert (
+        latest_training_run(tmp_path, "full", held_out_session="akmal").name
+        == "20261104T000000Z"
+    )
 
 
 def test_latest_split_run_selects_by_split_hash(tmp_path):

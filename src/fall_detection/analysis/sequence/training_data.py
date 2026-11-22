@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Full, Queue
@@ -150,33 +150,37 @@ def split_sequence_attempts(
 
 
 def hold_out_dataset(
-    split: pl.DataFrame, dataset: str, *, keep_split: tuple[str, ...] = ()
+    split: pl.DataFrame,
+    dataset: str | Sequence[str],
+    *,
+    keep_split: tuple[str, ...] = (),
 ) -> pl.DataFrame:
-    """Test on every attempt of one dataset instead of a random attempt share.
+    """Test on every attempt of one or more datasets instead of a random share.
 
-    The held-out dataset's attempts all become test attempts. The other
+    The held-out datasets' attempts all become test attempts. The other
     datasets' test attempts join training, except datasets in ``keep_split``,
     which keep their split (for example, continuous non-fall data that should
     stay represented in the test set). Validation attempts outside the held-out
-    dataset are unchanged, so early stopping never sees it.
+    datasets are unchanged, so early stopping never sees them.
 
     Args:
         split: Output of :func:`split_sequence_attempts`.
-        dataset: Dataset whose attempts are all held out.
+        dataset: Dataset name, or several names, whose attempts are all held out.
         keep_split: Datasets whose original split is retained.
 
     Returns:
         The split with reassigned ``split`` labels.
 
     Raises:
-        ValueError: If the dataset is absent or kept, or a split lacks a class.
+        ValueError: If a dataset is absent or kept, or a split lacks a class.
     """
-    if dataset not in set(split["dataset"]):
-        raise ValueError(f"Unknown held-out dataset: {dataset}")
-    if dataset in keep_split:
-        raise ValueError("The held-out dataset cannot keep its split")
+    held = [dataset] if isinstance(dataset, str) else list(dataset)
+    if not held or any(name not in set(split["dataset"]) for name in held):
+        raise ValueError(f"Unknown held-out dataset: {held}")
+    if set(held) & set(keep_split):
+        raise ValueError("A held-out dataset cannot keep its split")
     result = split.with_columns(
-        pl.when(pl.col("dataset") == dataset)
+        pl.when(pl.col("dataset").is_in(held))
         .then(pl.lit("test"))
         .when(~pl.col("dataset").is_in(list(keep_split)) & (pl.col("split") == "test"))
         .then(pl.lit("train"))

@@ -77,6 +77,8 @@ on their hardware and data, and are not reproduced here.
   fell to attempt balanced accuracy 0.45–0.52 (median of nine), while FallDeFi
   kept 0.68–0.71 and was the best approach in both directions
   ([generalization report](reports/generalization-2026-11-22.md)).
+  `HELD_OUT_SESSION` in `03`–`06` now runs that holdout from the committed
+  notebooks; `06` matches baseline runs to the training split by hash.
 - **Speed from CSI (considered 22 November, not pursued):** DeFall
   ([text](../resources/Papers/md/defall-2022.md)) and FallDar
   ([text](../resources/Papers/md/falldar-2023.md)) estimate movement speed

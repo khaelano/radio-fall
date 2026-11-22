@@ -141,6 +141,13 @@ FallDeFi's cross-session balanced accuracy matched its random-split value
 (0.685). WiFall stayed near chance: gated attempt balanced accuracy
 0.459–0.500, classifier-only 0.425–0.513.
 
+Rerunning the holdout from the committed notebooks (`HELD_OUT_SESSION` in
+`03`–`06`) reproduced these results: FallDeFi 0.678 (`akmal`) and 0.709
+(`khaelano`), best sequence model CNN 2 s 0.592 and GRU 4 s 0.543. Runs:
+`06_comparison/20261122T144148567986Z` (test `akmal`) and
+`06_comparison/20261122T145709625213Z` (test `khaelano`), which name their
+`03`, `04` and `05` runs.
+
 ## Interpretation and limits
 
 - Under the random split, the sequence models' advantage over FallDeFi came

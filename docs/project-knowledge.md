@@ -268,9 +268,9 @@ on their hardware and data, and are not reproduced here.
   or decision threshold has been selected.
 - Scope: the detector is trained and used in one room setup; transfer between
   rooms or receiver placements is not a research goal. All current sessions
-  share the receivers, placements and channel (their `location` field is
-  empty). Session holdouts therefore test a new day and participant in the
-  same room.
+  were recorded in the same room with the same receiver positions (confirmed
+  by the collector; the manifests' `location` field is empty). Session
+  holdouts therefore test a new day and participant in the same room.
 - Existing model results do not establish independent-session or
   participant-level generalization. Collection cues are not measured movement
   onset times.

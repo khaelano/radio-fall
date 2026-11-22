@@ -6,8 +6,8 @@ current approach: amplitude sequences from
 [`02_preprocess.ipynb`](../notebooks/latest/02_preprocess.ipynb) and the CNN,
 LSTM, and GRU classifiers in
 [`03_training.ipynb`](../notebooks/latest/03_training.ipynb). The repository's
-WiFall adaptation is a separate baseline and has no results yet; see
-[wifall.md](wifall.md).
+WiFall adaptation is a separate baseline with only a one-session smoke run so
+far; see [wifall.md](wifall.md).
 
 The two result sets use different metrics, labels, data, and evaluation
 protocols. The tables place them side by side; they do not rank the methods.
@@ -92,5 +92,6 @@ checked out in this workspace.
   GRU rows.
 
 A fair comparison needs both methods run on the same recordings, split, and
-metrics. The [WiFall adaptation](wifall.md) is set up for that, but it has not
-produced results yet.
+metrics. The [WiFall adaptation](wifall.md) is set up for that. Its only run so
+far, a one-session smoke run, found no falls through its activity gate
+([report](reports/wifall-smoke-2026-11-22.md)).

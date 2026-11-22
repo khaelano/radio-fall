@@ -1,200 +1,172 @@
-# WiFall implementation with ESP32-C5 adaptations
+# WiFall adapted to the ESP32-C5 receivers
 
-`src/fall_detection/analysis/wifall/` implements amplitude smoothing, a resting
-profile with Local Outlier Factor (LOF), and fall classification with random
-forest or one-class SVM. It reads the preserved recordings through the existing
-session loader. It does not use the neural models' `log1p(squared_difference)`
-exports or modify raw recordings.
+`src/fall_detection/analysis/wifall/` is a window-level fall detector built on
+WiFall ([paper](../resources/Papers/md/wifall-2017.md),
+[DOI](https://doi.org/10.1109/TMC.2016.2557792)): smoothed CSI amplitude, a
+Local Outlier Factor (LOF) activity detector trained on resting data, window
+statistics and singular values, and a random forest or a fall-inlier
+one-class SVM. It keeps WiFall's structure but adapts each step to our radios
+instead of reproducing the paper, in the same way as the
+[FallDeFi adaptation](falldefi.md). It reads the preserved recordings through
+the shared session adapter and never modifies raw recordings. Tests check the
+processing and training boundaries; they do not establish detection
+performance.
 
-The source is [WiFall, §§4–6](../resources/Papers/md/wifall-2017.md)
-([DOI](https://doi.org/10.1109/TMC.2016.2557792)). The paper does not specify
-enough feature formulas and hyperparameters to claim an exact reproduction.
-This implementation makes those choices explicit. Tests check equations,
-training boundaries, and software behavior; they do not establish detection
-performance on our recordings.
+## Hardware constraints
+
+The constraints are those listed for [FallDeFi](falldefi.md#hardware-constraints):
+120 Hz sampling, four single-antenna receivers that are separate radios,
+245 reported tones, and a scheduled 0.1 s gap about every 0.57 s on each
+receiver, staggered so that all four are complete only about a quarter of the
+time. The first WiFall implementation required all four receivers in every
+window. On the 9 November 13:15 session, with 0.7 coverage and gaps up to
+0.15 s, that kept 134 of 1,005 action windows and 99 of 768 countdown windows.
+Its default 0.9 coverage was above the about 0.82 that the schedule alone
+leaves each receiver.
+
+## Pipeline
+
+1. **Windows.** Two-second windows slide by one second inside each recording
+   epoch (§4.3.2). A window whose center lies in an action cue is classified
+   for both classes; a window wholly inside a countdown cue is a resting
+   chunk.
+2. **Gaps and receivers.** Gaps up to 0.25 s are linearly interpolated and
+   each receiver needs 0.7 coverage. A receiver failing either rule is dropped
+   from that window only; a window needs two usable receivers.
+3. **Representation per receiver.** 120 evenly spaced interior tones are
+   divided by their window means (relative amplitude) and smoothed by
+   equation 9 (`m = 5`, newest weight m, restarting in each window). From the
+   smoothed tones come six statistics, averaged over tones; three singular
+   values of the centered window divided by √(samples); and the activity
+   stream, the window's first principal component with a fixed sign. This is computed once at load time; it uses no labels and no other
+   window.
+4. **Activity profile.** Each receiver gets a LOF profile (20 neighbors) of its
+   resting stream values from at most 128 training countdown chunks (§4.3.1).
+   A sample is active on a receiver when its LOF score exceeds 1.5.
+5. **Activity gate.** A window passes when, at some sample, a strict majority
+   of its profiled, present receivers is active: two of two, two of three,
+   three of four. The motion period of a receiver is its active time.
+6. **Features.** The seven statistics and three singular values of each
+   receiver are pooled over present receivers by mean and maximum: 20
+   features (`--features statistics` keeps 14, `singular_values` 6).
+7. **Classifier.** Standard scaling, then a random forest (200 trees, balanced
+   class weights) or a one-class SVM (RBF, `ν = 0.1`) fitted on fall windows
+   only, falls being its inliers as in the paper (§4.4). Both are fitted on
+   training windows only. A window is a fall when the classifier says so and
+   it passes the gate.
+
+| Feature | Definition per tone, on smoothed relative amplitude |
+| --- | --- |
+| Normalized standard deviation | Population standard deviation divided by mean |
+| Signal offset | Maximum minus minimum |
+| Motion period | LOF-active samples of the receiver divided by the sample rate |
+| Median absolute deviation | Median absolute deviation from the median |
+| Interquartile range | 75th minus 25th percentile |
+| Signal entropy | Base-two entropy of a 16-bin histogram on the tone's own range |
+| Signal-change velocity | Mean absolute first difference times the sample rate |
+
+## Relation to WiFall
+
+| Step | WiFall | Here | Reason |
+| --- | --- | --- | --- |
+| Streams | Nine antenna pairs on one Intel 5300, 30 subcarriers, 100 Hz | Four C5 receivers, 120 interior tones, 120 Hz | Hardware |
+| Missing data | Not discussed | Interpolate up to 0.25 s; drop failing receivers per window | Scheduled, staggered gaps |
+| Scale | Raw amplitude | Relative amplitude per tone and window | Separate radios with their own gain; profiles must transfer across sessions |
+| Activity stream | Mean of `(f_j / f_0)` × amplitude over subcarriers (equation 8) | First principal component of the receiver's relative tones | Motion raises some tones and lowers others, so the mean cancels it: during falls its 2 s standard deviation was 1.14 times the resting value, against 1.54 times for the first component |
+| Activity gate | LOF per stream, majority vote of nine streams | LOF per receiver, strict majority of present receivers | Receivers may be missing |
+| Features | Seven statistics, or three SVD values; how they combine is not stated | Both, per receiver, pooled by mean and maximum | A fixed vector whatever receiver is dropped |
+| SVD | Of the window matrix | Of the centered window per receiver, scaled by √(samples) | After relative scaling the first uncentered value is constant |
+| Classifier | One-class SVM (falls as target class) or random forest | Same; random forest with balanced class weights | Non-falls outnumber falls |
+
+The feature formulas, LOF settings, smoothing startup and classifier
+hyperparameters are not given in the paper; the values above are adaptation
+choices, not author details.
 
 ## Run on existing recordings
-
-Install the analysis and radio dependencies from the repository root:
 
 ```bash
 uv sync --extra analysis --extra radio
 ```
 
-The following example uses activity labels present in the 4 November recording.
-Repeat `--session` to include other closed session archives. Sources must share
-the recorded 120 Hz, 5 GHz, 20 MHz sensing configuration and channel.
+On the data laptop, check new settings on one session and leave
+multi-session runs to the training device. These are the runs in the
+[22 November smoke report](reports/wifall-smoke-2026-11-22.md):
 
 ```bash
 uv run python -m fall_detection.analysis.wifall \
-  --session data/raw/sessions/20261104T081805521126Z.zip \
-  --fall-label walk_to_fall \
-  --fall-label sit_to_fall \
-  --fall-label stand_to_fall \
-  --non-fall-label sit_to_stand \
-  --non-fall-label sit_to_walk \
-  --non-fall-label stand_to_sit \
-  --non-fall-label stand_to_walk \
-  --non-fall-label walk_to_sit \
-  --non-fall-label walk_to_stand \
+  --session data/raw/sessions/20261109T131546367822Z.zip \
+  --fall-label walk_to_fall --fall-label sit_to_fall --fall-label stand_to_fall \
+  --non-fall-label sit_to_stand --non-fall-label sit_to_walk \
+  --non-fall-label stand_to_sit --non-fall-label stand_to_walk \
+  --non-fall-label walk_to_sit --non-fall-label walk_to_stand \
   --classifier random_forest \
-  --representation statistics \
-  --minimum-coverage 0.7 \
-  --max-gap-seconds 0.15 \
-  --output artifacts/wifall/rf-statistics-seed42
+  --output artifacts/wifall/<new-run>
 ```
 
-The explicit coverage and gap settings accommodate the scheduled acquisition
-gaps in these recordings. A smoke check of three `stand_to_fall` attempts in
-this session found recurring 13-round finite-bracket separations (about
-108 ms). With the stricter defaults, no windows survived the two-activity
-adapter check. Interpolation across these gaps can remove motion detail; its
-effect on detection remains unverified. The relaxed example is a runnable
-adaptation, not a claim that the missing CSI is recovered.
+Use `--classifier one_class_svm` for the fall-inlier SVM. Repeat `--session`
+to combine sessions and add `--non-fall-label non_fall` for the continuous
+non-fall session; `--split-by session` trains on one day and tests on another.
+`--help` lists every setting. Use a new output directory for every run.
 
-Use a new output directory for every run. Change `--classifier` to
-`one_class_svm` for the paper's fall-inlier classifier. Change
-`--representation` to `singular_values` for the separate SVD interpretation.
-`--help` lists window, gap, model, and split settings.
-
-Outputs are:
-
-- `model.joblib`: a dictionary with `schema`, `version`, fitted `detector`,
-  receiver/tone `coordinates`, and model `parameters`.
-- `predictions.json`: held-out targets, classifier predictions, gated
-  predictions, activity flags, timestamps, coverage, and attempt identities.
-- `report.json`: source/review fingerprints, dataset settings, code hashes,
-  library versions, seed, full split assignments, resting-profile membership,
-  model checksum, exclusion counts, and held-out window metrics. This file is
-  published last to mark a completed run.
-
-Model files use joblib serialization and should only be loaded from trusted
-sources. A saved detector consumes raw amplitude windows with the saved receiver
-and tone order:
+Outputs are `model.joblib` (fitted detector, coordinates, parameters and the
+representation settings; load only from trusted sources), `predictions.json`
+(each held-out window with its provenance, receivers used, gated and
+classifier-only predictions, and activity flag), and `report.json` (sources,
+settings, exclusion counts, split, profiled receivers, held-out window and
+attempt metrics, activity fractions, versions and code hashes), written last.
+A saved detector takes representations, not raw amplitude:
 
 ```python
 import joblib
+from fall_detection.analysis.wifall.representation import represent_windows
 
-bundle = joblib.load("artifacts/wifall/rf-statistics-seed42/model.joblib")
-detector = bundle["detector"]
-# windows: finite nonnegative [window, time, receiver, selected_subcarrier]
-predictions = detector.predict(windows)
+bundle = joblib.load("artifacts/wifall/<run>/model.joblib")
+# windows: [window, time, receiver, tone] in the saved coordinates, NaN for
+# a dropped receiver.
+batch = represent_windows(windows, **bundle["representation"])
+predictions = bundle["detector"].predict(batch)
 ```
 
-The run directory is Git-ignored. To retain a research run, version it with
-`uv run dvc add artifacts/wifall/rf-statistics-seed42` and retain the resulting
-DVC metadata alongside the existing raw-data metadata. No remote changes are
-needed. Frame tables under `data/interim/frames/` are shared derived caches.
+Git does not ignore `artifacts/wifall/`; keep a run with
+`uv run dvc add artifacts/wifall/<run>` and commit only the `.dvc` file.
 
-## Data handling and evaluation
+## Evaluation
 
-The adapter reuses native magnitude decoding and the existing epoch/alignment
-helpers. It retains the 120 Hz sequence grid and treats `rx-1` through `rx-4`
-as four streams. The default selects 30 evenly spaced interior HE20 physical
-tones, excluding indices outside −120…120 and the null tones −1, 0, 1.
-Inspected C5 captures contain zeros at the positive edge tone; the fixed
-interior selection avoids that edge without fitting to held-out labels or
-accuracy. The selected indices are recorded. These
-separate receivers differ from the paper's nine antenna-pair streams on
-Intel 5300 hardware, sampled at 100 Hz. The paper's original input and
-two-second matrix construction are described in
-[§§4.2–4.3](../resources/Papers/md/wifall-2017.md).
+The holdout groups by attempt by default, so overlapping windows never cross
+the split; `--split-by session` and `--split-by participant` give stronger
+separation. Up to 100 seeded assignments are examined only to find both
+classes on each side. The report gives gated and classifier-only window
+metrics, balanced accuracy, the activity fraction per class, and attempt
+metrics, where an attempt is a fall when any of its windows is. Attempt
+metrics are the closest to FallDeFi's trace metrics, though FallDeFi traces
+add 1 s margins. Neither measures event latency or false alarms per hour.
 
-Only accepted attempts without an exclusion review are eligible. Exact activity
-labels must be mapped explicitly; unmapped attempts are counted and skipped.
-Both fall and non-fall windows require their center inside the action cue.
-This differs from the current neural experiment's non-fall window policy.
-Collection cues remain approximate labels, not measured movement or impact
-boundaries.
+## Limitations
 
-Windows never cross attempts, transmitter runs/boots, receiver reboots, or
-all-receiver gaps of at least one second. Default windows are two seconds with
-a one-second hop. Observed coverage must reach 90% per receiver across selected
-tones. Only internal missing values whose finite bracketing samples are at
-most 25 ms apart are linearly interpolated, independently inside each window.
-Edges are never extrapolated; windows with remaining missing values are
-excluded and counted. These policies are adaptations, not WiFall procedures.
-Missing amplitudes never become zeros.
-
-Resting chunks must fit wholly inside countdown cues. Countdown stillness is an
-assumption that requires inspection; recovery after a fall is not automatically
-treated as resting. LOF sees only chunks from training attempts, capped at 128
-chunks by seeded selection. Each chunk is smoothed independently.
-
-The default holdout groups by attempt, so overlapping windows cannot cross the
-split. `--split-by session` and `--split-by participant` enforce stronger group
-separation when enough data exist. Up to 100 seeded assignments are examined
-only to find both classes on each side, never to select model performance.
-The selected assignments are recorded. There is no hyperparameter search;
-changing settings after inspecting this holdout makes it validation data and
-requires an untouched test partition for final claims.
-
-The report includes classifier-only and LOF-gated window metrics. These do not
-measure event latency or false alarms per hour. An attempt holdout does not
-establish generalization to new sessions or participants.
-
-## Paper equations and explicit interpretations
-
-Amplitude smoothing follows WiFall equation 9: the newest sample has weight
-`m`, the oldest weight 1, divided by the sum of weights. The selected default
-is `m=5`; the paper leaves `m` unspecified. Smoothing restarts at each window
-and resting chunk, using an expanding weighted prefix at startup. This reset
-policy is an adaptation to independent offline windows.
-
-LOF uses the equation 8 stream aggregate:
-`mean((subcarrier_frequency / center_frequency) * amplitude)`.
-The denominator is the number of selected tones, not the sum of frequency
-weights. Frequency ratios come from the recorded channel and HE20's 78.125 kHz
-tone spacing. The defaults are 20 neighbors and anomaly-score threshold 1.5;
-these are selected implementation settings. LOF scores are not probabilities.
-The gate requires a simultaneous strict majority of streams at any sample in
-the window: three of four streams. The paper describes majority voting but
-does not establish its temporal voting rule precisely. See
-[§4.3.1](../resources/Papers/md/wifall-2017.md).
-
-The paper separately describes three leading SVD values and seven statistical
-features per stream without explaining how to combine them. The implementation
-therefore exposes two alternatives rather than inventing a combined pipeline:
-
-| Representation | Defined input features |
-| --- | --- |
-| `statistics` | Seven features per stream, concatenated in receiver order: 28 features for four streams |
-| `singular_values` | Leading three singular values of the uncentered, smoothed `[time, stream × tone]` matrix |
-
-For `statistics`, temporal features are computed per tone and averaged within
-each stream, except motion duration, which uses the stream's LOF flags:
-
-| Feature | Implementation definition |
-| --- | --- |
-| Normalized standard deviation | Population standard deviation divided by mean; zero for zero-mean amplitude |
-| Signal-strength offset | Maximum minus minimum amplitude |
-| Motion period | Number of LOF-active samples divided by sample rate |
-| Median absolute deviation | Median absolute deviation from the temporal median |
-| Interquartile range | Temporal 75th minus 25th percentile |
-| Signal entropy | Shannon entropy in bits using 16 bins over that tone's window-local amplitude range |
-| Signal-change velocity | Mean absolute consecutive amplitude difference multiplied by sample rate |
-
-These formulas resolve omissions in [§4.4](../resources/Papers/md/wifall-2017.md);
-they are not verified author implementation details. In particular, the selected
-max-minus-min offset is one interpretation of the paper's signal-strength
-description. Histogram ranges are local descriptors, with no fitting on other
-windows. There is no Hampel filter, log transform, or squared-difference stage
-in this implementation.
-
-Random forest uses 200 trees, seed 42, and one worker by default. Its scaler
-fits all training windows. The one-class SVM uses an RBF kernel, `nu=0.1`, and
-`gamma=scale`; its scaler and classifier fit only fall training windows.
-**SVM inliers mean falls**, following the paper's objective-class definition.
-These model hyperparameters are configurable choices because the paper does
-not provide them. Neither classifier nor normalizer fits on held-out windows.
+- On the 9 November 13:15 session the gate passed no held-out window and the
+  classifiers alone reached balanced accuracy 0.52–0.56; the window features
+  did not separate falls from other transitions there
+  ([smoke report](reports/wifall-smoke-2026-11-22.md)).
+- The 9 November 13:15 session informed the hardware choices; treat it as
+  development data and evaluate on other sessions.
+- Interpolation of the scheduled gaps alters every window.
+- Resting profiles assume still countdowns, which have not been inspected;
+  the LOF threshold and neighbors are untuned.
+- Action cues are collection instructions, not measured movement or impact
+  times; windows overlap and are correlated within an attempt.
+- An attempt holdout within one session does not establish generalization to
+  new sessions, rooms or participants.
 
 ## Code and checks
 
-`signal.py` contains smoothing and frequency aggregation; `features.py` defines
-the two representations; `model.py` owns LOF and classifiers; `dataset.py`
-adapts preserved sessions; `experiment.py` owns grouped evaluation and output;
-`__main__.py` supplies the command above. Existing preprocessing, training, and
-live detection remain separate consumers of their current representations.
+`representation.py` holds smoothing, relative amplitude and the per-receiver
+statistics; `model.py` owns the profiles, gate, pooling and classifiers;
+`dataset.py` adapts preserved sessions; `experiment.py` owns grouped
+evaluation and output; `__main__.py` supplies the command. Session reading,
+gap filling and per-receiver checks are shared with FallDeFi in
+`analysis/_recorded_attempts.py`, and the grouped holdout and metrics in
+`analysis/_grouped_holdout.py`. Existing preprocessing, training, and live
+detection do not use this package.
 
 ```bash
 uv run ruff format src/fall_detection/analysis/wifall tests/analysis/wifall

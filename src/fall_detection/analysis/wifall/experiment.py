@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
 import joblib
 import numpy as np
-import sklearn
-from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
-from sklearn.model_selection import GroupShuffleSplit
 
 from .._cache_keys import file_hash
+from .._grouped_holdout import binary_metrics, grouped_holdout
 from .._io import atomic_json, temporary_sibling
-from .dataset import WindowDataset
+from .dataset import WindowSet
 from .model import WiFallConfig, WiFallDetector
 
 
@@ -27,82 +26,10 @@ class ExperimentResult:
     predictions: list[dict[str, Any]]
 
 
-def grouped_holdout(
-    dataset: WindowDataset,
-    *,
-    split_by: str,
-    test_fraction: float,
-    seed: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Find a deterministic group holdout containing both classes on each side.
-
-    Args:
-        dataset: Amplitude windows with attempt/session/participant identities.
-        split_by: ``attempt``, ``session``, or ``participant``.
-        test_fraction: Fraction of groups reserved for testing.
-        seed: Seed for at most 100 candidate group assignments. Selection only
-            checks class coverage; it never examines model performance.
-
-    Returns:
-        Training and test window indices with disjoint requested groups.
-
-    Raises:
-        ValueError: Missing identities or no valid two-class partition.
-    """
-    if split_by not in {"attempt", "session", "participant"}:
-        raise ValueError("split_by must be attempt, session, or participant")
-    if not 0 < test_fraction < 1:
-        raise ValueError("test_fraction must lie strictly between zero and one")
-    if len(dataset.metadata) != len(dataset.targets):
-        raise ValueError("Every window needs provenance metadata")
-    if split_by == "attempt":
-        groups = np.asarray(dataset.groups)
-    else:
-        field = f"{split_by}_id"
-        values = [row.get(field) for row in dataset.metadata]
-        if any(not isinstance(value, str) or not value.strip() for value in values):
-            raise ValueError(f"Every window needs a nonempty {field}")
-        groups = np.asarray(values)
-    if len(np.unique(groups)) < 2:
-        raise ValueError(f"At least two {split_by} groups are required")
-    splitter = GroupShuffleSplit(
-        n_splits=100, test_size=test_fraction, random_state=seed
-    )
-    for train, test in splitter.split(dataset.windows, dataset.targets, groups):
-        if all(
-            set(dataset.targets[index].tolist()) == {0, 1} for index in (train, test)
-        ):
-            if set(dataset.groups[train]) & set(dataset.groups[test]):
-                raise ValueError("Attempt identities cross the requested split")
-            return train, test
-    raise ValueError(
-        f"No {split_by} holdout with both classes in train and test; "
-        "provide more groups or explicitly choose a different split"
-    )
-
-
-def _metrics(target: np.ndarray, prediction: np.ndarray) -> dict[str, Any]:
-    tn, fp, fn, tp = confusion_matrix(target, prediction, labels=[0, 1]).ravel()
-    precision, recall, f1, _ = precision_recall_fscore_support(
-        target, prediction, average="binary", zero_division=0
-    )
-    return {
-        "confusion_matrix": [[int(tn), int(fp)], [int(fn), int(tp)]],
-        "confusion_order": ["non_fall", "fall"],
-        "accuracy": float(np.mean(target == prediction)),
-        "precision": float(precision),
-        "recall": float(recall),
-        "f1": float(f1),
-        "false_positive_rate": float(fp / (fp + tn)),
-        "specificity": float(tn / (tn + fp)),
-    }
-
-
 def run_experiment(
-    dataset: WindowDataset,
+    dataset: WindowSet,
     config: WiFallConfig,
     *,
-    classifier: str = "random_forest",
     split_by: str = "attempt",
     test_fraction: float = 0.25,
     max_stable_windows: int = 128,
@@ -110,35 +37,34 @@ def run_experiment(
     """Fit on training attempts and evaluate once on held-out windows.
 
     Args:
-        dataset: Windows derived from raw magnitudes, including resting chunks.
-        config: Signal, feature and model parameters.
-        classifier: ``random_forest`` or ``one_class_svm``.
+        dataset: Represented windows and resting streams.
+        config: Activity profile and classifier settings.
         split_by: Identity level kept disjoint across the holdout.
         test_fraction: Held-out group fraction.
-        max_stable_windows: Seeded cap on training-only resting chunks for LOF.
+        max_stable_windows: Seeded cap on training-only resting chunks.
 
     Returns:
         Detector, report, and predictions. No files are written by this function.
 
     Raises:
-        ValueError: Insufficient training resting chunks or incompatible data.
+        ValueError: Incompatible data or no training resting chunks.
     """
     if not isinstance(max_stable_windows, int) or max_stable_windows < 1:
         raise ValueError("max_stable_windows must be a positive integer")
-    parameters = dataset.provenance.get("parameters", {})
-    if (
-        parameters.get("sample_rate_hz") != config.sample_rate_hz
-        or parameters.get("window_seconds") != config.window_seconds
+    if dataset.provenance.get("parameters", {}).get("sample_rate_hz") != (
+        config.sample_rate_hz
     ):
-        raise ValueError("Dataset sampling rate/window duration differs from config")
+        raise ValueError("Dataset sampling rate differs from config")
     train, test = grouped_holdout(
-        dataset,
+        dataset.targets,
+        dataset.groups,
+        dataset.metadata,
         split_by=split_by,
         test_fraction=test_fraction,
         seed=config.random_seed,
     )
     train_groups = set(dataset.groups[train].tolist())
-    stable = np.flatnonzero(np.isin(dataset.stable_groups, list(train_groups)))
+    stable = np.flatnonzero(np.isin(dataset.resting_groups, list(train_groups)))
     if not len(stable):
         raise ValueError(
             "No usable countdown/resting windows from training attempts; "
@@ -150,23 +76,13 @@ def run_experiment(
                 stable, max_stable_windows, replace=False
             )
         )
-    coordinates = dataset.provenance["coordinates"]
-    tones = np.asarray(coordinates["subcarriers"], dtype=float)
-    weights = (
-        1
-        + tones
-        * dataset.provenance["subcarrier_spacing_hz"]
-        / dataset.provenance["center_frequency_hz"]
+    detector = WiFallDetector(config).fit(
+        dataset.windows.take(train),
+        dataset.targets[train],
+        dataset.resting_streams[stable],
     )
-    detector = WiFallDetector(
-        config, classifier=classifier, frequency_weights=weights
-    ).fit(
-        dataset.windows[train], dataset.targets[train], dataset.stable_windows[stable]
-    )
-    windows = dataset.windows[test]
-    prediction = detector.predict(windows)
-    ungated = detector.predict_ungated(windows)
-    activity = detector.predict_activity(windows)
+    prediction, ungated, activity = detector.predict_all(dataset.windows.take(test))
+    target = dataset.targets[test]
     rows = [
         {
             **dataset.metadata[int(index)],
@@ -178,6 +94,13 @@ def run_experiment(
         }
         for position, index in enumerate(test)
     ]
+    attempts = sorted(set(dataset.groups[test].tolist()))
+    attempt_target = np.array(
+        [int(target[dataset.groups[test] == group][0]) for group in attempts]
+    )
+    attempt_prediction = np.array(
+        [int(prediction[dataset.groups[test] == group].any()) for group in attempts]
+    )
     assignments = [
         {
             **dataset.metadata[int(index)],
@@ -189,13 +112,12 @@ def run_experiment(
     ]
     report = {
         "schema": "wifall_experiment",
-        "version": 1,
-        "implementation": "WiFall with explicit ESP32-C5 adaptations",
+        "version": 2,
+        "implementation": "WiFall adapted to the ESP32-C5 receivers",
         "paper_doi": "10.1109/TMC.2016.2557792",
         "parameters": asdict(config),
-        "classifier": classifier,
         "feature_names": list(detector.feature_names_),
-        "frequency_weights": weights.tolist(),
+        "profiled_receivers": [profile is not None for profile in detector.profiles_],
         "dataset": dataset.provenance,
         "split": {
             "by": split_by,
@@ -204,29 +126,37 @@ def run_experiment(
             "train_windows": len(train),
             "test_windows": len(test),
             "train_attempts": sorted(train_groups),
-            "test_attempts": sorted(set(dataset.groups[test].tolist())),
-            "stable_attempts": sorted(set(dataset.stable_groups[stable].tolist())),
+            "test_attempts": attempts,
+            "stable_attempts": sorted(set(dataset.resting_groups[stable].tolist())),
             "stable_windows": len(stable),
             "max_stable_windows": max_stable_windows,
             "assignments": assignments,
         },
-        "held_out": _metrics(dataset.targets[test], prediction),
-        "held_out_classifier_only": _metrics(dataset.targets[test], ungated),
-        "held_out_activity_fraction": float(np.mean(activity)),
+        "held_out": binary_metrics(target, prediction),
+        "held_out_classifier_only": binary_metrics(target, ungated),
+        "held_out_attempts": binary_metrics(attempt_target, attempt_prediction),
+        "held_out_activity_fraction": {
+            "fall": float(activity[target == 1].mean()),
+            "non_fall": float(activity[target == 0].mean()),
+        },
         "versions": {
-            "numpy": np.__version__,
-            "scikit_learn": sklearn.__version__,
-            "joblib": joblib.__version__,
+            name: version(name) for name in ("numpy", "scikit-learn", "joblib")
         },
         "code_sha256": {
             path.name: file_hash(path)
             for path in sorted(Path(__file__).parent.glob("*.py"))
+        }
+        | {
+            "_grouped_holdout.py": file_hash(
+                Path(__file__).parents[1] / "_grouped_holdout.py"
+            )
         },
         "limitations": [
-            "Paper feature formulas and hyperparameters are partly unspecified.",
+            "Scheduled 0.1 s receiver gaps are interpolated inside every window.",
+            "Hardware adaptations were chosen on the 9 November 13:15 session.",
             "Countdown cues are assumed quiet; they are not verified resting labels.",
             "Action cues are not measured movement or impact boundaries.",
-            "Window metrics do not establish event accuracy or false alarms per hour.",
+            "Overlapping windows of one attempt are correlated.",
             "Attempt holdout does not establish participant/session generalization.",
         ],
     }
@@ -246,10 +176,14 @@ def save_experiment(result: ExperimentResult, destination: Path) -> None:
         joblib.dump(
             {
                 "schema": "wifall_model",
-                "version": 1,
+                "version": 2,
                 "detector": result.detector,
                 "coordinates": result.report["dataset"]["coordinates"],
                 "parameters": result.report["parameters"],
+                "representation": {
+                    name: result.report["dataset"]["parameters"][name]
+                    for name in ("sample_rate_hz", "smoothing_samples", "entropy_bins")
+                },
             },
             temporary,
         )

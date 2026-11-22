@@ -6,9 +6,10 @@ import argparse
 import json
 from pathlib import Path
 
-from .dataset import DEFAULT_SUBCARRIERS, load_dataset
+from ..preprocessing.sequence_preprocessing import RECEIVERS
+from .dataset import WIFALL_SUBCARRIERS, load_windows
 from .experiment import run_experiment, save_experiment
-from .model import WiFallConfig
+from .model import FEATURE_SETS, WiFallConfig
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -31,11 +32,7 @@ def _parser() -> argparse.ArgumentParser:
         choices=("random_forest", "one_class_svm"),
         default="random_forest",
     )
-    parser.add_argument(
-        "--representation",
-        choices=("statistics", "singular_values"),
-        default="statistics",
-    )
+    parser.add_argument("--features", choices=tuple(FEATURE_SETS), default="all")
     parser.add_argument(
         "--split-by", choices=("attempt", "session", "participant"), default="attempt"
     )
@@ -44,19 +41,21 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--window-seconds", type=float, default=2.0)
     parser.add_argument("--hop-seconds", type=float, default=1.0)
     parser.add_argument("--smoothing-samples", type=int, default=5)
+    parser.add_argument("--entropy-bins", type=int, default=16)
     parser.add_argument("--lof-neighbors", type=int, default=20)
     parser.add_argument("--lof-threshold", type=float, default=1.5)
     parser.add_argument("--svm-nu", type=float, default=0.1)
     parser.add_argument("--forest-trees", type=int, default=200)
-    parser.add_argument("--entropy-bins", type=int, default=16)
     parser.add_argument("--max-stable-windows", type=int, default=128)
-    parser.add_argument("--max-gap-seconds", type=float, default=0.025)
-    parser.add_argument("--minimum-coverage", type=float, default=0.9)
+    parser.add_argument("--max-gap-seconds", type=float, default=0.25)
+    parser.add_argument("--minimum-coverage", type=float, default=0.7)
+    parser.add_argument("--minimum-receivers", type=int, default=2)
+    parser.add_argument("--receivers", nargs="+", default=list(RECEIVERS))
     parser.add_argument(
         "--subcarriers",
         type=int,
         nargs="+",
-        default=DEFAULT_SUBCARRIERS,
+        default=WIFALL_SUBCARRIERS,
         help="Fixed HE20 physical tone indices, chosen before looking at test data.",
     )
     return parser
@@ -83,32 +82,32 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--output must be outside raw recording paths")
     try:
         config = WiFallConfig(
-            sample_rate_hz=120,
-            window_seconds=args.window_seconds,
-            smoothing_samples=args.smoothing_samples,
             lof_neighbors=args.lof_neighbors,
             lof_threshold=args.lof_threshold,
-            svm_nu=args.svm_nu,
+            features=args.features,
+            classifier=args.classifier,
             forest_trees=args.forest_trees,
+            svm_nu=args.svm_nu,
             random_seed=args.seed,
-            representation=args.representation,
-            entropy_bins=args.entropy_bins,
         )
-        dataset = load_dataset(
+        dataset = load_windows(
             sources,
             root=root,
+            fall_labels=tuple(args.fall_label),
+            non_fall_labels=tuple(args.non_fall_label),
             window_seconds=args.window_seconds,
             hop_seconds=args.hop_seconds,
+            receivers=tuple(args.receivers),
+            minimum_receivers=args.minimum_receivers,
             subcarriers=tuple(args.subcarriers),
             max_gap_seconds=args.max_gap_seconds,
             minimum_coverage=args.minimum_coverage,
-            fall_labels=tuple(args.fall_label),
-            non_fall_labels=tuple(args.non_fall_label),
+            smoothing_samples=args.smoothing_samples,
+            entropy_bins=args.entropy_bins,
         )
         result = run_experiment(
             dataset,
             config,
-            classifier=args.classifier,
             split_by=args.split_by,
             test_fraction=args.test_fraction,
             max_stable_windows=args.max_stable_windows,
@@ -116,9 +115,16 @@ def main(argv: list[str] | None = None) -> int:
         save_experiment(result, output)
     except (ValueError, FileNotFoundError) as error:
         parser.error(str(error))
+    report = result.report
     print(
         json.dumps(
-            {"output": str(output), "held_out": result.report["held_out"]}, indent=2
+            {
+                "output": str(output),
+                "held_out": report["held_out"],
+                "held_out_attempts": report["held_out_attempts"],
+                "held_out_activity_fraction": report["held_out_activity_fraction"],
+            },
+            indent=2,
         )
     )
     return 0

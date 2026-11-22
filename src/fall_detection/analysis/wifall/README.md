@@ -1,10 +1,11 @@
 # WiFall
 
-WiFall amplitude preprocessing, LOF activity gating, and random-forest or
-fall-inlier one-class SVM classification, with explicit ESP32-C5 adaptations.
+WiFall's smoothing, Local Outlier Factor activity gating, window statistics
+and singular values, with random-forest or fall-inlier one-class SVM
+classification, adapted to the four ESP32-C5 receivers.
 
-See [the implementation guide](../../../../docs/wifall.md) for the paper
-mapping, dataset requirements, run command, feature formulas, and limitations.
+See [the implementation guide](../../../../docs/wifall.md) for the hardware
+adaptations, run command, feature definitions, and limitations.
 
 ```bash
 uv run python -m fall_detection.analysis.wifall --help

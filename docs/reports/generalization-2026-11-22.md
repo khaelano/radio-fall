@@ -188,6 +188,11 @@ its alarms low only because it rarely passes any window.
   false-positive rate (0.42–0.45).
 - The filtered amplitude should not be used as evidence of better detection.
   Its random-split scores reflect static levels.
+- All sessions share one room setup (same receivers, placements and channel),
+  which is the project's scope; the cross-session tests change day and
+  participant, not room. The deployed models were trained on all three
+  sessions, including continuous data; the continuous false-alarm figures
+  above apply only to models trained without it.
 - Limits: two participant sessions, so each cross-session test also changes
   participant and date; the mattress confound remains inside both sessions,
   so cross-session scores can still contain setup effects; FallDeFi left 9–21 %

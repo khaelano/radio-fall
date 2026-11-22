@@ -34,14 +34,38 @@ the [data layout](../data/README.md) and [dataset format](dataset-format.md).
 
 ## Implemented
 
-- **WiFall adaptation:** `analysis/wifall/` reads preserved 120 Hz sessions and
-  implements weighted amplitude smoothing, training-only resting LOF profiles,
-  separate statistical/SVD representations, random forest and fall-inlier
-  one-class SVM, with grouped holdout evaluation. Countdown stillness and cue
-  labels are assumptions; feature formulas and hyperparameters resolve paper
-  omissions explicitly. This is a separate baseline, not a selected production
-  representation or a claim of reproduced detection results. See the
-  [implementation guide](wifall.md).
+- **WiFall adaptation (rewritten 22 November):** `analysis/wifall/` keeps
+  WiFall's structure (smoothing, LOF activity gate on training countdowns,
+  seven statistics and singular values, random forest or fall-inlier one-class
+  SVM) adapted to the C5 receivers like FallDeFi: receivers judged per 2 s
+  window, relative amplitude, the first principal component instead of the
+  tone mean for the gate (the mean cancels motion), features pooled over
+  present receivers, balanced random forest. Representations are computed at
+  load time. A smoke run on the 9 November 13:15 session kept 848 windows
+  (134 before) but the gate passed no held-out window and the classifiers
+  alone were near chance (balanced accuracy 0.52–0.56)
+  ([report](reports/wifall-smoke-2026-11-22.md)). See the
+  [implementation guide](wifall.md). Session reading, gap filling,
+  per-receiver checks and the grouped holdout are shared with FallDeFi
+  (`analysis/_recorded_attempts.py`, `analysis/_grouped_holdout.py`).
+- **FallDeFi adaptation:** `analysis/falldefi/` keeps FallDeFi's structure
+  (one trace per action cue ± 1 s, STFT spectrograms, power-burst events, RBF
+  SVM on duration, two spectral entropies and fractal dimension) but adapts it
+  to the C5 receivers rather than reproducing the paper: receivers are judged
+  and dropped per trace, amplitudes are relative, each receiver is whitened by
+  its training resting spectrum before averaging, `k` is calibrated on
+  training traces, and the SVM is class-balanced. On 22 November a smoke run on
+  the 9 November 13:15 session (attempt holdout, 46 held-out traces) detected
+  13 of 16 falls with 9 of 30 non-falls flagged; that session informed the
+  design, so it is development data
+  ([report](reports/falldefi-smoke-2026-11-22.md)). Unverified: other
+  sessions, participants and continuous monitoring. See the
+  [implementation guide](falldefi.md).
+- **Receiver gap schedule (measured 22 November on the 9 November 13:15
+  session):** each receiver loses a 0.1 s burst about every 0.57 s (about
+  18 % of samples), staggered across receivers; all four are complete only
+  26 % of the time. Rules that require every receiver at once discard most
+  windows ([report](reports/falldefi-smoke-2026-11-22.md#receiver-gaps-in-this-session)).
 
 - **Reviews and archive resolution (13 November 2026):** the mutable review
   lives at `data/annotations/<session-id>/session_review.json`, tracked in Git.

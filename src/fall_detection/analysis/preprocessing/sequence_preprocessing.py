@@ -156,6 +156,19 @@ def squared_difference(values: np.ndarray) -> np.ndarray:
     return result
 
 
+def absolute_difference(values: np.ndarray) -> np.ndarray:
+    """Magnitude of adjacent sample changes in one segment, preserving NaN.
+
+    Variant of ``squared_difference`` without squaring: each change keeps its
+    linear size instead of being weighted by itself, so large spikes do not
+    dominate small movements. Returns the same shape with NaN at the first
+    sample and wherever either neighbour is missing.
+    """
+    result = np.full_like(values, np.nan)
+    result[1:] = np.abs(values[1:] - values[:-1])
+    return result
+
+
 def split_packet_epochs(
     frame: pl.DataFrame, *, gap_seconds: float = 1.0
 ) -> list[pl.DataFrame]:

@@ -18,18 +18,17 @@ Bachelor’s thesis on fall detection using WiFi CSI recorded with ESP32-C5 radi
 - Preserve raw data; create derived artifacts only. Never commit large data files to Git. DVC is installed: use `uv run dvc` for data versioning, inspect existing tracking/configuration first, and commit relevant DVC metadata with code. Do not overwrite raw data or change remotes casually.
 - Keep thesis text and literature syntheses in descriptive `draft/*.md` files, supporting material in `docs/`, code in `src/`, and experiments in `notebooks/`.
 - Never invent results; state uncertainty and unfinished work. Fix random seeds and record dataset versions.
-- Hard requirement: use the provided jupyter-agent-bridge MCP tools for all interactions with notebook files, including reading, editing, and executing. Before editing, ensure there is no stale code in the notebook buffer. Refuse to write directly to `.ipynb` files or bypass the bridge; if the bridge is unavailable, stop notebook work and report the blocker. Disobedience will result in a severe penalty.
+- Prefer the jupyter-agent-bridge MCP tools for reading, editing, and executing notebooks when available; otherwise edit `.ipynb` files directly and verify execution afterwards.
 - After modifying any piece of code, inspect its direct upstream and downstream relationships, including callers, dependencies, and consumers of its outputs. Assess how the change affects directly connected code and adjust these codes when necessary.
 
 ## Development and Validation
 
 Ruff and DVC are installed in the `dev` dependency group. Use uv from the repository root:
 
-- `uv sync --extra radio`: update the environment with radio and development dependencies.
+- `uv sync --extra analysis --extra radio --extra cuda`: update the environment with analysis, radio, CUDA PyTorch, and development dependencies. This machine has an NVIDIA GPU; use the `cuda` extra (not the CPU-only `train` extra) and run training or processing on the GPU wherever it is faster. Use `uv run --no-sync` so `uv run` does not re-sync to a different extra set.
 - After every write/change, run `uv run ruff format <changed Python/notebook files>` and `uv run ruff check <changed Python/notebook files>`; resolve findings before finalizing. These are the formatting and check commands, not `uv format` or `uv check`. For Markdown-only changes, Ruff does not apply; review the diff and whitespace with `git diff --check`.
-- For notebooks, run Ruff on temporary copies of cell code obtained through the bridge and apply formatting or fixes through the bridge. Do not let Ruff write directly to `.ipynb` files.
 - `uv run pytest`: run the full suite before submitting code changes. Tests must be deterministic and offline; add only necessary tests whose coverage cannot be inferred from existing tests.
-- Verify notebook execution through jupyter-agent-bridge when applicable, save changes through the bridge, and rerun Ruff using the notebook workflow above.
+- Verify notebook execution when applicable and rerun Ruff on changed notebooks afterwards.
 - Python: PEP 8, `snake_case` functions/variables, `PascalCase` classes, `SCREAMING_SNAKE_CASE` constants; public functions need type hints and Google-style docstrings. Tests: `test_<module>.py`, `test_<function>_<scenario>`.
 - Keep commits focused and use Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`). PRs explain approach and results, link related issues, and include plots/metrics for model changes.
 

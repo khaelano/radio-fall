@@ -14,6 +14,8 @@ import numpy as np
 import polars as pl
 from sklearn.model_selection import train_test_split
 
+from .segments import RECEIVER_COUNT, TONE_LAYOUTS
+
 LABELS = ("non_fall", "fall")
 
 
@@ -30,18 +32,24 @@ def load_sequence_index(
     Returns:
         Window index and source metadata, including declared signal hashes.
     """
-    frames, sources = [], {}
+    frames, sources, layouts = [], {}, set()
     for name in datasets:
         folder = root / name
         manifest_path = folder / "manifest.json"
         manifest = json.loads(manifest_path.read_text())
         if manifest["schema"] != "amplitude_sequence":
             raise ValueError(f"Unsupported export schema: {folder}")
-        if manifest["coordinates"] != {
-            "receivers": [f"rx-{i}" for i in range(1, 5)],
-            "subcarriers": list(range(-122, 123)),
-        }:
+        if manifest["coordinates"] not in [
+            {
+                "receivers": [f"rx-{i}" for i in range(1, RECEIVER_COUNT + 1)],
+                "subcarriers": list(tones),
+            }
+            for tones in TONE_LAYOUTS.values()
+        ]:
             raise ValueError(f"Unexpected feature coordinates: {folder}")
+        layouts.add(len(manifest["coordinates"]["subcarriers"]))
+        if len(layouts) > 1:
+            raise ValueError("Selected exports differ in their tone layout")
         index_path = folder / "window_index.parquet"
         shard_path = folder / "signals.parquet"
         for filename in ("window_index.parquet", "segments.parquet", "signals.parquet"):
@@ -200,19 +208,14 @@ def hold_out_dataset(
 class SegmentStore:
     """Map segment NPY files without a second Python signal cache."""
 
-    def __init__(self) -> None:
-        self.coordinates = (
-            np.asarray([f"rx-{i}" for i in range(1, 5)]),
-            np.arange(-122, 123),
-        )
-
     def read(self, path: str) -> np.memmap:
         """Map one segment; the operating system owns the page cache."""
         signal = np.load(path, mmap_mode="r", allow_pickle=False)
         if (
             signal.dtype != np.float32
             or signal.ndim != 3
-            or signal.shape[1:] != (4, 245)
+            or signal.shape[1] != RECEIVER_COUNT
+            or signal.shape[2] not in TONE_LAYOUTS
         ):
             raise ValueError(f"Invalid segment signal: {path}")
         return signal

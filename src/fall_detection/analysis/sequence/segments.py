@@ -14,7 +14,16 @@ from .._cache_keys import file_hash
 from .._io import atomic_json, atomic_table, temporary_sibling
 from . import alignment, transforms
 
-FEATURES = 4 * 245
+RECEIVER_COUNT = 4
+PHYSICAL_SUBCARRIERS = tuple(range(-122, 123))
+"""Tone coordinates of a per-tone export: physical HE20 indices -122..122."""
+TONE_MEAN = ("tone_mean",)
+"""Tone coordinate of an export averaged over tones, one value per receiver."""
+TONE_LAYOUTS = {
+    len(PHYSICAL_SUBCARRIERS): PHYSICAL_SUBCARRIERS,
+    len(TONE_MEAN): TONE_MEAN,
+}
+"""Supported tone-axis lengths and their coordinates."""
 
 
 def export_code_hashes() -> dict[str, str]:
@@ -58,9 +67,18 @@ def _no_btrfs_compression(path: Path) -> bool:
 
 
 def write_signal(path: Path, signal: np.ndarray) -> dict:
-    """Publish a complete NPY atomically, with a hash and logical dimensions."""
-    if signal.dtype != np.float32 or signal.ndim != 3 or signal.shape[1:] != (4, 245):
-        raise ValueError("Expected float32 [time,4,245] signal")
+    """Publish a complete NPY atomically, with a hash and logical dimensions.
+
+    The signal is float32 ``[time, receiver, tone]`` with four receivers and
+    either every physical tone or one tone-averaged value (``TONE_LAYOUTS``).
+    """
+    if (
+        signal.dtype != np.float32
+        or signal.ndim != 3
+        or signal.shape[1] != RECEIVER_COUNT
+        or signal.shape[2] not in TONE_LAYOUTS
+    ):
+        raise ValueError("Expected float32 [time,4,245] or [time,4,1] signal")
     with temporary_sibling(path, ".npy") as temporary:
         # Compression must be disabled before any bytes are written to the file.
         uncompressed = _no_btrfs_compression(temporary)

@@ -56,6 +56,7 @@ def training_notebook():
         "dd512d89",
         "49721a0c",
         "cf18ef59",
+        "7a1c5e2b",
         "b385170d",
         "2cb98c36",
         "fb056210",

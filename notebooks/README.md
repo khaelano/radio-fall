@@ -18,7 +18,9 @@ excluded from Git. Recordings and reusable derived datasets remain in `data/`.
   differences, cue labels, windows, exports, and stage figures. Its
   `EXPORT_VARIANTS` also write alternative signals for the same windows to
   `amplitude_sequence/<rate>hz-<variant>/`; `filtered_amplitude` is the
-  Hampel-filtered amplitude without difference or log1p.
+  Hampel-filtered amplitude without difference or log1p, and
+  `tone_mean_log_ratio` is one value per receiver: `log1p(1000 · x)` of the
+  mean over tones of the squared log-amplitude change.
 - `03_training.ipynb` runs PyTorch sequence models on CPU or NVIDIA
   CUDA, with independent pilot and full-data training sections. Its final cell
   exports available checkpoints to ONNX and verifies logits with ONNX Runtime.

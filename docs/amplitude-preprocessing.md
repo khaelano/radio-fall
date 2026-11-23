@@ -34,6 +34,10 @@ representation is exploratory and offline.
 change's magnitude instead of squaring it. It is not yet used: the notebook
 export, the trained models and the Rust live detector all use the squared
 difference, so a model on the variant needs its own export and training run.
+`tone_mean_squared_log_ratio` averages each receiver's squared log-amplitude
+change over its tones; `02_preprocess` exports it as the offline variant
+`tone_mean_log_ratio` with shape `[time, 4, 1]`
+([tone-pooling report](reports/tone-pooling-2026-11-23.md)).
 
 The notebook defines 2-, 4-, and 6-second windows with 50% overlap. Complete
 windows must fit within the recorded attempt. Fall windows receive target 1

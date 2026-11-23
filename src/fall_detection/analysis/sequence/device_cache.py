@@ -136,7 +136,7 @@ def _prepare(
     offset = 0
     for path, begin, end in spans:
         signal = dataset.store.read(path)
-        if end > len(signal) or features != 980:
+        if end > len(signal) or features != signal.shape[1] * signal.shape[2]:
             raise ValueError(f"Window bounds or feature layout differ: {path}")
         presence = None
         if rate == 120:

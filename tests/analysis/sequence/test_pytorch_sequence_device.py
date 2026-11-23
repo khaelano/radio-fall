@@ -99,3 +99,26 @@ def test_notebook_trainer_saves_and_reloads_checkpoint(tmp_path, training_notebo
     assert (model_output / metadata["normalizer"]).resolve() == normalizer_path
     assert (output / "metrics.json").is_file()
     assert result["runtime"]["device"] == "cpu"
+
+
+def test_tone_pool_ignores_tone_and_receiver_order(training_notebook):
+    torch.manual_seed(0)
+    model = training_notebook["TorchTonePool"](1964, 4).eval()
+    values = torch.randn(2, 48, 4, 245)
+    valid = (torch.rand(2, 48, 4, 245) > 0.2).float()
+    present = (torch.rand(2, 48, 4) > 0.2).float()
+
+    def inputs(tones, receivers):
+        return torch.cat(
+            (
+                values[:, :, receivers][..., tones].flatten(2),
+                valid[:, :, receivers][..., tones].flatten(2),
+                present[:, :, receivers],
+            ),
+            dim=-1,
+        )
+
+    original = model(inputs(torch.arange(245), torch.arange(4)))
+    shuffled = model(inputs(torch.randperm(245), torch.tensor([2, 0, 3, 1])))
+    assert original.shape == (2,)
+    torch.testing.assert_close(shuffled, original)

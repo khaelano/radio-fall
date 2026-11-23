@@ -1,5 +1,6 @@
 """Signal publication preserves values, validity, and an existing destination."""
 
+import hashlib
 import json
 
 import numpy as np
@@ -7,12 +8,14 @@ import polars as pl
 import pytest
 
 from fall_detection.analysis.sequence.segments import (
+    TONE_MEAN,
     publish_export,
     write_signal,
 )
 from fall_detection.analysis.sequence.training_data import (
     SegmentStore,
     _selected,
+    load_sequence_index,
 )
 
 
@@ -71,6 +74,48 @@ def test_publish_preserves_values_and_invalidity(tmp_path):
         parameters={"target_hz": 96},
     )
     assert (tmp_path / "segments.parquet").stat().st_mtime_ns == stamp
+
+
+def test_publish_tone_mean_layout_loads_four_features(tmp_path):
+    signal = np.ones((240, 4, 1), dtype=np.float32)
+    with pytest.raises(ValueError, match="signal"):
+        write_signal(tmp_path / "signals/bad.npy", np.ones((240, 4, 2), np.float32))
+    row = dict(
+        segment_id="one",
+        **write_signal(tmp_path / "data/signals/one.npy", signal),
+        subcarriers=list(TONE_MEAN),
+        presence="signals/one.presence.npy",
+    )
+    presence = np.ones((240, 4), dtype=bool)
+    np.save(tmp_path / "data/signals/one.presence.npy", presence)
+    row["presence_sha256"] = hashlib.sha256(
+        (tmp_path / "data/signals/one.presence.npy").read_bytes()
+    ).hexdigest()
+    index = pl.DataFrame(
+        [
+            {
+                "segment_id": "one",
+                "signal": "signals/one.npy",
+                "duration": 2,
+                "start": 0,
+                "stop": 240,
+                "target": 1,
+                "group": "g",
+            }
+        ]
+    )
+    publish_export(
+        tmp_path / "data",
+        index,
+        pl.DataFrame([{"segment_id": "one", "samples": 240}]),
+        [row],
+        seconds=0,
+        parameters={"target_hz": 120},
+    )
+    loaded, _ = load_sequence_index(tmp_path, datasets=("data",), durations=(2,))
+    window = loaded.row(0, named=True)
+    values, mask = _selected(SegmentStore(), window["path"], [window])
+    assert values.shape == mask.shape == (1, 240, 4)
 
 
 def test_failed_signal_write_preserves_existing_file(tmp_path, monkeypatch):

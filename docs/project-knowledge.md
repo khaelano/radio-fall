@@ -253,7 +253,19 @@ on their hardware and data, and are not reproduced here.
   published to `artifacts/model/`. The `filtered_amplitude` variant (no
   difference transform) scored higher on the random split only through static
   levels and failed across sessions
-  ([generalization report](reports/generalization-2026-11-22.md)).
+  ([generalization report](reports/generalization-2026-11-22.md)). The
+  `tone_mean_log_ratio` variant (`[time, 4, 1]`: per receiver, the mean over
+  tones of the squared log-amplitude change) removed the per-tone session
+  fingerprint. Across sessions it cut idle false alarms from 39–100 % to
+  under 8 % of continuous windows for seven of nine models. It raised median
+  window AUC on `khaelano` from 0.38 to 0.79 but lowered it on `akmal` from
+  0.70 to 0.59. It did not reach FallDeFi's attempt score. The
+  `03_training` model `tonepool` encodes each per-tone series with shared
+  weights and pools over tones and receivers on the default input. Its 4 s
+  model kept window AUC 0.76–0.82 in all four holdouts. It flagged 9–39 % of
+  idle continuous windows from an unseen day and stayed below FallDeFi at
+  attempt level
+  ([tone-pooling report](reports/tone-pooling-2026-11-23.md)).
   Both 96 Hz and 120 Hz exports remain current; version-1 exports are retired.
   Notebooks must record dataset versions, split policy, and seeds. See
   [amplitude preprocessing](amplitude-preprocessing.md) and the notebook index.
@@ -294,7 +306,10 @@ on their hardware and data, and are not reproduced here.
 - Which signal representation and temporal filtering generalize to new
   sessions without erasing short fall-related motion? Neither the log1p
   squared difference nor the filtered amplitude did across the two current
-  participant sessions; FallDeFi's event features did best.
+  participant sessions; FallDeFi's event features did best. Averaging over
+  tones transferred to `khaelano` but not to `akmal`; why the direction
+  matters is unresolved. The shared-weight tone-pooled encoder transferred in
+  both directions but not to idle data from an unseen day.
 - How should collection separate falls from setup, for example non-fall
   activity with the mattress in place or interleaved trial order?
 - How should irregular timestamps and packet loss shape model windows?

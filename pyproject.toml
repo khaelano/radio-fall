@@ -23,6 +23,7 @@ analysis = [
     "ipykernel>=6,<8",
     "nbconvert>=7,<8",
     "pywavelets>=1.8",
+    "threadpoolctl>=3.1",
 ]
 radio = [
     "pyarrow>=18",

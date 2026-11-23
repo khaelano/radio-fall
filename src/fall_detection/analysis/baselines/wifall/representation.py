@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from threadpoolctl import threadpool_limits
 
 STATISTIC_NAMES = (
     "normalized_std",
@@ -189,7 +190,9 @@ def receiver_representation(
         ]
     ).mean(axis=1)
     centered = smoothed - smoothed.mean(axis=0)
-    left, singular, _ = np.linalg.svd(centered, full_matrices=False)
+    # A window's SVD is small; more BLAS threads only slow it down.
+    with threadpool_limits(limits=1, user_api="blas"):
+        left, singular, _ = np.linalg.svd(centered, full_matrices=False)
     # The component's sign is arbitrary; fixing it keeps streams comparable.
     component = left[:, 0] * singular[0]
     if component[np.argmax(np.abs(component))] < 0:

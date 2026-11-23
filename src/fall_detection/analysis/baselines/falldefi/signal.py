@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pywt
+from threadpoolctl import threadpool_limits
 
 
 @dataclass(frozen=True)
@@ -103,7 +104,9 @@ def principal_components(values: np.ndarray, *, components: int = 3) -> np.ndarr
     ):
         raise ValueError("components must be positive and at most min(time, tones)")
     centered = array - array.mean(axis=0)
-    _, _, rows = np.linalg.svd(centered, full_matrices=False)
+    # A trace's SVD is small; more BLAS threads only slow it down.
+    with threadpool_limits(limits=1, user_api="blas"):
+        _, _, rows = np.linalg.svd(centered, full_matrices=False)
     return centered @ rows[:components].T
 
 

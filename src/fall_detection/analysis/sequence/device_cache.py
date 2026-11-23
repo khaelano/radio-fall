@@ -74,9 +74,10 @@ def prepare_device_dataset(
     """Prepare complete compact segments within budget, or return a fallback.
 
     Budget refusal and CUDA allocation failure return None. Invalid data raises
-    rather than silently bypassing validation. CPU devices support parity tests;
-    the notebook selects this path only for CUDA. Budgets exclude model state,
-    activations, batch assembly, and allocator overhead.
+    rather than silently bypassing validation. On a CPU device the segments sit
+    in RAM, once each, which suits partitions too large for the GPU budget; the
+    notebook tries CUDA first. Budgets exclude model state, activations, batch
+    assembly, and allocator overhead.
 
     Args:
         dataset: One partition with fixed duration, rate, and fitted normalizer.
@@ -175,8 +176,14 @@ def training_batches(
     batch_size: int,
     seed: int | None = None,
 ) -> Iterator[tuple[np.ndarray | torch.Tensor, list[dict]]]:
-    """Use the consumer stream for device inputs and a prefetch thread for RAM."""
-    if isinstance(dataset, DeviceSequenceDataset):
+    """Gather GPU-resident batches on the consumer stream; prefetch the others.
+
+    Batches from RAM, whether a CPU segment cache or the streamed window
+    dataset, are built one ahead in a producer thread, so the next batch is
+    assembled while the GPU trains on the current one. Order and values match
+    synchronous iteration.
+    """
+    if isinstance(dataset, DeviceSequenceDataset) and dataset.device.type != "cpu":
         yield from dataset.batches(batch_size, seed)
     else:
         yield from prefetched_batches(dataset, batch_size, seed)

@@ -30,6 +30,31 @@ def squared_difference(values: np.ndarray) -> np.ndarray:
     return result
 
 
+def lagged_squared_difference(values: np.ndarray, lag: int) -> np.ndarray:
+    """Square of changes over ``lag`` samples in one segment, preserving NaN.
+
+    A change over ``lag`` samples responds most to fluctuations near
+    ``rate / (2 * lag)``, so several lags form a coarse filter bank that
+    needs no gap filling.
+
+    Args:
+        values: Samples in time order along the first axis.
+        lag: Positive sample lag; 1 gives :func:`squared_difference`.
+
+    Returns:
+        The same shape with NaN for the first ``lag`` samples and wherever
+        either sample of a pair is missing.
+
+    Raises:
+        ValueError: If ``lag`` is not positive.
+    """
+    if lag < 1:
+        raise ValueError("lag must be positive")
+    result = np.full_like(values, np.nan)
+    result[lag:] = np.square(values[lag:] - values[:-lag])
+    return result
+
+
 def absolute_difference(values: np.ndarray) -> np.ndarray:
     """Magnitude of adjacent sample changes in one segment, preserving NaN.
 

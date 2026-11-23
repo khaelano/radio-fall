@@ -19,9 +19,16 @@ PHYSICAL_SUBCARRIERS = tuple(range(-122, 123))
 """Tone coordinates of a per-tone export: physical HE20 indices -122..122."""
 TONE_MEAN = ("tone_mean",)
 """Tone coordinate of an export averaged over tones, one value per receiver."""
+CHANGE_LAGS = (1, 2, 4, 8)
+"""Sample lags of a lag-stacked export; lag k responds most near rate / (2k)."""
+LAG_STACK = tuple(
+    f"lag{lag}/{tone}" for lag in CHANGE_LAGS for tone in PHYSICAL_SUBCARRIERS
+)
+"""Tone coordinates of a lag-stacked export: every physical tone per lag, lag-major."""
 TONE_LAYOUTS = {
     len(PHYSICAL_SUBCARRIERS): PHYSICAL_SUBCARRIERS,
     len(TONE_MEAN): TONE_MEAN,
+    len(LAG_STACK): LAG_STACK,
 }
 """Supported tone-axis lengths and their coordinates."""
 

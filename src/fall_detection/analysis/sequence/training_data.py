@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Full, Queue
 from threading import Event, Thread
+from typing import Any
 
 import numpy as np
 import polars as pl
@@ -500,11 +501,13 @@ class SequenceDataset:
 
 
 def prefetched_batches(
-    dataset: SequenceDataset, batch_size: int, seed: int | None = None
+    dataset: SequenceDataset | Any, batch_size: int, seed: int | None = None
 ) -> Iterator[tuple[np.ndarray, list[dict]]]:
     """Overlap decoding/normalization and GPU work with one ready batch.
 
-    Only the producer touches the shard cache. Iteration order and input values
+    ``dataset`` is anything with ``batches(batch_size, seed)``, such as a
+    streamed :class:`SequenceDataset` or a CPU segment cache. Only the producer
+    touches the shard cache. Iteration order and input values
     match synchronous loading. Exceptions propagate and early closure joins the
     producer, so validation cannot race it for the shared cache.
     """

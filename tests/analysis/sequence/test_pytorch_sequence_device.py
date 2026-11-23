@@ -192,3 +192,26 @@ def test_tone_pool_centering_removes_each_tones_window_level(training_notebook):
         model.prepare(shifted, valid), model.prepare(values, valid)
     )
     assert torch.all(model.prepare(values, valid)[valid == 0] == 0)
+
+
+def test_tone_pool_lags_reads_lags_as_channels_of_each_tone(training_notebook):
+    torch.manual_seed(0)
+    model = training_notebook["TorchTonePoolLags"](2 * 4 * 980 + 4, 4).eval()
+    values = torch.randn(2, 48, 4, 4, 245)  # [batch, time, receiver, lag, tone]
+    valid = (torch.rand(2, 48, 4, 4, 245) > 0.2).float()
+    present = (torch.rand(2, 48, 4) > 0.2).float()
+
+    def inputs(tones):
+        return torch.cat(
+            (
+                values[..., tones].flatten(2),
+                valid[..., tones].flatten(2),
+                present,
+            ),
+            dim=-1,
+        )
+
+    original = model(inputs(torch.arange(245)))
+    # The same tone permutation in every lag leaves the output unchanged.
+    torch.testing.assert_close(model(inputs(torch.randperm(245))), original)
+    assert original.shape == (2,)

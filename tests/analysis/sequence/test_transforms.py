@@ -4,6 +4,7 @@ import numpy as np
 
 from fall_detection.analysis.sequence.transforms import (
     absolute_difference,
+    quiet_floor,
     squared_difference,
     tone_mean_squared_log_ratio,
 )
@@ -26,3 +27,9 @@ def test_tone_mean_squared_log_ratio_ignores_gain_and_missing_tones():
     expected = [np.nan, np.log(2) ** 2 / 2, np.nan, np.nan]
     np.testing.assert_allclose(pooled[:, 0, 0], expected)
     np.testing.assert_allclose(pooled[:, 1, 0], expected)
+
+
+def test_quiet_floor_skips_missing_samples_and_unseen_features():
+    first = np.array([[1.0, np.nan], [3.0, np.nan]])
+    second = np.array([[5.0, np.nan]])
+    np.testing.assert_array_equal(quiet_floor([first, second]), [3.0, 0.0])

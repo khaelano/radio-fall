@@ -6,8 +6,11 @@ trained models and the Rust live detector all use ``log1p`` of it.
 ``tone_mean_squared_log_ratio`` averages each receiver's relative changes over
 its tones, removing the per-tone pattern that identifies a session
 (``docs/reports/tone-pooling-2026-11-23.md``). All act on one segment at a time
-and never difference across a gap.
+and never difference across a gap. ``quiet_floor`` averages a signal over
+still periods, for subtracting a session's per-tone idle level.
 """
+
+from collections.abc import Iterable
 
 import numpy as np
 
@@ -75,3 +78,30 @@ def tone_mean_squared_log_ratio(values: np.ndarray) -> np.ndarray:
     count = finite.sum(axis=2, keepdims=True)
     total = np.where(finite, change, 0).sum(axis=2, keepdims=True)
     return np.divide(total, count, out=np.full(count.shape, np.nan), where=count > 0)
+
+
+def quiet_floor(blocks: Iterable[np.ndarray]) -> np.ndarray:
+    """Mean of each feature over the finite samples of still periods.
+
+    Args:
+        blocks: Arrays with time on axis zero and the same feature shape, such
+            as ``[time, receiver, tone]``; NaN marks missing samples, which
+            are skipped rather than filled.
+
+    Returns:
+        The per-feature mean; zero for a feature without any finite sample.
+
+    Raises:
+        ValueError: If no block is given.
+    """
+    total = count = None
+    for block in blocks:
+        values = np.asarray(block, dtype=np.float64)
+        finite = np.isfinite(values)
+        block_total = np.where(finite, values, 0).sum(axis=0)
+        block_count = finite.sum(axis=0)
+        total = block_total if total is None else total + block_total
+        count = block_count if count is None else count + block_count
+    if total is None:
+        raise ValueError("Quiet floor requires at least one block")
+    return np.divide(total, count, out=np.zeros_like(total), where=count > 0)

@@ -156,6 +156,8 @@ def test_preprocessing_notebook_stages_and_cache(tmp_path, monkeypatch, rate):
             "ENABLE_PLOTS": True,
             "MAX_PLOT_POINTS": 16,
             "SAMPLE": False,
+            # The synthetic session has no quiet non-fall samples for a floor.
+            "EXPORT_VARIANTS": ("filtered_amplitude", "tone_mean_log_ratio"),
         }
         if target.id in values:
             node.value = ast.parse(repr(values[target.id]), mode="eval").body

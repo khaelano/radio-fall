@@ -21,6 +21,8 @@ excluded from Git. Recordings and reusable derived datasets remain in `data/`.
   Hampel-filtered amplitude without difference or log1p, and
   `tone_mean_log_ratio` is one value per receiver: `log1p(1000 · x)` of the
   mean over tones of the squared log-amplitude change.
+  `quiet_floor_squared_difference` is the default signal minus each session's
+  per-tone mean over its still samples (`quiet_floor.npy` in each export).
 - `03_training.ipynb` runs PyTorch sequence models on CPU or NVIDIA
   CUDA, with independent pilot and full-data training sections. Its final cell
   exports available checkpoints to ONNX and verifies logits with ONNX Runtime.

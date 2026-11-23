@@ -14,8 +14,12 @@ idle alarms to about 1 % without lowering window AUC. Window AUC, however,
 mostly measured motion against stillness. On windows of the action cue, where
 non-falls are posture transitions, no input separated falls from transitions
 in both directions (best medians about 0.52–0.70 depending on input and
-direction). A threshold chosen on validation attempts could not compensate.
-FallDeFi still has the best attempt score.
+direction), and a threshold chosen on validation attempts could not
+compensate. Giving the tone-pooled model a seconds-long temporal view
+changed that: at 4–6 s it separated falls from transitions at 0.78–0.91 in
+both directions. It ranked attempts at least as well as FallDeFi (attempt
+AUC 0.77–0.88) and scored the attempts FallDeFi drops, with idle alarms
+about 1 % (one seed; the mattress confound applies).
 
 ## Screen: which representation carries the session
 
@@ -432,6 +436,92 @@ the other:
   error of about 0.035. Differences below about 0.05 between rows are not
   reliable.
 
+## Burst features against FallDeFi
+
+`burst_vs_falldefi.py` scored the burst features and FallDeFi on the same cued
+attempts. FallDeFi's attempt score is the SVM decision of its strongest event,
+recomputed from the saved 22 November holdout models. FallDeFi's own attempt
+rule reproduced its reported scores on these attempts (balanced accuracy
+0.679 and 0.714). FallDeFi left 49 of 231 `akmal` and 21 of 232 `khaelano`
+attempts unscored.
+
+| Attempt AUC (all cued / FallDeFi-scored) | → `akmal` | → `khaelano` |
+| --- | --- | --- |
+| FallDeFi SVM | 0.77 / 0.79 | 0.70 / 0.80 |
+| Burst, 5 features | 0.63 / 0.64 | 0.63 / 0.64 |
+| FallDeFi's 4 features, logistic | 0.77 / 0.86 | 0.68 / 0.69 |
+| Burst 5 + FallDeFi 4, logistic | 0.75 / 0.83 | 0.69 / 0.71 |
+| Rank fusion of FallDeFi SVM and burst 5 | 0.76 / 0.75 | 0.73 / 0.79 |
+
+On FallDeFi-scored attempts, burst 5 minus FallDeFi was −0.15 [−0.25, −0.05]
+and −0.15 [−0.26, −0.04] (95 % bootstrap intervals). Combining the two did not
+help reliably (+0.04 [−0.03, +0.11] and −0.09 [−0.15, −0.03]). FallDeFi's own
+features carry the fall information; the burst screen's Lomb–Scargle
+entropies, computed on one pooled envelope, did not.
+
+## A seconds-long temporal view (phase 1)
+
+The CNNs so far could not see a fall's shape:
+
+- **`TorchCNN`:** each output position saw about 0.06 s (7 samples), and the
+  model averaged those positions over the window.
+- **`TorchTonePool`:** each position saw about 0.18 s, with the same averaging.
+
+So they were short-texture detectors. Phase 1 adds two `03_training` models
+on the default per-tone input, with balanced-log-loss checkpoints:
+
+- **`tonepool_tcn`:** after GeM tone pooling, five residual dilated temporal
+  convolutions (dilations 1–16) at a quarter of the sample rate, reaching
+  about 2.2 s, with max plus mean over time into the head.
+- **`tonepool_tcn_center`:** the same model, with each tone's value minus its
+  own mean over the window, as FallDeFi normalizes each trace.
+
+Both models keep tone and receiver order invariance and export to ONNX. The
+runs are listed in `temporal_runs.json`.
+
+| Action-cue window AUC, 2 / 4 / 6 s | `akmal` | `khaelano` | `akmal` + cont. | `khaelano`, all cont. |
+| --- | --- | --- | --- | --- |
+| GeM, step 2 | 0.62 / 0.69 / 0.65 | 0.53 / 0.56 / 0.52 | 0.66 / 0.71 / 0.69 | 0.53 / 0.56 / 0.51 |
+| TCN | 0.75 / 0.90 / 0.87 | 0.68 / 0.79 / 0.82 | 0.79 / 0.87 / 0.91 | 0.68 / 0.78 / 0.86 |
+| TCN, centred | 0.74 / 0.91 / 0.83 | 0.68 / 0.80 / 0.79 | 0.77 / 0.86 / 0.84 | 0.66 / 0.78 / 0.81 |
+
+| Attempt AUC, 4 / 6 s | `akmal` | `khaelano` | `akmal` + cont. | `khaelano`, all cont. |
+| --- | --- | --- | --- | --- |
+| GeM, step 2 | 0.60 / 0.58 | 0.58 / 0.51 | 0.63 / 0.63 | 0.58 / 0.51 |
+| TCN | 0.84 / 0.82 | 0.79 / 0.84 | 0.81 / 0.88 | 0.77 / 0.87 |
+| TCN, centred | 0.85 / 0.76 | 0.82 / 0.82 | 0.82 / 0.78 | 0.78 / 0.83 |
+| FallDeFi SVM (all cued attempts) | 0.77 | 0.70 | not computed | not computed |
+
+- **Both directions.** Falls separated from posture transitions at 0.78–0.91
+  (4 and 6 s), against 0.51–0.71 before. The direction dependence of every
+  earlier input disappeared. The 2 s models gained less, because a 2 s
+  window cannot hold a burst and its aftermath.
+- **Against FallDeFi** (`temporal_vs_falldefi.py`, attempt AUC difference with
+  95 % bootstrap interval). Over all cued attempts:
+  - TCN 6 s on `khaelano`: +0.14 [+0.05, +0.22];
+  - centred TCN 4 s: +0.09 [+0.00, +0.17] on `akmal` and +0.12
+    [+0.02, +0.21] on `khaelano`.
+
+  On FallDeFi-scored attempts only, the differences were +0.02 to +0.06 with
+  intervals including zero. The temporal models rank attempts at least as
+  well as FallDeFi, and they also score the attempts FallDeFi drops.
+- **Centring.** It did not change the result consistently.
+- **Idle data.** The models flagged 0.3–2.2 % of the unseen day's continuous
+  windows (2 s: about 2 %).
+- **Decisions.** With the threshold chosen on validation (`k` = 1), TCN 6 s
+  reached attempt balanced accuracy 0.77, 0.65, 0.79 and 0.77, against
+  FallDeFi's 0.68, 0.71, 0.73 and 0.69. In the `khaelano` holdout the chosen
+  threshold was too strict (recall 0.33, false-positive rate 0.03).
+  Calibration across sessions remains open.
+- **Limits.**
+  - One seed and two participants.
+  - The 4–6 s windows of a fall reach into the lying phase after it, and
+    every fall ended on the mattress. The model may use "lying on the
+    mattress" as well as the fall itself. Posture after a fall is a real
+    signature, but here it cannot be separated from the setup.
+  - Non-fall recordings with the mattress in place are needed to tell the
+    two apart.
+
 ## Frequency features without gap filling
 
 Two further linear screens (`stft_screen.py`, `gap_screen.py`) tested
@@ -455,10 +545,12 @@ is lag-1 energy averaged over tones and receivers, with transfer AUC
 
 ## Next steps (not yet run)
 
-1. Compare the burst features with FallDeFi on the same attempts, and
-   combine them with FallDeFi's event features in one small model.
-2. Repeat over several seeds before comparing models whose differences are
-   below about 0.05.
+1. Repeat `tonepool_tcn` over several seeds (3–5) on the four holdouts
+   before building on it.
+2. Phase 2–4 of the model plan: per-receiver PCA within the window (gaps
+   kept), a frequency view of those components, and positive labels from
+   the detected main burst.
+3. Calibrate the decision threshold across sessions.
 3. For live use, register the `tonepool` families in the Rust detector. The
    quiet-floor variant would also need a still-room calibration step.
 4. Record non-fall activity with the mattress in place, and if it can be done
@@ -492,7 +584,9 @@ holdout runners (`tone_mean_holdouts.py` with `runs.json`,
 `tonepool_holdouts.py` with `tonepool_runs.json`, `floor_gem_holdouts.py` with
 `floor_gem_runs.json`, `decision_rule_holdouts.py` with
 `decision_rule_runs.json`, `hard_negative_holdouts.py` with
-`hard_negative_runs.json`), the burst screen (`burst_screen.py`,
+`hard_negative_runs.json`, `temporal_holdouts.py` with
+`temporal_runs.json`), the FallDeFi comparisons (`burst_vs_falldefi.py`,
+`temporal_vs_falldefi.py`, `temporal_attempts.py` and their CSVs), the burst screen (`burst_screen.py`,
 `burst_features.csv`, `burst_feature_auc.csv`, `burst_model_auc.csv`,
 `burst_screen_results.txt`), the idle diagnosis (`idle_diagnosis.py`,
 `idle_diagnosis.json`), `attempt_span.py` with `attempt_span.csv`, and

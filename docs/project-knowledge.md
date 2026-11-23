@@ -321,8 +321,15 @@ on their hardware and data, and are not reproduced here.
   weighting transition windows in training (one seed). Attempt-level burst
   features transferred in both directions: logistic regression on burst
   prominence, duration, post-burst quiet, posture displacement and receiver
-  agreement reached 0.62–0.72. A sudden stop did not distinguish falls in
-  these mattress-only recordings.
+  agreement reached 0.62–0.72, well below FallDeFi's SVM (0.70–0.77). A
+  sudden stop did not distinguish falls in these mattress-only recordings.
+  The `03_training` model `tonepool_tcn` adds dilated temporal convolutions
+  (about 2.2 s) after GeM tone pooling. At 4–6 s it separated falls from
+  transitions in both directions (action-cue window AUC 0.78–0.91, attempt
+  AUC 0.77–0.88) and matched or exceeded FallDeFi on the same attempts. One
+  seed; the fall windows reach the lying phase on the mattress, so the
+  setup confound applies
+  ([tone-pooling report](reports/tone-pooling-2026-11-23.md)).
 - How should collection separate falls from setup, for example non-fall
   activity with the mattress in place or interleaved trial order?
 - How should irregular timestamps and packet loss shape model windows?

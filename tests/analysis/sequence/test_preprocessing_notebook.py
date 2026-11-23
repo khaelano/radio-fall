@@ -169,6 +169,8 @@ def test_preprocessing_notebook_stages_and_cache(tmp_path, monkeypatch, rate):
     assert set(dataset.index["duration"]) == {2, 4, 6}
     assert set(dataset.index["target"]) == {1}
     assert set(dataset.index["center_phase"]) == {"action"}
+    bursts = pl.read_parquet(dataset.output / "main_bursts.parquet")
+    assert len(bursts) == dataset.segments.height  # one fall segment each
     assert dataset.index["receiver_coverage"].list.get(1).min() < 1
     index, _ = load_sequence_index(
         dataset.output.parent, datasets=("synthetic",), durations=(2, 4, 6)

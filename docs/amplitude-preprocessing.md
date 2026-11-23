@@ -38,6 +38,10 @@ difference, so a model on the variant needs its own export and training run.
 change over its tones; `02_preprocess` exports it as the offline variant
 `tone_mean_log_ratio` with shape `[time, 4, 1]`
 ([tone-pooling report](reports/tone-pooling-2026-11-23.md)).
+`analysis/sequence/bursts.py` locates the main motion burst of a segment
+(gap-tolerant envelope, peak within the action cue). `02_preprocess` writes
+it per fall segment to `main_bursts.parquet` in each default export, as an
+offline labelling aid for `03_training` (`POSITIVE_LABELS = "burst"`).
 
 The notebook defines 2-, 4-, and 6-second windows with 50% overlap. Complete
 windows must fit within the recorded attempt. Fall windows receive target 1

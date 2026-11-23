@@ -252,3 +252,44 @@ def test_prepared_batches_match_streaming_without_rereading(
         for (values, metadata), (cached, cached_metadata) in zip(batches, actual):
             np.testing.assert_array_equal(cached, values)
             assert cached_metadata == metadata
+
+
+def test_restrict_positives_to_bursts_keeps_test_and_non_fall_windows():
+    from fall_detection.analysis.sequence.training_data import (
+        restrict_positives_to_bursts,
+    )
+
+    rows = []
+    for split_name in ("train", "validation", "test"):
+        for start, target in ((0, 1), (120, 1), (240, 1), (0, 0)):
+            rows.append(
+                {
+                    "dataset": "d",
+                    "segment_id": "fall" if target else "other",
+                    "start": start,
+                    "stop": start + 240,
+                    "duration": 2,
+                    "target": target,
+                    "split": split_name,
+                }
+            )
+    split = pl.DataFrame(rows)
+    # Peak at 250: the middle half of the window starting at 120 is [180, 300).
+    bursts = pl.DataFrame({"dataset": ["d"], "segment_id": ["fall"], "peak": [250]})
+    result = restrict_positives_to_bursts(split, bursts)
+    kept = {
+        (r["split"], r["start"])
+        for r in result.filter(pl.col("target") == 1).iter_rows(named=True)
+    }
+    assert kept == {
+        ("train", 120),
+        ("validation", 120),
+        ("test", 0),
+        ("test", 120),
+        ("test", 240),
+    }
+    assert result.filter(pl.col("target") == 0).height == 3
+    with pytest.raises(ValueError, match="Both classes"):
+        restrict_positives_to_bursts(
+            split, bursts.with_columns(pl.lit("none").alias("segment_id"))
+        )

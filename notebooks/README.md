@@ -23,6 +23,8 @@ excluded from Git. Recordings and reusable derived datasets remain in `data/`.
   mean over tones of the squared log-amplitude change.
   `quiet_floor_squared_difference` is the default signal minus each session's
   per-tone mean over its still samples (`quiet_floor.npy` in each export).
+  Its last step writes `main_bursts.parquet` beside each default export: the
+  main motion burst of every fall segment, for burst training labels.
 - `03_training.ipynb` runs PyTorch sequence models on CPU or NVIDIA
   CUDA, with independent pilot and full-data training sections. Its final cell
   exports available checkpoints to ONNX and verifies logits with ONNX Runtime.
@@ -30,6 +32,8 @@ excluded from Git. Recordings and reusable derived datasets remain in `data/`.
   `REPRESENTATION` selects the default export or a variant and is recorded in
   the run manifest; variant models are not copied to `artifacts/model/`,
   because the live detector computes only the default signal.
+  `POSITIVE_LABELS = "burst"` keeps only training and validation fall windows
+  whose middle half holds the main burst peak; test windows are unchanged.
   `HELD_OUT_SESSION` tests on every attempt of one dataset, or of a tuple such
   as `("akmal", "continuous_non_fall")`, instead
   of a random attempt share (`hold_out_dataset`); such runs are evaluation runs

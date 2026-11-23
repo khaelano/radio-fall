@@ -205,6 +205,59 @@ def hold_out_dataset(
     return result
 
 
+def restrict_positives_to_bursts(
+    split: pl.DataFrame,
+    bursts: pl.DataFrame,
+    *,
+    splits: Sequence[str] = ("train", "validation"),
+) -> pl.DataFrame:
+    """Keep only fall windows with their attempt's burst peak in the middle half.
+
+    A fall cue spans seconds before the fall and the lying after it. Fall
+    windows of ``splits`` keep their label only when the main burst's peak
+    lies in the window's middle half, ``[centre - size / 4, centre +
+    size / 4)``; with 50 % overlap these halves tile time, so about one window
+    per fall is kept, with the fall centred. The others, and fall windows of a
+    segment without a burst, are dropped rather than relabelled. Non-fall
+    windows and windows of other splits are unchanged, so the test windows
+    stay comparable.
+
+    Args:
+        split: Window split with ``dataset``, ``segment_id``, ``start``,
+            ``stop``, ``target`` and ``split``.
+        bursts: One row per fall segment with ``dataset``, ``segment_id`` and
+            the burst ``peak`` sample index.
+        splits: Splits whose fall windows are restricted.
+
+    Returns:
+        The split without the dropped fall windows.
+
+    Raises:
+        ValueError: If a duration and split lose a class.
+    """
+    peaks = bursts.select("dataset", "segment_id", pl.col("peak").alias("burst_peak"))
+    joined = split.join(peaks, on=["dataset", "segment_id"], how="left")
+    size = pl.col("stop") - pl.col("start")
+    centre = pl.col("start") + size // 2
+    centred = (pl.col("burst_peak") >= centre - size // 4) & (
+        pl.col("burst_peak") < centre + size // 4
+    )
+    keep = (
+        (pl.col("target") == 0)
+        | ~pl.col("split").is_in(list(splits))
+        | centred.fill_null(False)
+    )
+    result = joined.filter(keep).drop("burst_peak")
+    for duration in sorted(result["duration"].unique()):
+        for label in ("train", "validation", "test"):
+            subset = result.filter(
+                (pl.col("duration") == duration) & (pl.col("split") == label)
+            )
+            if set(subset["target"].unique()) != {0, 1}:
+                raise ValueError(f"Both classes required in {duration}s {label}")
+    return result
+
+
 class SegmentStore:
     """Map segment NPY files without a second Python signal cache."""
 

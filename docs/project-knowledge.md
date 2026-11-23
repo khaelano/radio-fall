@@ -329,6 +329,11 @@ on their hardware and data, and are not reproduced here.
   AUC 0.77–0.88) and matched or exceeded FallDeFi on the same attempts.
   Over four model seeds the action-cue window AUC stayed at 0.71 or above
   (6 s: 0.80 or above), and 15 of 16 runs ranked attempts above FallDeFi.
+  A threshold chosen on the training sessions drifted on a new
+  session, mostly with how the person moves. Calibrating it on about ten
+  known non-fall movements of the new session held the false-positive rate
+  near 0.2. At that rate, the 6 s model matched FallDeFi testing on `akmal`
+  and beat it testing on `khaelano` (balanced accuracy 0.74 against 0.69).
   The fall windows reach the lying phase on the mattress, so the setup
   confound applies
   ([tone-pooling report](reports/tone-pooling-2026-11-23.md)).

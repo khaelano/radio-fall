@@ -553,6 +553,65 @@ Together with seed 42, that gives four seeds per cell (`temporal_seeds.py`,
 - **What the seeds do not change.** Two participants, one room, and the
   mattress confound.
 
+### Why the decision threshold drifts, and an installation calibration
+
+A threshold chosen on validation attempts of the training sessions missed
+its target on the held-out session (`threshold_drift.py`, all 32
+`tonepool_tcn` runs, attempt false-positive target 0.2, `k` = 1).
+
+| Median over seeds | Logit shift, test − validation: quiet / transition / fall windows | Test false-positive rate | Test recall |
+| --- | --- | --- | --- |
+| Test `akmal`, 4 s / 6 s | +0.07 / +0.63 / +1.26; +0.33 / +0.57 / +1.58 | 0.41 / 0.41 | 0.88 / 0.89 |
+| Test `akmal` + continuous | +0.21–0.28 / +0.48–0.54 / +1.14–1.25 | 0.43–0.44 | 0.93–0.95 |
+| Test `khaelano` | −0.17 to −0.41 / −1.96 to −2.29 / −3.03 to −3.44 | 0.06–0.09 | 0.34–0.43 |
+| Test `khaelano`, all continuous | −0.32 to −0.34 / −1.25 to −2.06 / −2.15 to −3.09 | 0.09–0.11 | 0.31–0.55 |
+
+- **Direction.** Testing on `akmal`, every score rose, so the threshold was
+  too low and false alarms doubled. Testing on `khaelano`, scores fell and
+  falls were missed.
+- **Scale, not offset.** Quiet windows moved by at most 0.4 logits;
+  transitions and falls moved 5–10 times more, in the same direction. The
+  model responds more strongly to one participant's movement than to the
+  other's. A still-room reference cannot correct that.
+
+`install_calibration.py` simulates a calibration that a deployment could
+perform. At installation, the person makes a few ordinary movements, which
+are known non-falls. The threshold is set so that at most 20 % of them alarm.
+In the simulation, k random non-fall attempts of the held-out session form
+the calibration set, and the scores are taken on the remaining attempts, over
+200 draws per k:
+
+| False-positive rate (target 0.2), mean over seeds | Test `akmal` | `akmal` + cont. | `khaelano` | `khaelano`, all cont. |
+| --- | --- | --- | --- | --- |
+| Validation threshold | 0.41 | 0.43–0.44 | 0.06–0.09 | 0.09–0.11 |
+| Install, k = 5 | 0.28–0.29 | 0.26 | 0.23–0.26 | 0.23–0.25 |
+| Install, k = 10 | 0.24–0.25 | 0.23 | 0.22–0.23 | 0.22–0.23 |
+| Install, k = 20 | 0.22 | 0.22 | 0.21–0.22 | 0.21–0.22 |
+
+`install_calibration_falldefi.py` applies the same procedure to FallDeFi's
+attempt scores, which are available for two holdouts, so the
+false-positive rate is matched:
+
+| k = 10–20, false-positive rate ≈ 0.22 | Test `akmal`: BA / recall | Test `khaelano`: BA / recall |
+| --- | --- | --- |
+| FallDeFi | 0.69 / 0.59 | 0.68–0.69 / 0.58–0.60 |
+| `tonepool_tcn` 4 s (4 seeds) | 0.68 / 0.58–0.61 | 0.69 / 0.60–0.61 |
+| `tonepool_tcn` 6 s (4 seeds) | 0.67–0.68 / 0.57–0.61 | 0.74 / 0.69 |
+
+The 6 s model also reached balanced accuracy 0.73–0.74 and recall 0.69–0.70
+in both continuous holdouts.
+
+- **Calibration works.** Installation calibration held the false-positive
+  rate near its target in every holdout; ten non-fall movements gave 0.22–0.25.
+- **Against FallDeFi at the same false-positive rate.** `tonepool_tcn` 6 s was
+  better in the `khaelano` holdout (about +0.05 balanced accuracy, +0.10
+  recall) and equal in the `akmal` holdout. Its higher attempt AUC on `akmal`
+  comes from other operating points.
+- **Limits.**
+  - The calibration movements come from the same day as the test attempts,
+    so how long one calibration lasts is untested.
+  - The 0.2 target is a chosen setting, not an optimum.
+
 ## Frequency features without gap filling
 
 Two further linear screens (`stft_screen.py`, `gap_screen.py`) tested
@@ -580,7 +639,8 @@ is lag-1 energy averaged over tones and receivers, with transfer AUC
    kept), a frequency view of those components, and positive labels from
    the detected main burst. Compare each against `tonepool_tcn` over
    several seeds.
-2. Calibrate the decision threshold across sessions.
+2. Test how long an installation calibration lasts (needs a second day per
+   participant), and add the calibration step to the live detector.
 3. For live use, register the `tonepool` families in the Rust detector. The
    quiet-floor variant would also need a still-room calibration step.
 4. Record non-fall activity with the mattress in place, and if it can be done
@@ -617,7 +677,9 @@ holdout runners (`tone_mean_holdouts.py` with `runs.json`,
 `hard_negative_runs.json`, `temporal_holdouts.py` with
 `temporal_runs.json`, `temporal_seed_holdouts.py` with
 `temporal_seed_runs.json`), the seed summary (`temporal_seeds.py` and its
-CSVs), the FallDeFi comparisons (`burst_vs_falldefi.py`,
+CSVs), the threshold drift and calibration (`threshold_drift.py`,
+`install_calibration.py`, `install_calibration_falldefi.py` and their CSVs),
+the FallDeFi comparisons (`burst_vs_falldefi.py`,
 `temporal_vs_falldefi.py`, `temporal_attempts.py` and their CSVs), the burst screen (`burst_screen.py`,
 `burst_features.csv`, `burst_feature_auc.csv`, `burst_model_auc.csv`,
 `burst_screen_results.txt`), the idle diagnosis (`idle_diagnosis.py`,

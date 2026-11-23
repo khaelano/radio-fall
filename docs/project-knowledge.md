@@ -262,9 +262,11 @@ on their hardware and data, and are not reproduced here.
   0.70 to 0.59. It did not reach FallDeFi's attempt score. The
   `03_training` model `tonepool` encodes each per-tone series with shared
   weights and pools over tones and receivers on the default input. Its 4 s
-  model kept window AUC 0.76–0.82 in all four holdouts. It flagged 9–39 % of
-  idle continuous windows from an unseen day and stayed below FallDeFi at
-  attempt level
+  model kept window AUC 0.76–0.82 in all four holdouts. Its max pooling made
+  it flag 9–39 % of idle continuous windows from an unseen day.
+  Generalized-mean pooling (`tonepool_gem`) or the per-session
+  `quiet_floor_squared_difference` input brought that below 5 % at 2 s and
+  4 s. All variants stayed below FallDeFi at attempt level
   ([tone-pooling report](reports/tone-pooling-2026-11-23.md)).
   Both 96 Hz and 120 Hz exports remain current; version-1 exports are retired.
   Notebooks must record dataset versions, split policy, and seeds. See
@@ -309,7 +311,8 @@ on their hardware and data, and are not reproduced here.
   participant sessions; FallDeFi's event features did best. Averaging over
   tones transferred to `khaelano` but not to `akmal`; why the direction
   matters is unresolved. The shared-weight tone-pooled encoder transferred in
-  both directions but not to idle data from an unseen day.
+  both directions; with generalized-mean pooling it also stayed quiet on idle
+  data from an unseen day (one seed).
 - How should collection separate falls from setup, for example non-fall
   activity with the mattress in place or interleaved trial order?
 - How should irregular timestamps and packet loss shape model windows?

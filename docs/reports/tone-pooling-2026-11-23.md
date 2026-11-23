@@ -8,7 +8,9 @@ A linear screen pointed to the per-tone layout. Averaging over tones removed
 almost all idle false alarms and fixed the `khaelano` holdout, but it made the
 `akmal` holdout worse. A model that encodes every tone with shared weights and
 then pools over tones ranked windows well in both directions (window AUC
-0.76–0.82 at 4 s), but it flagged up to 39 % of idle data from a new day.
+0.76–0.82 at 4 s), but it flagged up to 39 % of idle data from a new day. Its
+max pooling caused that. Generalized-mean pooling, or a per-session quiet-floor
+input, brought idle alarms below 5 % at 2 s and 4 s without losing ranking.
 Across sessions, FallDeFi still has the best attempt score.
 
 ## Screen: which representation carries the session
@@ -165,6 +167,109 @@ per-tone runs and the tone-mean runs above, on the same test attempts.
   used validation attempts from the training sessions. The mattress confound
   remains inside both sessions.
 
+### Why tone-pool flags idle data from an unseen day
+
+`idle_diagnosis.py` reran the 2 s and 4 s tone-pool models of the `akmal` +
+continuous holdout without retraining:
+
+- **Training idle reference:** `khaelano` windows centred in `preparation` or
+  `resting`.
+- **Unseen idle:** the continuous hour.
+
+| | 2 s | 4 s |
+| --- | --- | --- |
+| Continuous windows flagged | 39.5 % | 31.3 % |
+| Pooled mean replaced by its training-idle average | 41.1 % | 31.2 % |
+| Pooled max replaced by its training-idle average | 0.2 % | 0.0 % |
+| Shift of pooled mean on the unseen day (training-idle SD, median) | 0.12 | 0.05 |
+| Shift of pooled max | 1.02 | 1.15 |
+
+The max branch alone produced the idle alarms. The normalized input of most
+tones barely moved: the median shift was −0.04 SD. A minority shifted more,
+with a 90th percentile of |shift| of 0.25 SD on the continuous hour and 0.14 SD
+on `akmal`'s `preparation`/`resting` windows. Max pooling selects those tones.
+So the per-tone training normalizer and max pooling together cause the alarms.
+
+Aligning each tone's normalized input by the difference between its idle mean
+on `akmal`'s `preparation`/`resting` windows and on `khaelano`'s fixed most of
+it. This is a calibration from the protocol's quiet phases and uses no fall
+labels.
+
+| | 2 s raw → aligned | 4 s raw → aligned |
+| --- | --- | --- |
+| Continuous windows flagged | 39.5 % → 4.8 % | 31.3 % → 2.6 % |
+| `akmal` window AUC | 0.785 → 0.793 | 0.815 → 0.826 |
+| `akmal` non-fall windows flagged | 56 % → 32 % | 56 % → 36 % |
+| `akmal` fall windows flagged | 89 % → 83 % | 98 % → 95 % |
+
+The calibration windows come from the continuous hour's day, recorded about
+3 h earlier. That matches an install-time calibration but does not show that
+one calibration lasts across days. The model already flagged 5–7 % of
+`khaelano`'s own quiet windows. The alignment was applied at test time only, in
+one holdout with one seed.
+
+### Fixes: quiet-floor input and generalized-mean pooling
+
+Two fixes target the two causes:
+
+- **Quiet floor** (`02_preprocess` variant `quiet_floor_squared_difference`).
+  Each session's default `log1p(ΔA²)` has its own per receiver/tone mean
+  subtracted. The mean is taken over the session's still samples: the
+  `preparation` and `resting` phases of non-fall attempts, with gaps skipped.
+  The variant is used in training as well as testing. `continuous_non_fall`
+  has no such phases and takes `akmal`'s floor (same day). The two days'
+  floors differ by a median of 0.003 and a 90th percentile |difference| of
+  0.068.
+- **Generalized-mean pooling** (`tonepool_gem`). A power mean with p = 3
+  replaces the max over tones and receivers. Top-k and quantile pooling were
+  not used because their CUDA backward passes are not deterministic. A first
+  run produced NaN in every `tonepool_gem` model: when dropout removed all
+  four receivers of a window, the root's gradient at zero was infinite. A
+  floor of 1e-12 under the root fixed it (and is tested), and those runs were
+  deleted and repeated.
+
+Three variants ran in every holdout, with one seed, next to the earlier
+tone-pool runs: `tonepool` on the quiet-floor input, and `tonepool_gem` on the
+quiet-floor and on the default input.
+
+**Idle continuous windows flagged** (`akmal` + continuous holdout, unseen day):
+
+| Variant | 2 s | 4 s | 6 s |
+| --- | --- | --- | --- |
+| Tone-pool (max), default input | 39.5 % | 31.3 % | 9.2 % |
+| Tone-pool (max), quiet floor | 4.6 % | 2.6 % | 6.5 % |
+| GeM, default input | 2.6 % | 3.8 % | 100 %* |
+| GeM, quiet floor | 0.8 % | 0.8 % | 100 %* |
+
+\* Both 6 s GeM models of this holdout never learned. Their training loss
+stayed at 1.055, and early stopping kept epoch 2, a checkpoint that calls
+every window a fall (validation F1 0.385, the all-positive value). This is a
+failed training on `khaelano` alone, not idle behaviour.
+
+**Window AUC** (2 s / 4 s / 6 s):
+
+| Variant | `akmal` | `khaelano` | `akmal` + continuous | `khaelano`, all continuous |
+| --- | --- | --- | --- | --- |
+| Tone-pool (max), default | 0.79 / 0.82 / 0.73 | 0.72 / 0.76 / 0.67 | 0.79 / 0.82 / 0.72 | 0.71 / 0.76 / 0.65 |
+| Tone-pool (max), quiet floor | 0.79 / 0.82 / 0.73 | 0.72 / 0.77 / 0.68 | 0.79 / 0.83 / 0.75 | 0.71 / 0.77 / 0.66 |
+| GeM, default | 0.79 / 0.83 / 0.75 | 0.75 / 0.76 / 0.66 | 0.80 / 0.84 / 0.75 | 0.73 / 0.76 / 0.65 |
+| GeM, quiet floor | 0.78 / 0.82 / 0.74 | 0.75 / 0.77 / 0.67 | 0.80 / 0.84 / 0.75 | 0.73 / 0.76 / 0.66 |
+
+- **Idle alarms.** Either fix alone brought the 2 s and 4 s models below 5 %
+  of idle windows on the unseen day, and both together to 0.8 %. GeM needs no
+  calibration and no change to live preprocessing. The quiet floor needs a
+  still-room calibration.
+- **Ranking.** Neither fix cost window AUC. The changes are within ±0.03 of
+  tone-pool on default input, and 4 s stays at 0.76–0.84 in every holdout.
+- **Attempts.** At threshold 0.5 with the any-window rule, no variant reached
+  FallDeFi. The best attempt balanced accuracies were 0.64–0.65 on `akmal`
+  and `khaelano` and 0.638 on `akmal` + continuous (GeM 4 s, quiet floor),
+  against FallDeFi's 0.68–0.73. Attempt false-positive rates stayed at
+  0.33–1.00, because most non-fall attempts contain cued motion. The decision
+  rule, not idle data, now limits the attempt score.
+- **Limits.** One seed. Checkpoint selection by in-session validation F1 kept
+  degenerate checkpoints at 6 s.
+
 ## Frequency features without gap filling
 
 Two further linear screens (`stft_screen.py`, `gap_screen.py`) tested
@@ -188,12 +293,14 @@ is lag-1 energy averaged over tones and receivers, with transfer AUC
 
 ## Next steps (not yet run)
 
-1. Normalize the tone-pool input per session or with a running quiet-time
-   floor, and check whether its idle false alarms fall to the tone-mean level.
-2. Choose the threshold, and possibly the checkpoint, on a held-out session
-   rather than in-session validation.
-3. Repeat tone-pool over several seeds before comparing it with the nine-model
-   medians.
+1. Replace threshold 0.5 and the any-window attempt rule with a debounced
+   rule, and choose the threshold for a target false-positive rate. Select
+   checkpoints by validation loss or a fixed epoch count, which would avoid
+   the degenerate 6 s checkpoints.
+2. Repeat tone-pool GeM over several seeds before comparing it with FallDeFi
+   or the nine-model medians.
+3. For live use, register the `tonepool` families in the Rust detector. The
+   quiet-floor variant would also need a still-room calibration step.
 4. Record non-fall activity with the mattress in place.
 
 ## Runs and diagnostics
@@ -213,10 +320,14 @@ Tone-pool `03_training` runs (each with its `06_comparison`) are listed in
 `20261123T031715857223Z` (`khaelano`), `20261123T032030242464Z` (`akmal` +
 continuous) and `20261123T032219481778Z` (`khaelano`, `KEEP_SPLIT = ()`).
 
+Quiet-floor and GeM runs are listed in `floor_gem_runs.json` (one quiet-floor
+and one default `03_training` run plus one `06_comparison` per holdout).
+
 `diagnostics/20261123-tone-pooling/` holds the screen scripts and results
 (`level_screen*.py`, `screen_results.txt`, `stft_screen*`, `gap_screen*`), the
 holdout runners (`tone_mean_holdouts.py` with `runs.json`,
-`tonepool_holdouts.py` with `tonepool_runs.json`), and `window_auc.py` with
-`window_auc.csv`. The export is
+`tonepool_holdouts.py` with `tonepool_runs.json`, `floor_gem_holdouts.py` with
+`floor_gem_runs.json`), the idle diagnosis (`idle_diagnosis.py`,
+`idle_diagnosis.json`), and `window_auc.py` with `window_auc.csv`. The export is
 `data/processed/amplitude_sequence/120hz-tone_mean_log_ratio/` (not
 DVC-tracked; regenerate with `02_preprocess`).

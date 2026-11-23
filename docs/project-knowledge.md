@@ -326,9 +326,11 @@ on their hardware and data, and are not reproduced here.
   The `03_training` model `tonepool_tcn` adds dilated temporal convolutions
   (about 2.2 s) after GeM tone pooling. At 4–6 s it separated falls from
   transitions in both directions (action-cue window AUC 0.78–0.91, attempt
-  AUC 0.77–0.88) and matched or exceeded FallDeFi on the same attempts. One
-  seed; the fall windows reach the lying phase on the mattress, so the
-  setup confound applies
+  AUC 0.77–0.88) and matched or exceeded FallDeFi on the same attempts.
+  Over four model seeds the action-cue window AUC stayed at 0.71 or above
+  (6 s: 0.80 or above), and 15 of 16 runs ranked attempts above FallDeFi.
+  The fall windows reach the lying phase on the mattress, so the setup
+  confound applies
   ([tone-pooling report](reports/tone-pooling-2026-11-23.md)).
 - How should collection separate falls from setup, for example non-fall
   activity with the mattress in place or interleaved trial order?

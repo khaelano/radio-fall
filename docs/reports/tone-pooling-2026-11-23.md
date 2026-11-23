@@ -522,6 +522,37 @@ runs are listed in `temporal_runs.json`.
   - Non-fall recordings with the mattress in place are needed to tell the
     two apart.
 
+### Seed repeats
+
+`tonepool_tcn` was retrained with model seeds 43–45 on the four holdouts at
+4 s and 6 s, with the attempt split unchanged (`temporal_seed_holdouts.py`).
+Together with seed 42, that gives four seeds per cell (`temporal_seeds.py`,
+`temporal_seeds.csv`, `temporal_seeds_summary.csv`).
+
+| Mean ± SD (lowest), 4 seeds | Action-cue window AUC | Attempt AUC |
+| --- | --- | --- |
+| `akmal`, 4 s | 0.89 ± 0.01 (0.89) | 0.80 ± 0.03 (0.77) |
+| `akmal`, 6 s | 0.85 ± 0.06 (0.80) | 0.81 ± 0.06 (0.75) |
+| `khaelano`, 4 s | 0.79 ± 0.03 (0.75) | 0.80 ± 0.03 (0.76) |
+| `khaelano`, 6 s | 0.82 ± 0.01 (0.82) | 0.84 ± 0.01 (0.83) |
+| `akmal` + continuous, 4 s | 0.89 ± 0.02 (0.86) | 0.82 ± 0.01 (0.81) |
+| `akmal` + continuous, 6 s | 0.89 ± 0.04 (0.86) | 0.85 ± 0.05 (0.81) |
+| `khaelano`, all continuous, 4 s | 0.78 ± 0.05 (0.71) | 0.78 ± 0.05 (0.72) |
+| `khaelano`, all continuous, 6 s | 0.83 ± 0.02 (0.81) | 0.84 ± 0.02 (0.82) |
+
+- **The gain holds over seeds.** Every seed separated falls from transitions
+  in every holdout at 0.71 or above (6 s: 0.80 or above), against 0.51–0.71
+  for the GeM model.
+- **Against FallDeFi.** In the two holdouts with FallDeFi's attempt AUC (0.77
+  testing on `akmal`, 0.70 on `khaelano`), 15 of the 16 seed runs ranked
+  attempts higher. The exception was seed 43 at 6 s on `akmal` (0.75).
+- **Idle data.** On the unseen idle day, the highest share of continuous
+  windows flagged was 2.0 %.
+- **Window length.** 6 s spread less than 4 s in the `khaelano` holdouts,
+  and more on `akmal`.
+- **What the seeds do not change.** Two participants, one room, and the
+  mattress confound.
+
 ## Frequency features without gap filling
 
 Two further linear screens (`stft_screen.py`, `gap_screen.py`) tested
@@ -545,12 +576,11 @@ is lag-1 energy averaged over tones and receivers, with transfer AUC
 
 ## Next steps (not yet run)
 
-1. Repeat `tonepool_tcn` over several seeds (3–5) on the four holdouts
-   before building on it.
-2. Phase 2–4 of the model plan: per-receiver PCA within the window (gaps
+1. Phase 2–4 of the model plan: per-receiver PCA within the window (gaps
    kept), a frequency view of those components, and positive labels from
-   the detected main burst.
-3. Calibrate the decision threshold across sessions.
+   the detected main burst. Compare each against `tonepool_tcn` over
+   several seeds.
+2. Calibrate the decision threshold across sessions.
 3. For live use, register the `tonepool` families in the Rust detector. The
    quiet-floor variant would also need a still-room calibration step.
 4. Record non-fall activity with the mattress in place, and if it can be done
@@ -585,7 +615,9 @@ holdout runners (`tone_mean_holdouts.py` with `runs.json`,
 `floor_gem_runs.json`, `decision_rule_holdouts.py` with
 `decision_rule_runs.json`, `hard_negative_holdouts.py` with
 `hard_negative_runs.json`, `temporal_holdouts.py` with
-`temporal_runs.json`), the FallDeFi comparisons (`burst_vs_falldefi.py`,
+`temporal_runs.json`, `temporal_seed_holdouts.py` with
+`temporal_seed_runs.json`), the seed summary (`temporal_seeds.py` and its
+CSVs), the FallDeFi comparisons (`burst_vs_falldefi.py`,
 `temporal_vs_falldefi.py`, `temporal_attempts.py` and their CSVs), the burst screen (`burst_screen.py`,
 `burst_features.csv`, `burst_feature_auc.csv`, `burst_model_auc.csv`,
 `burst_screen_results.txt`), the idle diagnosis (`idle_diagnosis.py`,

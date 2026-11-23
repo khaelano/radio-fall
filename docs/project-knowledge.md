@@ -338,7 +338,10 @@ on their hardware and data, and are not reproduced here.
   (`POSITIVE_LABELS = "burst"`) raised the 4 s model's attempt AUC by
   0.05–0.07 in three of four holdouts. Its calibrated recall became
   0.63–0.73 at a false-positive rate of about 0.22; at 6 s the labels gave no
-  gain.
+  gain. A multi-lag frequency view per tone (`tonepool_tcn_lags`) helped
+  only when trained on `akmal` (attempt AUC 0.88–0.90 on `khaelano`). Trained
+  on `khaelano` it lost 0.17–0.21, so the 4 s burst-label `tonepool_tcn`
+  stays the most consistent model.
   The fall windows reach the lying phase on the mattress, so the setup
   confound applies
   ([tone-pooling report](reports/tone-pooling-2026-11-23.md)).

@@ -700,6 +700,67 @@ positives to the fall itself:
   - A 4 s window centred on the burst still reaches 2 s into the lying
     phase, so the mattress confound is narrowed, not removed.
 
+### A multi-lag frequency view (phase 3)
+
+FallDeFi's only transferring feature was 10–30 Hz spectral entropy, while our
+input told the model only how much each tone changed between consecutive
+samples. Phase 3 gives each tone a coarse frequency view without gap
+filling:
+
+- **Export.** The variant `lag_stack_squared_difference` holds
+  `log1p((A[t] − A[t−k])²)` for k = 1, 2, 4 and 8 per tone
+  (`transforms.lagged_squared_difference`), stacked lag-major as
+  `[time, 4, 980]`. A change over k samples responds most near 120 / (2k)
+  Hz: about 60, 30, 15 and 7.5 Hz. Its lag-1 block equals the default
+  signal.
+- **Model.** `tonepool_tcn_lags` is `tonepool_tcn` with 9 encoder channels
+  per tone: 4 lag energies, 4 validity flags and the receiver's presence.
+- **Runs.** 4 s with burst labels, seeds 42–45, on the four holdouts
+  (`lags_seed_holdouts.py`, `compare_lags.py`), against the burst-label
+  `tonepool_tcn`.
+
+| Mean over 4 seeds, lags / `tonepool_tcn` | Attempt AUC | Calibrated recall (FPR ≈ 0.22) | Seeds with higher attempt AUC |
+| --- | --- | --- | --- |
+| Test `khaelano` | 0.88 / 0.84 | 0.76 / 0.67 | 3 of 4 |
+| Test `khaelano`, all continuous | 0.90 / 0.84 | 0.81 / 0.69 | 4 of 4 |
+| Test `akmal` | 0.68 / 0.85 | 0.42 / 0.73 | 0 of 4 |
+| Test `akmal` + continuous | 0.60 / 0.81 | 0.32 / 0.64 | 0 of 4 |
+
+- **Trained on `akmal`, tested on `khaelano`.** The lag model reached the
+  highest scores so far: attempt AUC 0.88–0.90 and calibrated balanced
+  accuracy 0.78–0.80.
+- **Trained on `khaelano` alone, tested on `akmal`.** It lost 0.17–0.21
+  attempt AUC, with every seed worse. Idle alarms stayed at most 2 %.
+- **Possible explanation (untested).** The change rates may carry how one
+  participant moves; the threshold drift showed that the model responds more
+  strongly to `akmal`'s movement. With two participants, more data might
+  remove the direction dependence, or might not.
+- **Decision.** The model and export code stay. The 19 GB export was
+  deleted and can be regenerated with `02_preprocess`. The most consistent
+  configuration across both directions remains `tonepool_tcn` at 4 s with
+  burst labels.
+- **A side note on numbers.** The calibrated scores of the burst-label runs
+  differ slightly from the phase-4 table (recall 0.725 against 0.734 on
+  `akmal`), because the scripts draw the random calibration sets in a
+  different order.
+
+**Data feeding.** The lag input is four times wider, and its training
+windows fit neither the 4 GiB GPU cache nor the RAM window cache, so batches
+streamed from disk. Epochs took about 23 s, 20 s of which went to waiting for
+data, and GPU use came in spikes. Another process held 6 GB of the 12 GB GPU,
+so a larger GPU cache could not help. Two changes fixed it:
+
+- **RAM segment cache.** When the GPU cache does not fit, `03_training` now
+  keeps each covered segment once in RAM, already normalized
+  (`prepare_device_dataset` on the CPU). The tone-pool configuration allows
+  16 GiB, capped at 60 % of available RAM.
+- **Background assembly.** `device_cache.training_batches` builds the next
+  batch from RAM in a producer thread.
+
+Epochs dropped to 3.3–9.7 s, with data waiting 0.5–1.3 s. Values and batch
+order match streaming (the device-cache parity test covers this path), so the
+11 runs trained before the change and the 5 after are comparable.
+
 ## Frequency features without gap filling
 
 Two further linear screens (`stft_screen.py`, `gap_screen.py`) tested
@@ -723,9 +784,9 @@ is lag-1 energy averaged over tones and receivers, with transfer AUC
 
 ## Next steps (not yet run)
 
-1. Phase 3 of the model plan on `tonepool_tcn` with 4 s burst labels: a
-   frequency view of the pooled signal, compared over several seeds. Phase 2,
-   PCA inside the model, was dropped; phase 4, burst labels, helped at 4 s.
+1. With more participants, retest the multi-lag model (phase 3), whose
+   gain depended on the training participant. Phase 2 (PCA inside the model)
+   was dropped. Phase 4 (burst labels) helped at 4 s.
 2. Test how long an installation calibration lasts (needs a second day per
    participant), and add the calibration step to the live detector.
 3. For live use, register the `tonepool` families in the Rust detector. The
@@ -768,7 +829,9 @@ CSVs), the threshold drift and calibration (`threshold_drift.py`,
 `install_calibration.py`, `install_calibration_falldefi.py` and their CSVs),
 the dropped PCA model (`pca_seed_holdouts.py` with `pca_seed_runs.json`,
 `compare_seeds.py` and its CSVs), burst labels (`burst_seed_holdouts.py` with
-`burst_seed_runs.json`, `compare_labels.py` and its CSVs),
+`burst_seed_runs.json`, `compare_labels.py` and its CSVs), the multi-lag model
+(`lags_seed_holdouts.py` with `lags_seed_runs.json`, `compare_lags.py` and
+its CSVs),
 the FallDeFi comparisons (`burst_vs_falldefi.py`,
 `temporal_vs_falldefi.py`, `temporal_attempts.py` and their CSVs), the burst screen (`burst_screen.py`,
 `burst_features.csv`, `burst_feature_auc.csv`, `burst_model_auc.csv`,

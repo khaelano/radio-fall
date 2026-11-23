@@ -44,6 +44,31 @@ def test_evaluate_balanced_log_loss_weights_classes_equally(training_notebook):
     assert result["balanced_log_loss"] == pytest.approx(np.log(2))
 
 
+def test_evaluate_action_loss_ignores_quiet_non_fall_windows(training_notebook):
+    rows = [
+        {"target": 1, "center_phase": "action", "activity_label": "sit_to_fall"},
+        {"target": 0, "center_phase": "action", "activity_label": "sit_to_stand"},
+        {"target": 0, "center_phase": "preparation", "activity_label": "sit_to_stand"},
+    ]
+
+    class Dataset:
+        def batches(self, batch_size, seed=None):
+            # Logits 0, 0 and -10: the quiet window is confidently non-fall.
+            yield np.array([[0.0], [0.0], [-10.0]], dtype=np.float32), rows
+
+    class Identity(torch.nn.Module):
+        def forward(self, x):
+            return x[:, 0]
+
+    result = training_notebook["_evaluate"](
+        Identity(), Dataset(), 3, torch.device("cpu")
+    )
+    assert result["action_balanced_log_loss"] == pytest.approx(np.log(2))
+    assert result["balanced_log_loss"] < result["action_balanced_log_loss"]
+    assert training_notebook["_is_hard_negative"](rows[1])
+    assert not training_notebook["_is_hard_negative"](rows[2])
+
+
 def test_requested_cuda_fails_when_unavailable(
     tmp_path, monkeypatch, training_notebook
 ):

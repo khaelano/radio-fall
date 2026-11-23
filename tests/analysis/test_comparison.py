@@ -13,6 +13,7 @@ from fall_detection.analysis.comparison import (
     latest_run,
     latest_split_run,
     latest_training_run,
+    phase_window_auc,
     split_assignment,
     split_labels,
     split_sessions,
@@ -218,3 +219,33 @@ def test_choose_threshold_takes_lowest_threshold_within_target():
     # The debounced test rule agrees with the attempt scores.
     predicted = debounce(rows, threshold=strict["threshold"], consecutive=2)
     assert {row["group"] for row in predicted if row["prediction"]} == {"s::fall"}
+
+
+def test_phase_window_auc_drops_still_windows():
+    split = pl.DataFrame(
+        {
+            "group": ["s::f", "s::t", "s::t"],
+            "segment_id": ["0", "0", "0"],
+            "start": [0, 0, 4],
+            "duration": [2, 2, 2],
+            "center_phase": ["action", "action", "preparation"],
+        }
+    )
+    predictions = pl.DataFrame(
+        {
+            "dataset": ["d", "d", "d", "continuous_non_fall"],
+            "group": ["s::f", "s::t", "s::t", "c::x"],
+            "segment_id": ["0", "0", "0", "0"],
+            "start": [0, 0, 4, 0],
+            "stop": [8, 8, 12, 8],
+            "target": [1, 0, 0, 0],
+            "probability": [0.6, 0.7, 0.1, 0.9],
+        }
+    )
+    result = phase_window_auc(predictions, split, duration=2)
+    # The still window makes the fall look separable; the transition does not.
+    assert result == {
+        "window_auc": 0.5,
+        "action_window_auc": 0.0,
+        "action_windows": 2,
+    }

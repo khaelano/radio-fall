@@ -22,6 +22,7 @@ from typing import Any
 
 import numpy as np
 import polars as pl
+from sklearn.metrics import roc_auc_score
 
 from .baselines._grouped_holdout import binary_metrics
 
@@ -453,4 +454,54 @@ def choose_threshold(
         "threshold": float(threshold),
         "false_positive_rate": float(flagged[target == 0].mean()),
         "recall": float(flagged[target == 1].mean()),
+    }
+
+
+def phase_window_auc(
+    predictions: pl.DataFrame, split: pl.DataFrame, *, duration: int
+) -> dict[str, float | int | None]:
+    """Window AUC on cued attempts, over all windows and action-cue windows.
+
+    Non-fall attempts keep their still ``preparation`` and ``resting``
+    windows, which a motion detector separates from falls easily. Windows
+    centred in the action cue leave falls against posture transitions.
+    Continuous recordings are excluded.
+
+    Args:
+        predictions: Test windows with ``dataset``, ``group``, ``start``,
+            ``stop``, ``target``, ``probability`` and, in newer runs,
+            ``segment_id``.
+        split: The run's ``window_split.parquet`` with ``center_phase``.
+        duration: Window length of these predictions in seconds.
+
+    Returns:
+        ``window_auc``, ``action_window_auc`` and the number of action-cue
+        windows; an AUC is None when a class is missing. Without
+        ``segment_id``, windows are matched on attempt, start and stop, and
+        windows whose match is ambiguous are left out of the action subset.
+    """
+    cued = predictions.filter(pl.col("dataset") != "continuous_non_fall")
+    phases = split.filter(pl.col("duration") == duration)
+    keys = (
+        ["group", "segment_id", "start"]
+        if "segment_id" in cued.columns
+        else ["group", "start", "stop"]
+    )
+    unique = phases.group_by(keys).agg(
+        pl.col("center_phase").first(), pl.len().alias("matches")
+    )
+    phased = cued.join(
+        unique.filter(pl.col("matches") == 1).drop("matches"), on=keys, how="left"
+    )
+    action = phased.filter(pl.col("center_phase") == "action")
+
+    def auc(frame: pl.DataFrame) -> float | None:
+        if frame["target"].n_unique() < 2:
+            return None
+        return float(roc_auc_score(frame["target"], frame["probability"]))
+
+    return {
+        "window_auc": auc(cued),
+        "action_window_auc": auc(action),
+        "action_windows": len(action),
     }

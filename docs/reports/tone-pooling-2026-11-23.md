@@ -338,6 +338,100 @@ best input depends on the direction: tone mean on `khaelano` (median 0.68 and
 separates them in both directions. A threshold cannot fix a ranking this
 weak, which explains the step-2 result.
 
+## Training for falls against transitions
+
+`03_training` gained two options:
+
+- **`hard_negative_weight`** multiplies the training loss of non-fall windows
+  centred in a cued transition's action cue. Quiet windows and continuous data
+  keep weight 1.
+- **`checkpoint_metric = "action_balanced_log_loss"`** selects the checkpoint
+  on validation windows of the action cue.
+
+`06_comparison` now reports window AUC on all windows and on action-cue
+windows (`window_auc.csv`, from `comparison.phase_window_auc`). Three
+configurations ran on the four holdouts (`hard_negative_holdouts.py`), all
+with action-cue checkpoints. Weight 5 was set in advance, not tuned.
+
+| Median action-cue window AUC | `akmal` | `khaelano` | `akmal` + continuous | `khaelano`, all continuous |
+| --- | --- | --- | --- | --- |
+| Tone-pool GeM, balanced-loss checkpoint (step 2) | 0.65 | 0.53 | 0.69 | 0.53 |
+| A: GeM, weight 1 | 0.56 | 0.53 | 0.70 | 0.53 |
+| B: GeM, weight 5 | 0.68 | 0.52 | 0.29 | 0.50 |
+| C: CNN/LSTM/GRU on tone mean, weight 5 | 0.50 | 0.55 | 0.48 | 0.57 |
+| Tone mean (earlier, 9 models) | 0.50 | 0.68 | 0.52 | 0.70 |
+
+- **Action-cue checkpoints.** They did not help. On `akmal` the median fell
+  from 0.65 to 0.56, in a run that differs from step 2 only in which epoch was
+  kept. Selection on the small action-cue validation set is noisy.
+- **Weight 5.** It destabilized training. Trained on `khaelano` alone, the B
+  models ranked `akmal` windows backwards (window AUC 0.17–0.22). At 0.5,
+  many B and C models predicted no falls at all.
+- **One direction only.** The best single model, tone-mean CNN 4 s with
+  weight 5, reached 0.80 on `khaelano` and 0.45 on `akmal`. The better input
+  depends on which session is trained on. With two sessions and one seed,
+  such direction effects cannot be separated from noise.
+
+## Burst features
+
+`burst_screen.py` asked whether hand-made descriptions of a motion burst
+separate falls from transitions. Each unit is one cued attempt of `akmal` (87
+falls, 144 transitions) or `khaelano` (88, 144), from the staged
+Hampel-filtered amplitude with gaps kept as NaN:
+
+- **Envelope.** The envelope `m(t)` is `log1p(1000 ·` mean over present tones
+  and receivers of `(Δ ln A)²)`, smoothed by a 0.125 s running median.
+- **Floor and burst.** The quiet floor is the 20th percentile of `m` during
+  `preparation`. The main burst is the peak of `m` from 0.5 s before to 1 s
+  after the action cue.
+- **Envelope features.** Eleven features of that burst.
+- **Spectral features.** A per-tone Lomb–Scargle spectrum over the burst, at
+  least 1 s and at most 2 s. Each tone's spectrum is normalized and the
+  results are averaged. It is computed with gaps kept and, for comparison,
+  after linear interpolation.
+
+| Feature (AUC, fall positive) | `akmal` | `khaelano` |
+| --- | --- | --- |
+| Peak prominence above the floor | 0.60 | 0.78 |
+| Burst duration above half prominence | 0.64 | 0.72 |
+| Post-burst level (1–3 s after) ÷ prominence | 0.31 | 0.41 |
+| Posture displacement (per-tone change of mean `ln A`, 1 s before vs after) | 0.63 | 0.63 |
+| Receiver agreement (share of receivers peaking within ±0.3 s) | 0.61 | 0.61 |
+| Stop ratio (0.5 s after ÷ before the peak) | 0.49 | 0.51 |
+| Asymmetry (decay ÷ rise time) | 0.50 | 0.51 |
+| Steepest drop after the peak ÷ prominence | 0.61 | 0.68 |
+| Lag-1 ÷ lag-8 change energy | 0.61 | 0.37 |
+| Spectral, gaps kept: power above 10 Hz / centroid | 0.57 / 0.58 | 0.61 / 0.58 |
+| Spectral, gaps kept: entropy 10–30 Hz | 0.54 | 0.49 |
+
+Logistic regression (balanced classes) trained on one session and tested on
+the other:
+
+| Feature set | → `akmal` | → `khaelano` | Within (5-fold) `akmal` / `khaelano` |
+| --- | --- | --- | --- |
+| Envelope (11) | 0.62 | 0.62 | 0.73 / 0.75 |
+| Spectral, gaps kept (4) | 0.54 | 0.56 | 0.48 / 0.70 |
+| Spectral, interpolated (4) | 0.54 | 0.58 | 0.54 / 0.69 |
+| Envelope + spectral, gaps kept (15) | 0.64 | 0.66 | 0.72 / 0.82 |
+| Duration + entropies 1–10 and 10–30 Hz (3) | 0.64 | 0.72 | 0.61 / 0.76 |
+
+- **Both directions.** These attempt-level features transferred at 0.62–0.72
+  in both directions. The sequence models reached attempt AUC 0.50–0.67, each
+  in one direction.
+- **No sudden stop.** The stop features did not differ (stop ratio,
+  asymmetry), or pointed the other way (steepest drop relative to
+  prominence). Instead, falls were larger and longer bursts, followed by a
+  relatively deeper quiet. They moved the body further from its earlier
+  position and were seen by more receivers at once. All falls landed on a
+  mattress, which may soften the end of a fall, so the stop features remain
+  untested for hard landings.
+- **Spectral features.** They added little. Keeping gaps cost nothing
+  compared with interpolation. FallDeFi's 10–30 Hz entropy did not separate
+  these bursts.
+- **Uncertainty.** With about 230 attempts per session, an AUC has a standard
+  error of about 0.035. Differences below about 0.05 between rows are not
+  reliable.
+
 ## Frequency features without gap filling
 
 Two further linear screens (`stft_screen.py`, `gap_screen.py`) tested
@@ -361,15 +455,14 @@ is lag-1 energy averaged over tones and receivers, with transfer AUC
 
 ## Next steps (not yet run)
 
-1. Train for falls against transitions, not motion against stillness. For
-   example, weight or keep only action-cue windows of non-fall attempts in
-   training, and select checkpoints on action-cue windows.
-2. Report action-cue window AUC next to window AUC in `06_comparison`.
-3. Repeat over several seeds before comparing models whose differences are
+1. Compare the burst features with FallDeFi on the same attempts, and
+   combine them with FallDeFi's event features in one small model.
+2. Repeat over several seeds before comparing models whose differences are
    below about 0.05.
-4. For live use, register the `tonepool` families in the Rust detector. The
+3. For live use, register the `tonepool` families in the Rust detector. The
    quiet-floor variant would also need a still-room calibration step.
-4. Record non-fall activity with the mattress in place.
+4. Record non-fall activity with the mattress in place, and if it can be done
+   safely, some falls onto a harder surface.
 
 ## Runs and diagnostics
 
@@ -398,7 +491,10 @@ are listed in `decision_rule_runs.json`.
 holdout runners (`tone_mean_holdouts.py` with `runs.json`,
 `tonepool_holdouts.py` with `tonepool_runs.json`, `floor_gem_holdouts.py` with
 `floor_gem_runs.json`, `decision_rule_holdouts.py` with
-`decision_rule_runs.json`), the idle diagnosis (`idle_diagnosis.py`,
+`decision_rule_runs.json`, `hard_negative_holdouts.py` with
+`hard_negative_runs.json`), the burst screen (`burst_screen.py`,
+`burst_features.csv`, `burst_feature_auc.csv`, `burst_model_auc.csv`,
+`burst_screen_results.txt`), the idle diagnosis (`idle_diagnosis.py`,
 `idle_diagnosis.json`), `attempt_span.py` with `attempt_span.csv`, and
 `window_auc.py` with `window_auc.csv` (window and action-cue window AUC and
 idle flags for every model). The export is

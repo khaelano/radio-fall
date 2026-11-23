@@ -317,7 +317,12 @@ on their hardware and data, and are not reproduced here.
   consistently in both directions and, with generalized-mean pooling, stayed
   quiet on idle data from an unseen day. It still did not separate falls from
   posture transitions on `khaelano` (action-cue window AUC about 0.53). A
-  validation-chosen threshold could not make up for that (one seed).
+  validation-chosen threshold could not make up for that, and neither did
+  weighting transition windows in training (one seed). Attempt-level burst
+  features transferred in both directions: logistic regression on burst
+  prominence, duration, post-burst quiet, posture displacement and receiver
+  agreement reached 0.62–0.72. A sudden stop did not distinguish falls in
+  these mattress-only recordings.
 - How should collection separate falls from setup, for example non-fall
   activity with the mattress in place or interleaved trial order?
 - How should irregular timestamps and packet loss shape model windows?

@@ -29,7 +29,10 @@ excluded from Git. Recordings and reusable derived datasets remain in `data/`.
   `HELD_OUT_SESSION` tests on every attempt of one dataset, or of a tuple such
   as `("akmal", "continuous_non_fall")`, instead
   of a random attempt share (`hold_out_dataset`); such runs are evaluation runs
-  and are not copied to `artifacts/model/` either. Prefer it for comparisons:
+  and are not copied to `artifacts/model/` either. Datasets in `KEEP_SPLIT`
+  (default `continuous_non_fall`) keep their random split in a holdout;
+  `KEEP_SPLIT = ()` moves their test attempts into training. 04–06 select
+  the 03 run by both settings. Prefer it for comparisons:
   random attempt splits are confounded by the equipment-ordered protocol
   ([report](../docs/reports/generalization-2026-11-22.md)).
 - `04_wifall.ipynb` and `05_falldefi.ipynb` run the WiFall and FallDeFi
@@ -38,7 +41,7 @@ excluded from Git. Recordings and reusable derived datasets remain in `data/`.
   are the sequence models' test attempts.
 - `06_comparison.ipynb` collects the newest default-representation 03 run for
   its `HELD_OUT_SESSION` and the newest 04 and 05 runs fitted on that run's
-  split (matched by split hash; set the same `HELD_OUT_SESSION` in 03–06), and scores every approach on
+  split (matched by split hash; set the same `HELD_OUT_SESSION` and `KEEP_SPLIT` in 03–06), and scores every approach on
   its own unit and per attempt (an attempt is predicted a fall when any of its
   units is). `EXTRA_TRAINING_RUNS` adds sequence runs on the same windows and
   attempts, such as a representation variant.

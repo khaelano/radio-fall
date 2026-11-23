@@ -23,6 +23,9 @@ from .baselines._grouped_holdout import binary_metrics
 DEFAULT_REPRESENTATION = "log1p_squared_difference"
 """Sequence signal the live detector computes; ``03_training`` runs default to it."""
 
+DEFAULT_KEEP_SPLIT = ("continuous_non_fall",)
+"""Datasets that keep their random split in a ``03_training`` session holdout."""
+
 SEQUENCE_GROUP_SEPARATOR = "::"
 """Separator between session and attempt in the sequence export's ``group``."""
 
@@ -129,12 +132,13 @@ def latest_training_run(
     *,
     representation: str = DEFAULT_REPRESENTATION,
     held_out_session: str | Sequence[str] | None = None,
+    keep_split: Sequence[str] = DEFAULT_KEEP_SPLIT,
 ) -> Path:
     """Return the newest ``03_training`` run of one representation and split.
 
-    Runs recorded before ``03_training`` stored these settings have neither in
-    their manifest; they count as the default representation and a random
-    attempt split.
+    Runs recorded before ``03_training`` stored these settings lack them in
+    their manifest; they count as the default representation, a random
+    attempt split and, for a holdout, :data:`DEFAULT_KEEP_SPLIT`.
 
     Args:
         directory: ``artifacts/notebooks/03_training``.
@@ -142,6 +146,8 @@ def latest_training_run(
         representation: Sequence signal the run must have been trained on.
         held_out_session: Dataset or datasets held out entirely (order
             ignored), or None for the random attempt split.
+        keep_split: Datasets that kept their random split in a holdout; held-out
+            datasets are dropped from it, and it is ignored without a holdout.
 
     Returns:
         The newest qualifying run directory.
@@ -155,18 +161,25 @@ def latest_training_run(
         if not (path / required).exists() or not manifest_path.is_file():
             return False
         manifest = json.loads(manifest_path.read_text())
-        return manifest.get(
-            "representation", DEFAULT_REPRESENTATION
-        ) == representation and _held_out_key(
-            manifest.get("held_out_session")
-        ) == _held_out_key(held_out_session)
+        held_out = _held_out_key(manifest.get("held_out_session"))
+        kept = manifest.get("keep_split")
+        return (
+            manifest.get("representation", DEFAULT_REPRESENTATION) == representation
+            and held_out == wanted_held_out
+            and _kept_key(held_out, DEFAULT_KEEP_SPLIT if kept is None else kept)
+            == wanted_kept
+        )
+
+    wanted_held_out = _held_out_key(held_out_session)
+    wanted_kept = _kept_key(wanted_held_out, keep_split)
 
     runs = sorted(
         path for path in directory.glob("*") if path.is_dir() and matches(path)
     )
     if not runs:
-        key = _held_out_key(held_out_session)
-        split = "+".join(key) if key else "random-split"
+        split = "+".join(wanted_held_out) if wanted_held_out else "random-split"
+        if wanted_kept:
+            split += f" (keeping {'+'.join(wanted_kept)})"
         raise FileNotFoundError(
             f"No {representation} {split} run under {directory} contains {required}"
         )
@@ -178,6 +191,13 @@ def _held_out_key(value: str | Sequence[str] | None) -> tuple[str, ...]:
     if value is None:
         return ()
     return (value,) if isinstance(value, str) else tuple(sorted(value))
+
+
+def _kept_key(held_out: tuple[str, ...], keep_split: Sequence[str]) -> tuple[str, ...]:
+    """Return the datasets that effectively kept their split in a holdout."""
+    if not held_out:
+        return ()
+    return tuple(sorted(name for name in keep_split if name not in held_out))
 
 
 def latest_split_run(directory: Path, split_sha256: str) -> Path:

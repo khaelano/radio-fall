@@ -110,6 +110,29 @@ def test_latest_training_run_skips_other_representations(tmp_path):
     )
 
 
+def test_latest_training_run_separates_kept_splits(tmp_path):
+    for name, manifest in (
+        ("20261101T000000Z", {"held_out_session": "khaelano"}),
+        ("20261102T000000Z", {"held_out_session": "khaelano", "keep_split": []}),
+        ("20261103T000000Z", {"held_out_session": None, "keep_split": None}),
+    ):
+        (tmp_path / name / "full").mkdir(parents=True)
+        (tmp_path / name / "manifest.json").write_text(json.dumps(manifest))
+    assert (
+        latest_training_run(tmp_path, "full", held_out_session="khaelano").name
+        == "20261101T000000Z"
+    )
+    assert (
+        latest_training_run(
+            tmp_path, "full", held_out_session="khaelano", keep_split=()
+        ).name
+        == "20261102T000000Z"
+    )
+    assert latest_training_run(tmp_path, "full", keep_split=()).name == (
+        "20261103T000000Z"
+    )
+
+
 def test_latest_split_run_selects_by_split_hash(tmp_path):
     for name, digest in (
         ("20261101T000000Z", "a" * 64),

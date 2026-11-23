@@ -643,6 +643,63 @@ In all 32 paired seed runs, PCA had the lower attempt AUC, by 0.17–0.43.
   its ONNX skip were removed from `03_training` and `02_preprocess`. The
   executed notebooks in the run directories keep the code.
 
+### Positive labels from the main burst (phase 4)
+
+A fall attempt's cue spans seconds before the fall and the lying after it,
+and every window centred in it was a training positive. Phase 4 narrows the
+positives to the fall itself:
+
+- **Locating the burst.** `analysis/sequence/bursts.py` finds each fall
+  segment's main burst: the peak of the gap-tolerant motion envelope from
+  0.5 s before to 1 s after the action cue. `02_preprocess` writes it to
+  `main_bursts.parquet`. Every fall segment had one (87 of 87 and 88 of 88);
+  the peak came a median 1.9–2.3 s after the cue started.
+- **Why the peak, not the extent.** The half-prominence extent was short, a
+  median of 0.22–0.24 s (an impact spike). Requiring a window's centre to lie
+  inside it would have kept 21 of 175 falls at 6 s.
+- **The label rule.** `training_data.restrict_positives_to_bursts` keeps a
+  training or validation fall window only when the burst peak lies in the
+  window's middle half. With 50 % overlap these halves tile time, so about
+  one window per fall is kept, with the fall centred: 157–168 of 175 falls,
+  and half of the earlier positives. The other fall windows are dropped, not
+  relabelled.
+- **Unchanged.** Test windows keep the cue rule, so results compare directly.
+- **The runs.** `tonepool_tcn` ran with `POSITIVE_LABELS = "burst"`, seeds
+  42–45, on the four holdouts at 4 s and 6 s (`burst_seed_holdouts.py`,
+  `compare_labels.py`).
+
+| Mean over 4 seeds, burst / cue labels | Attempt AUC | Calibrated BA (FPR ≈ 0.22) | Calibrated recall |
+| --- | --- | --- | --- |
+| `akmal`, 4 s | 0.85 / 0.80 | 0.75 / 0.68 | 0.73 / 0.59 |
+| `akmal`, 6 s | 0.81 / 0.81 | 0.68 / 0.68 | 0.61 / 0.61 |
+| `khaelano`, 4 s | 0.84 / 0.80 | 0.73 / 0.69 | 0.68 / 0.62 |
+| `khaelano`, 6 s | 0.82 / 0.84 | 0.71 / 0.74 | 0.65 / 0.70 |
+| `akmal` + continuous, 4 s | 0.81 / 0.82 | 0.70 / 0.70 | 0.63 / 0.64 |
+| `akmal` + continuous, 6 s | 0.81 / 0.85 | 0.69 / 0.74 | 0.62 / 0.72 |
+| `khaelano`, all continuous, 4 s | 0.84 / 0.78 | 0.74 / 0.67 | 0.68 / 0.57 |
+| `khaelano`, all continuous, 6 s | 0.83 / 0.84 | 0.73 / 0.74 | 0.68 / 0.69 |
+
+- **4 s.** Burst labels raised attempt AUC by 0.05–0.07 in three holdouts
+  (higher in 3, 4 and 4 of the 4 seeds) and calibrated recall by 0.07–0.14.
+  In the `akmal` + continuous holdout they changed nothing (−0.01).
+- **6 s.** They gave no gain, and slightly less in three holdouts (attempt
+  AUC −0.01 to −0.04; higher in only 1–2 of the 4 seeds).
+- **Action-cue window AUC.** It fell slightly (−0.01 to −0.08 at 4 s). The
+  model now responds most to the window centred on the fall rather than to
+  every window of the cue, which helps the attempt score but not the
+  window-level ranking.
+- **Idle data.** At most 0.7 % of the unseen day's continuous windows were
+  flagged.
+- **Best configuration.** `tonepool_tcn` at 4 s with burst labels. Calibrated
+  recall was 0.63–0.73 at a false-positive rate of about 0.22, against
+  FallDeFi's 0.58–0.60 at the same rate in the two holdouts with its scores.
+  The 6 s model with cue labels is equivalent in the `khaelano` holdouts.
+- **Limits.**
+  - The burst search is bounded by the cue, so this is an offline labelling
+    aid.
+  - A 4 s window centred on the burst still reaches 2 s into the lying
+    phase, so the mattress confound is narrowed, not removed.
+
 ## Frequency features without gap filling
 
 Two further linear screens (`stft_screen.py`, `gap_screen.py`) tested
@@ -666,10 +723,9 @@ is lag-1 energy averaged over tones and receivers, with transfer AUC
 
 ## Next steps (not yet run)
 
-1. Phase 3–4 of the model plan on `tonepool_tcn`: a frequency view of the
-   pooled signal, and positive labels from the detected main burst.
-   Compare each against `tonepool_tcn` over several seeds. Phase 2, PCA
-   inside the model, was dropped.
+1. Phase 3 of the model plan on `tonepool_tcn` with 4 s burst labels: a
+   frequency view of the pooled signal, compared over several seeds. Phase 2,
+   PCA inside the model, was dropped; phase 4, burst labels, helped at 4 s.
 2. Test how long an installation calibration lasts (needs a second day per
    participant), and add the calibration step to the live detector.
 3. For live use, register the `tonepool` families in the Rust detector. The
@@ -711,7 +767,8 @@ holdout runners (`tone_mean_holdouts.py` with `runs.json`,
 CSVs), the threshold drift and calibration (`threshold_drift.py`,
 `install_calibration.py`, `install_calibration_falldefi.py` and their CSVs),
 the dropped PCA model (`pca_seed_holdouts.py` with `pca_seed_runs.json`,
-`compare_seeds.py` and its CSVs),
+`compare_seeds.py` and its CSVs), burst labels (`burst_seed_holdouts.py` with
+`burst_seed_runs.json`, `compare_labels.py` and its CSVs),
 the FallDeFi comparisons (`burst_vs_falldefi.py`,
 `temporal_vs_falldefi.py`, `temporal_attempts.py` and their CSVs), the burst screen (`burst_screen.py`,
 `burst_features.csv`, `burst_feature_auc.csv`, `burst_model_auc.csv`,

@@ -334,6 +334,11 @@ on their hardware and data, and are not reproduced here.
   known non-fall movements of the new session held the false-positive rate
   near 0.2. At that rate, the 6 s model matched FallDeFi testing on `akmal`
   and beat it testing on `khaelano` (balanced accuracy 0.74 against 0.69).
+  Training on positives centred on each fall's main burst
+  (`POSITIVE_LABELS = "burst"`) raised the 4 s model's attempt AUC by
+  0.05–0.07 in three of four holdouts. Its calibrated recall became
+  0.63–0.73 at a false-positive rate of about 0.22; at 6 s the labels gave no
+  gain.
   The fall windows reach the lying phase on the mattress, so the setup
   confound applies
   ([tone-pooling report](reports/tone-pooling-2026-11-23.md)).

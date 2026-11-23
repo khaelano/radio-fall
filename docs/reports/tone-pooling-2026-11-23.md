@@ -612,6 +612,37 @@ in both continuous holdouts.
     so how long one calibration lasts is untested.
   - The 0.2 target is a chosen setting, not an optimum.
 
+### Per-receiver PCA inside the model (phase 2, dropped)
+
+`tonepca_tcn` tested FallDeFi's adaptive tone weighting inside the model. It
+read a log-amplitude export (`log_filtered_amplitude`) and centred each tone
+over the window, which for log amplitude is FallDeFi's relative amplitude.
+Each receiver's 245 tones were replaced by the window's three leading
+principal components, computed over the samples where the receiver was
+present, with missing samples kept missing. The same encoder and temporal
+head as `tonepool_tcn` followed. Seeds 42–45 ran on the four holdouts at 4 s
+and 6 s (`pca_seed_holdouts.py`, `compare_seeds.py`).
+
+| Mean over 4 seeds, PCA / `tonepool_tcn` | Action-cue window AUC | Calibrated recall (FPR ≈ 0.22) | Idle windows flagged (worst seed) |
+| --- | --- | --- | --- |
+| `akmal`, 4 s; 6 s | 0.58 / 0.89; 0.54 / 0.85 | 0.16 / 0.59; 0.19 / 0.61 | 22 % / 2 %; 21 % / 0 % |
+| `khaelano`, 4 s; 6 s | 0.60 / 0.79; 0.57 / 0.82 | 0.28 / 0.62; 0.22 / 0.70 | 26 % / 0 %; 20 % / 0 % |
+| `akmal` + continuous, 4 s; 6 s | 0.54 / 0.89; 0.53 / 0.89 | 0.18 / 0.64; 0.15 / 0.72 | 42 % / 2 %; 55 % / 1 % |
+| `khaelano`, all continuous, 4 s; 6 s | 0.63 / 0.78; 0.55 / 0.83 | 0.28 / 0.57; 0.20 / 0.69 | — |
+
+In all 32 paired seed runs, PCA had the lower attempt AUC, by 0.17–0.43.
+
+- **Likely cause.** The likely cause is the signal, not the tone weighting.
+  `tonepool_tcn` reads `log1p(ΔA²)`, which is motion energy and already
+  free of slow level drift. The PCA model read relative amplitude levels,
+  whose largest within-window components are slow level shifts from posture
+  and drift. FallDeFi removes those with its STFT and 5–25 Hz band before
+  classifying; this model passed them to the network. That would explain
+  both the idle alarms and the poor transfer. It was not tested.
+- **Decision.** The approach was dropped. The model, its export variant and
+  its ONNX skip were removed from `03_training` and `02_preprocess`. The
+  executed notebooks in the run directories keep the code.
+
 ## Frequency features without gap filling
 
 Two further linear screens (`stft_screen.py`, `gap_screen.py`) tested
@@ -635,10 +666,10 @@ is lag-1 energy averaged over tones and receivers, with transfer AUC
 
 ## Next steps (not yet run)
 
-1. Phase 2–4 of the model plan: per-receiver PCA within the window (gaps
-   kept), a frequency view of those components, and positive labels from
-   the detected main burst. Compare each against `tonepool_tcn` over
-   several seeds.
+1. Phase 3–4 of the model plan on `tonepool_tcn`: a frequency view of the
+   pooled signal, and positive labels from the detected main burst.
+   Compare each against `tonepool_tcn` over several seeds. Phase 2, PCA
+   inside the model, was dropped.
 2. Test how long an installation calibration lasts (needs a second day per
    participant), and add the calibration step to the live detector.
 3. For live use, register the `tonepool` families in the Rust detector. The
@@ -679,6 +710,8 @@ holdout runners (`tone_mean_holdouts.py` with `runs.json`,
 `temporal_seed_runs.json`), the seed summary (`temporal_seeds.py` and its
 CSVs), the threshold drift and calibration (`threshold_drift.py`,
 `install_calibration.py`, `install_calibration_falldefi.py` and their CSVs),
+the dropped PCA model (`pca_seed_holdouts.py` with `pca_seed_runs.json`,
+`compare_seeds.py` and its CSVs),
 the FallDeFi comparisons (`burst_vs_falldefi.py`,
 `temporal_vs_falldefi.py`, `temporal_attempts.py` and their CSVs), the burst screen (`burst_screen.py`,
 `burst_features.csv`, `burst_feature_auc.csv`, `burst_model_auc.csv`,

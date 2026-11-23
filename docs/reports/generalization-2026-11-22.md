@@ -175,6 +175,40 @@ which trained on part of that recording, flagged none of it. FallDeFi kept the
 best attempt score and flagged 7.4 % of continuous traces; WiFall's gate kept
 its alarms low only because it rarely passes any window.
 
+## Training on `akmal` and all continuous data, testing on `khaelano`
+
+This run reverses the previous holdout. It holds out `khaelano`
+with `KEEP_SPLIT = ()`, so all 12 continuous segments join training
+(184 `akmal` and 10 continuous training attempts, 47 and 2 for validation).
+The test set is all 232 `khaelano` attempts, with no continuous data. It
+differs from the earlier `khaelano` holdout only by four more continuous
+segments in training and two fewer in test. Runs:
+`06_comparison/20261122T173216288800Z`, which names
+`03_training/20261122T165919454776Z`, `04_wifall/20261122T170444857575Z` and
+`05_falldefi/20261122T172700441735Z`.
+
+| Approach | Attempts | Balanced accuracy | Recall | False-positive rate | F1 |
+| --- | --- | --- | --- | --- | --- |
+| FallDeFi SVM | 211 scored | 0.688 | 0.842 | 0.467 | 0.631 |
+| LSTM 4 s | 232 | 0.573 | 0.375 | 0.229 | 0.429 |
+| GRU 4 s | 232 | 0.553 | 0.273 | 0.167 | 0.353 |
+| GRU 2 s | 232 | 0.536 | 0.580 | 0.507 | 0.481 |
+| GRU 6 s | 232 | 0.475 | 0.943 | 0.993 | 0.529 |
+| CNN 2 s | 232 | 0.438 | 0.875 | 1.000 | 0.498 |
+| LSTM 2 s | 232 | 0.416 | 0.568 | 0.736 | 0.410 |
+| LSTM 6 s | 232 | 0.269 | 0.330 | 0.792 | 0.251 |
+| CNN 6 s | 232 | 0.261 | 0.523 | 1.000 | 0.331 |
+| CNN 4 s | 232 | 0.055 | 0.102 | 0.993 | 0.075 |
+| WiFall random forest / one-class SVM, gated | 229 scored | 0.500 / 0.497 | 0.000 | 0.000 / 0.007 | 0.000 |
+
+The median attempt balanced accuracy of the nine sequence models was 0.438.
+The CNNs and GRU 6 s flagged 99–100 % of `khaelano` non-fall attempts, and
+CNN 4 s ranked attempts worse than chance. FallDeFi was again the best
+approach. Its 0.688 is close to the 0.709 of the earlier `khaelano` holdout,
+whose test set had two more continuous attempts. There the best sequence model
+had reached 0.543 and the median 0.452. The four extra continuous segments did
+not help the sequence models on the other participant's non-fall transitions.
+
 ## Interpretation and limits
 
 - Under the random split, the sequence models' advantage over FallDeFi came

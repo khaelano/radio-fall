@@ -82,7 +82,9 @@ on their hardware and data, and are not reproduced here.
   split by hash. Holding out `akmal` together with the same-day
   `continuous_non_fall` (training on `khaelano` only), FallDeFi reached 0.73
   and flagged 7 % of continuous traces (21 alarms in 1.0 h); the sequence
-  models flagged 39–100 % of idle continuous time.
+  models flagged 39–100 % of idle continuous time. Reversed (training on
+  `akmal` and all continuous data, `KEEP_SPLIT = ()`, testing on `khaelano`),
+  FallDeFi reached 0.69 and the best sequence model 0.57 (median 0.44).
 - **Speed from CSI (considered 22 November, not pursued):** DeFall
   ([text](../resources/Papers/md/defall-2022.md)) and FallDar
   ([text](../resources/Papers/md/falldar-2023.md)) estimate movement speed

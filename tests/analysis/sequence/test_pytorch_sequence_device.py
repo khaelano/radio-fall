@@ -142,7 +142,15 @@ def test_notebook_trainer_saves_and_reloads_checkpoint(tmp_path, training_notebo
     assert result["runtime"]["device"] == "cpu"
 
 
-@pytest.mark.parametrize("name", ["TorchTonePool", "TorchTonePoolGeM"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "TorchTonePool",
+        "TorchTonePoolGeM",
+        "TorchTonePoolTemporal",
+        "TorchTonePoolTemporalCentered",
+    ],
+)
 def test_tone_pool_ignores_tone_and_receiver_order(training_notebook, name):
     torch.manual_seed(0)
     model = training_notebook[name](1964, 4).eval()
@@ -173,3 +181,14 @@ def test_tone_pool_gem_gradient_is_finite_when_all_tones_are_dropped(
     encoded = torch.full((2, 980, 16, 5), 0.5, requires_grad=True)
     model.pool_peak(encoded, torch.zeros(2, 980, 1, 1)).sum().backward()
     assert torch.isfinite(encoded.grad).all()
+
+
+def test_tone_pool_centering_removes_each_tones_window_level(training_notebook):
+    model = training_notebook["TorchTonePoolTemporalCentered"](1964, 4)
+    values = torch.randn(2, 24, 4, 245)
+    valid = (torch.rand(2, 24, 4, 245) > 0.3).float()
+    shifted = values + torch.randn(1, 1, 4, 245)  # a per-tone level change
+    torch.testing.assert_close(
+        model.prepare(shifted, valid), model.prepare(values, valid)
+    )
+    assert torch.all(model.prepare(values, valid)[valid == 0] == 0)

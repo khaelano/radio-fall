@@ -28,6 +28,22 @@ def test_evaluate_moves_inputs_and_returns_host_metrics(device_name, training_no
     assert 0 <= result["fall_f1"] <= 1
 
 
+def test_evaluate_balanced_log_loss_weights_classes_equally(training_notebook):
+    class Dataset:
+        def batches(self, batch_size, seed=None):
+            rows = [{"target": 0}] * 3 + [{"target": 1}]
+            yield np.zeros((4, 1), dtype=np.float32), rows
+
+    class Uncertain(torch.nn.Module):
+        def forward(self, x):
+            return torch.zeros(len(x))
+
+    result = training_notebook["_evaluate"](
+        Uncertain(), Dataset(), 4, torch.device("cpu")
+    )
+    assert result["balanced_log_loss"] == pytest.approx(np.log(2))
+
+
 def test_requested_cuda_fails_when_unavailable(
     tmp_path, monkeypatch, training_notebook
 ):

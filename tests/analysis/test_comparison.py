@@ -6,7 +6,10 @@ import polars as pl
 import pytest
 
 from fall_detection.analysis.comparison import (
+    attempt_scores,
     baseline_group,
+    choose_threshold,
+    debounce,
     latest_run,
     latest_split_run,
     latest_training_run,
@@ -147,3 +150,71 @@ def test_latest_split_run_selects_by_split_hash(tmp_path):
     assert latest_split_run(tmp_path, "b" * 64).name == "20261102T000000Z"
     with pytest.raises(FileNotFoundError, match="cccccccccccc"):
         latest_split_run(tmp_path, "c" * 64)
+
+
+def _window(group, segment, start, probability, target=0):
+    return {
+        "group": group,
+        "segment_id": segment,
+        "start": start,
+        "stop": start + 4,
+        "target": target,
+        "probability": probability,
+    }
+
+
+def test_debounce_needs_overlapping_alarms_in_one_segment():
+    rows = [
+        _window("a", "s0", 0, 0.9),
+        _window("a", "s0", 2, 0.9),  # overlaps the previous window: run of 2
+        _window("b", "s0", 0, 0.9),
+        _window("b", "s0", 8, 0.9),  # after a gap: no run
+        _window("c", "s0", 0, 0.9),
+        _window("c", "s1", 2, 0.9),  # next segment: no run
+    ]
+    predicted = {
+        (row["group"], row["start"]): row["prediction"]
+        for row in debounce(rows, threshold=0.5, consecutive=2)
+    }
+    assert predicted == {
+        ("a", 0): 0,
+        ("a", 2): 1,
+        ("b", 0): 0,
+        ("b", 8): 0,
+        ("c", 0): 0,
+        ("c", 2): 0,
+    }
+    with pytest.raises(ValueError, match="at least one"):
+        debounce(rows, threshold=0.5, consecutive=0)
+
+
+def test_choose_threshold_takes_lowest_threshold_within_target():
+    rows = [
+        _window("s::fall", "s0", 0, 0.8, target=1),
+        _window("s::fall", "s0", 2, 0.7, target=1),
+        _window("s::quiet", "s0", 0, 0.3),
+        _window("s::quiet", "s0", 2, 0.4),
+        _window("s::busy", "s0", 0, 0.6),
+        _window("s::busy", "s0", 2, 0.65),
+    ]
+    # Attempt scores at k = 2: fall 0.7, busy 0.6, quiet 0.3.
+    scores = attempt_scores(rows, consecutive=2)
+    assert dict(zip(scores["group"], scores["score"], strict=True)) == {
+        "s/busy": 0.6,
+        "s/fall": 0.7,
+        "s/quiet": 0.3,
+    }
+    # One of two non-falls may alarm: any threshold in (0.3, 0.6] flags only
+    # "busy"; the midpoint is returned.
+    choice = choose_threshold(rows, target_false_positive_rate=0.5, consecutive=2)
+    assert choice == pytest.approx(
+        {"threshold": 0.45, "false_positive_rate": 0.5, "recall": 1.0}
+    )
+    # No non-fall may alarm: (0.6, 0.7] keeps the fall.
+    strict = choose_threshold(rows, target_false_positive_rate=0.0, consecutive=2)
+    assert strict == pytest.approx(
+        {"threshold": 0.65, "false_positive_rate": 0.0, "recall": 1.0}
+    )
+    # The debounced test rule agrees with the attempt scores.
+    predicted = debounce(rows, threshold=strict["threshold"], consecutive=2)
+    assert {row["group"] for row in predicted if row["prediction"]} == {"s::fall"}

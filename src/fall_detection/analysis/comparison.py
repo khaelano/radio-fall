@@ -6,6 +6,11 @@ approach with :func:`summarize`. Each approach decides on its own unit (a
 sequence window, a WiFall window or a FallDeFi trace), so the common unit is
 the attempt: an attempt is a fall when any of its units is, and it is
 predicted as a fall when any of its units is predicted as one.
+
+For sequence models, :func:`debounce` turns window probabilities into
+predictions that need several overlapping windows to agree, and
+:func:`choose_threshold` picks the threshold on validation attempts for a
+target attempt false-positive rate, so the test set never sets it.
 """
 
 from __future__ import annotations
@@ -296,4 +301,156 @@ def summarize(
             attempts["target"].to_numpy(), attempts["prediction"].to_numpy()
         ),
         "unscored_test_attempts": sorted(test_attempts - set(attempts["group"])),
+    }
+
+
+def debounce(
+    rows: Iterable[dict[str, Any]], *, threshold: float, consecutive: int
+) -> list[dict[str, Any]]:
+    """Predict a window as a fall only when it completes a run of alarms.
+
+    Windows are ordered by ``start`` within each ``group`` and ``segment_id``.
+    Two windows are consecutive when the later one starts before the earlier
+    one stops, so a recording gap that splits a segment, or windows omitted
+    by the labelling rule, break a run.
+
+    Args:
+        rows: Windows with ``group``, ``segment_id``, ``start``, ``stop``,
+            ``target`` and ``probability``.
+        threshold: Probability at or above which a window raises an alarm.
+        consecutive: Alarmed windows in a row needed to predict a fall; 1 is
+            the plain threshold rule.
+
+    Returns:
+        Copies of the rows, in run order, each with a binary ``prediction``.
+
+    Raises:
+        ValueError: If ``consecutive`` is below one.
+    """
+    if consecutive < 1:
+        raise ValueError("consecutive must be at least one")
+    ordered = sorted(
+        (dict(row) for row in rows),
+        key=lambda row: (row["group"], row["segment_id"], row["start"]),
+    )
+    run = 0
+    previous = None
+    for row in ordered:
+        same_run = (
+            previous is not None
+            and (previous["group"], previous["segment_id"])
+            == (row["group"], row["segment_id"])
+            and row["start"] < previous["stop"]
+        )
+        alarm = row["probability"] >= threshold
+        run = (run + 1 if same_run else 1) if alarm else 0
+        row["prediction"] = int(run >= consecutive)
+        previous = row
+    return ordered
+
+
+def attempt_scores(rows: Iterable[dict[str, Any]], *, consecutive: int) -> pl.DataFrame:
+    """Score each attempt by its strongest run of consecutive windows.
+
+    An attempt's score is the highest, over runs of ``consecutive`` windows
+    that are consecutive as in :func:`debounce`, of the lowest probability in
+    the run. :func:`debounce` with threshold ``t`` predicts the attempt as a
+    fall exactly when its score is at least ``t``. An attempt without such a
+    run scores minus infinity.
+
+    Args:
+        rows: Windows as for :func:`debounce`.
+        consecutive: Run length, at least one.
+
+    Returns:
+        One row per attempt (baseline identity) with its any-window ``target``
+        and ``score``.
+
+    Raises:
+        ValueError: If ``consecutive`` is below one.
+    """
+    if consecutive < 1:
+        raise ValueError("consecutive must be at least one")
+    ordered = sorted(
+        rows, key=lambda row: (row["group"], row["segment_id"], row["start"])
+    )
+    attempts: dict[str, dict[str, float]] = {}
+    chain: list[float] = []
+    previous = None
+    for row in ordered:
+        group = baseline_group(str(row["group"]))
+        same_chain = (
+            previous is not None
+            and (previous["group"], previous["segment_id"])
+            == (row["group"], row["segment_id"])
+            and row["start"] < previous["stop"]
+        )
+        chain = (
+            [*chain, float(row["probability"])]
+            if same_chain
+            else [float(row["probability"])]
+        )
+        entry = attempts.setdefault(group, {"target": 0, "score": -np.inf})
+        entry["target"] = max(entry["target"], int(row["target"]))
+        if len(chain) >= consecutive:
+            entry["score"] = max(entry["score"], min(chain[-consecutive:]))
+        previous = row
+    return pl.DataFrame(
+        [{"group": group, **values} for group, values in sorted(attempts.items())],
+        schema={"group": pl.String, "target": pl.Int64, "score": pl.Float64},
+    )
+
+
+def choose_threshold(
+    rows: Iterable[dict[str, Any]],
+    *,
+    target_false_positive_rate: float,
+    consecutive: int,
+) -> dict[str, float]:
+    """Choose a threshold that keeps attempt false positives at a target.
+
+    Thresholds between the highest non-fall attempt score that must stay
+    below it and the next attempt score up give the same result on these
+    rows; the midpoint of that interval is returned, which keeps fall recall
+    at its maximum for the target and leaves a margin on both sides. Use
+    validation windows, never test windows.
+
+    Args:
+        rows: Validation windows as for :func:`debounce`, from attempts of both
+            classes.
+        target_false_positive_rate: Highest acceptable share of non-fall
+            attempts predicted as falls, from zero to one.
+        consecutive: Run length passed to :func:`debounce`.
+
+    Returns:
+        The threshold and the attempt false-positive rate and recall it
+        reaches on these rows.
+
+    Raises:
+        ValueError: If the rows lack an attempt of either class, or the target
+            is outside zero to one.
+    """
+    if not 0 <= target_false_positive_rate <= 1:
+        raise ValueError("Target false-positive rate must be within [0, 1]")
+    attempts = attempt_scores(rows, consecutive=consecutive)
+    target = attempts["target"].to_numpy()
+    score = attempts["score"].to_numpy()
+    if not 0 < target.sum() < len(target):
+        raise ValueError("Threshold choice needs fall and non-fall attempts")
+    negatives = np.sort(score[target == 0])[::-1]
+    allowed = int(np.floor(target_false_positive_rate * len(negatives) + 1e-9))
+    if allowed >= len(negatives):
+        threshold = 0.0
+    else:
+        excluded = negatives[allowed]
+        above = score[score > excluded]
+        upper = float(above.min()) if len(above) else 1.0
+        threshold = (
+            np.inf if excluded >= 1.0 else (max(float(excluded), 0.0) + upper) / 2
+        )
+    flagged = score >= threshold
+    return {
+        "threshold": float(threshold),
+        "false_positive_rate": float(flagged[target == 0].mean()),
+        "recall": float(flagged[target == 1].mean()),
     }

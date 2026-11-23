@@ -262,7 +262,10 @@ on their hardware and data, and are not reproduced here.
   0.70 to 0.59. It did not reach FallDeFi's attempt score. The
   `03_training` model `tonepool` encodes each per-tone series with shared
   weights and pools over tones and receivers on the default input. Its 4 s
-  model kept window AUC 0.76–0.82 in all four holdouts. Its max pooling made
+  model kept window AUC 0.76–0.82 in all four holdouts; that mostly measured
+  motion against stillness. On action-cue windows (falls against posture
+  transitions), every input stayed at or below about 0.70 in at least one
+  direction. Its max pooling made
   it flag 9–39 % of idle continuous windows from an unseen day.
   Generalized-mean pooling (`tonepool_gem`) or the per-session
   `quiet_floor_squared_difference` input brought that below 5 % at 2 s and
@@ -310,9 +313,11 @@ on their hardware and data, and are not reproduced here.
   squared difference nor the filtered amplitude did across the two current
   participant sessions; FallDeFi's event features did best. Averaging over
   tones transferred to `khaelano` but not to `akmal`; why the direction
-  matters is unresolved. The shared-weight tone-pooled encoder transferred in
-  both directions; with generalized-mean pooling it also stayed quiet on idle
-  data from an unseen day (one seed).
+  matters is unresolved. The shared-weight tone-pooled encoder detected motion
+  consistently in both directions and, with generalized-mean pooling, stayed
+  quiet on idle data from an unseen day. It still did not separate falls from
+  posture transitions on `khaelano` (action-cue window AUC about 0.53). A
+  validation-chosen threshold could not make up for that (one seed).
 - How should collection separate falls from setup, for example non-fall
   activity with the mattress in place or interleaved trial order?
 - How should irregular timestamps and packet loss shape model windows?

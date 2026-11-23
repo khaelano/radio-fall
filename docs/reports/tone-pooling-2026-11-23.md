@@ -7,11 +7,15 @@ our input identifies a session, and whether removing it helps across sessions.
 A linear screen pointed to the per-tone layout. Averaging over tones removed
 almost all idle false alarms and fixed the `khaelano` holdout, but it made the
 `akmal` holdout worse. A model that encodes every tone with shared weights and
-then pools over tones ranked windows well in both directions (window AUC
-0.76–0.82 at 4 s), but it flagged up to 39 % of idle data from a new day. Its
-max pooling caused that. Generalized-mean pooling, or a per-session quiet-floor
-input, brought idle alarms below 5 % at 2 s and 4 s without losing ranking.
-Across sessions, FallDeFi still has the best attempt score.
+then pools over tones kept window AUC 0.76–0.82 at 4 s in both directions, but
+it flagged up to 39 % of idle data from a new day. Its max pooling caused
+that. Generalized-mean pooling, or a per-session quiet-floor input, brought
+idle alarms to about 1 % without lowering window AUC. Window AUC, however,
+mostly measured motion against stillness. On windows of the action cue, where
+non-falls are posture transitions, no input separated falls from transitions
+in both directions (best medians about 0.52–0.70 depending on input and
+direction). A threshold chosen on validation attempts could not compensate.
+FallDeFi still has the best attempt score.
 
 ## Screen: which representation carries the session
 
@@ -131,7 +135,9 @@ per-tone runs and the tone-mean runs above, on the same test attempts.
 | `akmal` + continuous | 0.68 | 0.61 | 0.79 / 0.82 / 0.72 | 0.553 (0.87), 6 s | 0.732 (0.39) |
 | `khaelano`, all continuous in training | 0.41 | 0.78 | 0.71 / 0.76 / 0.65 | 0.628 (0.35), 2 s | 0.688 (0.47) |
 
-- **Both directions.** Tone-pool 4 s reached window AUC 0.76–0.82 and 2 s
+- **Both directions.** (Window AUC here includes quiet windows; see
+  [what window AUC measured](#what-window-auc-measured) for the action-cue
+  windows alone.) Tone-pool 4 s reached window AUC 0.76–0.82 and 2 s
   0.71–0.79 in all four holdouts. Its 4 s worst case (0.76) is the best
   worst case of the 21 models compared. The next are tone-pool 2 s (0.71) and
   per-tone LSTM 4 s (0.69). The input medians fail in one direction each:
@@ -259,8 +265,10 @@ failed training on `khaelano` alone, not idle behaviour.
   of idle windows on the unseen day, and both together to 0.8 %. GeM needs no
   calibration and no change to live preprocessing. The quiet floor needs a
   still-room calibration.
-- **Ranking.** Neither fix cost window AUC. The changes are within ±0.03 of
-  tone-pool on default input, and 4 s stays at 0.76–0.84 in every holdout.
+- **Window AUC.** Neither fix lowered it. The changes are within about ±0.03
+  of tone-pool on default input, and 4 s stays at 0.76–0.84 in every holdout.
+  Mostly this is motion against stillness; see
+  [what window AUC measured](#what-window-auc-measured).
 - **Attempts.** At threshold 0.5 with the any-window rule, no variant reached
   FallDeFi. The best attempt balanced accuracies were 0.64–0.65 on `akmal`
   and `khaelano` and 0.638 on `akmal` + continuous (GeM 4 s, quiet floor),
@@ -269,6 +277,66 @@ failed training on `khaelano` alone, not idle behaviour.
   rule, not idle data, now limits the attempt score.
 - **Limits.** One seed. Checkpoint selection by in-session validation F1 kept
   degenerate checkpoints at 6 s.
+
+## Decision rule chosen on validation
+
+The attempt scores above use threshold 0.5, and an attempt alarms when any
+window does. Step 2 replaced both:
+
+- **Checkpoint.** The tone-pool models now choose their checkpoint by a
+  balanced log loss on validation: the mean of the two classes' log losses.
+  A model calling every window a fall cannot win it. CNN, LSTM and GRU keep
+  validation F1.
+- **Rule.** `comparison.debounce` raises an alarm only for a window that
+  completes a run of `k` overlapping alarmed windows in one segment.
+- **Threshold.** `comparison.choose_threshold` picks the threshold on
+  validation attempts so that at most 20 % of non-fall attempts alarm. It
+  returns the midpoint of the interval that gives that result.
+  `comparison.attempt_scores` makes the choice exact.
+- **Where.** `06_comparison` reports the result in `decision_rule.csv`, for
+  `k` = 1 and 2.
+
+`tonepool_gem` was retrained this way on the default and quiet-floor inputs
+for the four holdouts (`decision_rule_holdouts.py`).
+
+- **Checkpoints.** The degenerate 6 s models are gone. On the unseen idle day
+  all six models flagged 0.5–1.0 % of continuous windows (6 s: 1.0 % and
+  0.8 %, against 100 % with F1 checkpoints). Attempt balanced accuracy at 0.5
+  for the 6 s models of that holdout rose from 0.50 to 0.66.
+- **Thresholds made attempts worse.** At the 20 % target, the validation
+  attempts reached a recall of only 0.00–0.33. Even inside the training
+  sessions, the models could not separate fall attempts from transitions at
+  low false-positive rates, so the chosen thresholds were 0.62–1.00. On the
+  test attempts, balanced accuracy fell to 0.39–0.57, against 0.47–0.67 at
+  0.5. The test false-positive rate was 0.25–0.33 in the two `akmal`
+  holdouts and 0.01–0.05 in the two `khaelano` holdouts, where the models
+  almost never alarmed (recall 0.03–0.06).
+  `k` = 2 did not help.
+
+### What window AUC measured
+
+Fall attempts keep only windows centred in the action cue; non-fall attempts
+keep every window, including still `preparation` and `resting` windows.
+`attempt_span.py` and `window_auc.py` separate the two:
+
+- **Attempt AUC.** With attempts scored by their highest window, attempt AUC
+  was 0.50–0.67. It changed by at most 0.012 when non-fall attempts kept only
+  their action windows, so the extra windows were not the cause.
+- **Action-cue windows.** Restricted to windows centred in the action cue,
+  window AUC fell sharply:
+
+| Input | Test `akmal`: all / action windows | `khaelano` | `akmal` + continuous | `khaelano`, all continuous |
+| --- | --- | --- | --- | --- |
+| Per-tone (median of 9) | 0.70 / 0.59 | 0.38 / 0.40 | 0.68 / 0.57 | 0.41 / 0.39 |
+| Tone mean (median of 9) | 0.59 / 0.50 | 0.79 / 0.68 | 0.61 / 0.52 | 0.79 / 0.70 |
+| Tone-pool GeM, loss checkpoint (median of 3) | 0.79 / 0.65 | 0.73 / 0.53 | 0.80 / 0.69 | 0.73 / 0.53 |
+
+The high window AUCs came mostly from telling motion from stillness. On
+action-cue windows, falls and posture transitions are what remain. There the
+best input depends on the direction: tone mean on `khaelano` (median 0.68 and
+0.70, best model 0.75 and 0.77), and tone-pool on `akmal` (0.63–0.70). No input
+separates them in both directions. A threshold cannot fix a ranking this
+weak, which explains the step-2 result.
 
 ## Frequency features without gap filling
 
@@ -293,13 +361,13 @@ is lag-1 energy averaged over tones and receivers, with transfer AUC
 
 ## Next steps (not yet run)
 
-1. Replace threshold 0.5 and the any-window attempt rule with a debounced
-   rule, and choose the threshold for a target false-positive rate. Select
-   checkpoints by validation loss or a fixed epoch count, which would avoid
-   the degenerate 6 s checkpoints.
-2. Repeat tone-pool GeM over several seeds before comparing it with FallDeFi
-   or the nine-model medians.
-3. For live use, register the `tonepool` families in the Rust detector. The
+1. Train for falls against transitions, not motion against stillness. For
+   example, weight or keep only action-cue windows of non-fall attempts in
+   training, and select checkpoints on action-cue windows.
+2. Report action-cue window AUC next to window AUC in `06_comparison`.
+3. Repeat over several seeds before comparing models whose differences are
+   below about 0.05.
+4. For live use, register the `tonepool` families in the Rust detector. The
    quiet-floor variant would also need a still-room calibration step.
 4. Record non-fall activity with the mattress in place.
 
@@ -321,13 +389,18 @@ Tone-pool `03_training` runs (each with its `06_comparison`) are listed in
 continuous) and `20261123T032219481778Z` (`khaelano`, `KEEP_SPLIT = ()`).
 
 Quiet-floor and GeM runs are listed in `floor_gem_runs.json` (one quiet-floor
-and one default `03_training` run plus one `06_comparison` per holdout).
+and one default `03_training` run plus one `06_comparison` per holdout). The
+step-2 runs (loss checkpoints, validation predictions, decision-rule table)
+are listed in `decision_rule_runs.json`.
 
 `diagnostics/20261123-tone-pooling/` holds the screen scripts and results
 (`level_screen*.py`, `screen_results.txt`, `stft_screen*`, `gap_screen*`), the
 holdout runners (`tone_mean_holdouts.py` with `runs.json`,
 `tonepool_holdouts.py` with `tonepool_runs.json`, `floor_gem_holdouts.py` with
-`floor_gem_runs.json`), the idle diagnosis (`idle_diagnosis.py`,
-`idle_diagnosis.json`), and `window_auc.py` with `window_auc.csv`. The export is
+`floor_gem_runs.json`, `decision_rule_holdouts.py` with
+`decision_rule_runs.json`), the idle diagnosis (`idle_diagnosis.py`,
+`idle_diagnosis.json`), `attempt_span.py` with `attempt_span.csv`, and
+`window_auc.py` with `window_auc.csv` (window and action-cue window AUC and
+idle flags for every model). The export is
 `data/processed/amplitude_sequence/120hz-tone_mean_log_ratio/` (not
 DVC-tracked; regenerate with `02_preprocess`).

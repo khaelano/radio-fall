@@ -50,7 +50,7 @@ impl Scheduler {
         maximum_age_ns: u64,
     ) -> Result<Self, String> {
         if models.is_empty()
-            || models.len() > 9
+            || models.len() > crate::bundle::MAX_MODELS
             || !(0.0..=1.0).contains(&minimum_coverage)
             || maximum_age_ns == 0
         {

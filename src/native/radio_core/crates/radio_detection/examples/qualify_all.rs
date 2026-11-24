@@ -1,6 +1,6 @@
-//! Keep all nine verified exports resident and compare caller-prepared inputs.
+//! Keep all verified exports resident and compare caller-prepared inputs.
 use radio_detection::{
-    bundle::inspect_exports,
+    bundle::{FAMILIES, inspect_exports},
     runtime::{Backend, Runtime},
 };
 use std::{fs, path::Path, time::Instant};
@@ -26,8 +26,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs::create_dir_all(&args[5])?;
     }
     let mut models = Vec::new();
-    for family in ["cnn", "lstm", "gru"] {
-        for export in inspect_exports(&Path::new(&args[3]).join(family))? {
+    for family in &FAMILIES {
+        let directory = Path::new(&args[3]).join(family.name);
+        if !directory.is_dir() {
+            continue;
+        }
+        for export in inspect_exports(&directory)? {
             let bytes = fs::read(Path::new(&args[4]).join(format!("{}.f32le", export.id)))?;
             if bytes.len() != export.frames * 1964 * 4 {
                 return Err(format!("invalid input size for {}", export.id).into());

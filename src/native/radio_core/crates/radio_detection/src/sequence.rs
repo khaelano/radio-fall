@@ -92,6 +92,7 @@ mod tests {
                     .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
             }
         }
+        Normalizer::load(&root.join("tonepool_tcn/normalizer-4s.npz")).unwrap();
     }
     #[test]
     fn ordering_missingness_and_receiver_coverage() {

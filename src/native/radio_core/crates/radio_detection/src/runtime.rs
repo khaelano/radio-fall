@@ -52,7 +52,7 @@ impl Runtime {
         sessions: &std::collections::BTreeMap<String, usize>,
     ) -> Result<(), String> {
         if sessions.is_empty()
-            || sessions.len() > 9
+            || sessions.len() > crate::bundle::MAX_MODELS
             || sessions.keys().any(String::is_empty)
             || sessions.values().any(|&index| index >= self.sessions.len())
             || sessions

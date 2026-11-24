@@ -12,6 +12,11 @@ from fall_detection.apps.detector import gui
 ROOT = Path(__file__).resolve().parents[3]
 CAPTURE = ROOT / "data/experiments/detector/native-capture-20261112-c"
 MODELS = ROOT / "artifacts/model"
+# Deployed model and the saved normalizer its inputs must match.
+NORMALIZERS = {
+    "cnn-4s": "cnn/normalizer-4s.npz",
+    "tonepool_tcn-4s": "tonepool_tcn/normalizer-4s.npz",
+}
 
 
 def _offline_inputs(capture: Path) -> tuple[int, int, np.ndarray, np.ndarray]:
@@ -84,8 +89,10 @@ def _offline_inputs(capture: Path) -> tuple[int, int, np.ndarray, np.ndarray]:
 
 
 @pytest.mark.skipif(
-    not CAPTURE.is_dir() or gui.runtime_library() is None,
-    reason="needs the DVC capture and the detect extra",
+    not CAPTURE.is_dir()
+    or gui.runtime_library() is None
+    or not (MODELS / "tonepool_tcn").is_dir(),
+    reason="needs the DVC capture and models and an ONNX Runtime library",
 )
 def test_native_replay_matches_offline_preprocessing(tmp_path):
     from fall_detection._radio_native import NativeDetector
@@ -98,7 +105,7 @@ def test_native_replay_matches_offline_preprocessing(tmp_path):
         "model_root": str(MODELS),
         "core_library": str(gui.runtime_library()),
         "backend": "cpu",
-        "models": ["cnn-4s"],
+        "models": list(NORMALIZERS),
         "output_dir": str(output),
         "save_inputs": True,
         "preview": True,
@@ -134,7 +141,9 @@ def test_native_replay_matches_offline_preprocessing(tmp_path):
             }
 
     anchor, lowest, signal, presence = _offline_inputs(CAPTURE)
-    normalizer = Normalizer.load(MODELS / "cnn/normalizer-4s.npz")
+    normalizers = {
+        model: Normalizer.load(MODELS / path) for model, path in NORMALIZERS.items()
+    }
     index = [
         json.loads(line) for line in (output / "inputs.jsonl").read_text().splitlines()
     ]
@@ -147,19 +156,39 @@ def test_native_replay_matches_offline_preprocessing(tmp_path):
         mask = np.isfinite(values)
         reference = np.concatenate(
             (
-                normalizer.transform(np.where(mask, values, 0), mask),
+                normalizers[entry["model_id"]].transform(
+                    np.where(mask, values, 0), mask
+                ),
                 presence[start : start + 480].astype(np.float32),
             ),
             axis=-1,
         )
         np.testing.assert_array_equal(native, reference)
 
+    # Independent inference on the saved inputs must reproduce the Rust logits.
+    ort = pytest.importorskip("onnxruntime")
+    session = ort.InferenceSession(
+        str(MODELS / "tonepool_tcn/tonepool_tcn-4s.onnx"),
+        providers=["CPUExecutionProvider"],
+    )
+    logits = {
+        (row["model_id"], row["end_ns"]): row["logit"]
+        for row in rows
+        if row["state"] == "score"
+    }
+    for entry, native in zip(index, tensors):
+        logit = logits.get((entry["model_id"], entry["end_ns"]))
+        if entry["model_id"] == "tonepool_tcn-4s" and logit is not None:
+            expected = session.run(["fall_logit"], {"input": native[None]})[0][0]
+            assert logit == pytest.approx(expected, abs=1e-4)
+
     metadata, raw, model_input = preview
     metadata = json.loads(metadata)
+    cnn = [i for i, entry in enumerate(index) if entry["model_id"] == "cnn-4s"]
     assert metadata["frames"] == 480
-    assert metadata["end_ns"] == index[-1]["end_ns"]
+    assert metadata["end_ns"] == index[cnn[-1]]["end_ns"]
     magnitudes, signals = gui.preview_images(raw, model_input, 480)
     assert magnitudes.shape == signals.shape == (480, 980)
     np.testing.assert_array_equal(
-        np.frombuffer(model_input, dtype="<f4").reshape(480, 1964), tensors[-1]
+        np.frombuffer(model_input, dtype="<f4").reshape(480, 1964), tensors[cnn[-1]]
     )

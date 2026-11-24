@@ -13,10 +13,12 @@ from fall_detection.apps.detector import app, gui
 from fall_detection.radio.settings import RadioSettings
 
 
-def test_parser_selects_current_four_second_models_on_webgpu():
+def test_parser_selects_best_four_second_model_on_webgpu():
     args = app.parser().parse_args([])
     assert args.backend == "webgpu"
-    assert args.models == ["cnn-4s"]
+    assert args.models == ["tonepool_tcn-4s"]
+    # The earlier sequence models stay selectable next to it.
+    assert {"tonepool_tcn-4s", "cnn-4s"} <= set(gui.MODELS)
 
 
 def test_native_headless_polls_results_and_stops_on_failure(monkeypatch, capsys):

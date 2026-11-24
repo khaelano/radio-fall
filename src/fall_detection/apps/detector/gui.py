@@ -16,12 +16,17 @@ import numpy as np
 
 from fall_detection.apps.common.qt import qt_application
 
-MODELS = tuple(
-    f"{family}-{duration}s"
-    for family in ("cnn", "lstm", "gru")
-    for duration in (2, 4, 6)
+# Model IDs of the live-compatible exports. The Rust bundle loader is the
+# authority on families; a model whose bundle is absent fails at start.
+MODELS = (
+    *(
+        f"{family}-{duration}s"
+        for family in ("cnn", "lstm", "gru")
+        for duration in (2, 4, 6)
+    ),
+    "tonepool_tcn-4s",
 )
-DEFAULT_MODELS = ("cnn-4s",)
+DEFAULT_MODELS = ("tonepool_tcn-4s",)
 
 
 def runtime_library() -> Path | None:
@@ -80,7 +85,7 @@ def build_config(args: Any, models: list[str] | None = None) -> dict:
         or len(set(selected)) != len(selected)
         or any(model not in MODELS for model in selected)
     ):
-        raise ValueError("Select a unique nonempty subset of the nine sequence models")
+        raise ValueError("Select a unique nonempty subset of the sequence models")
     if args.hop_ms <= 0 or args.grace_ms < 0 or not 0 <= args.minimum_coverage <= 1:
         raise ValueError("Invalid hop, grace, or coverage policy")
     output = args.output_dir or Path("data/experiments/detector") / datetime.now(

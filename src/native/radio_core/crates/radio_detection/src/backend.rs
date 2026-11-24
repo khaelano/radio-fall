@@ -102,7 +102,7 @@ impl Default for BackendConfig {
             webgpu_plugin: None,
             backend: "webgpu".into(),
             adapter_id: None,
-            models: vec!["cnn-4s".into()],
+            models: vec!["tonepool_tcn-4s".into()],
             output_dir: PathBuf::new(),
             hop_ms: 250,
             delivery_grace_ms: 900,
@@ -136,7 +136,7 @@ impl BackendConfig {
         if self.core_library.as_os_str().is_empty()
             || self.output_dir.as_os_str().is_empty()
             || self.models.is_empty()
-            || self.models.len() > 9
+            || self.models.len() > bundle::MAX_MODELS
             || self.models.iter().collect::<BTreeSet<_>>().len() != self.models.len()
             || !(0.0..=1.0).contains(&self.minimum_coverage)
             || self.hop_ms == 0
@@ -381,8 +381,8 @@ fn load_models(
     stop: &AtomicBool,
 ) -> Result<Option<LoadedModels>, String> {
     let mut available = BTreeMap::new();
-    for family in ["cnn", "lstm", "gru"] {
-        let directory = config.model_root.join(family);
+    for family in &bundle::FAMILIES {
+        let directory = config.model_root.join(family.name);
         if !directory.is_dir() {
             continue;
         }
@@ -441,11 +441,9 @@ fn load_models(
             .map(str::to_owned)
             .into();
             let placement = crate::audit_placement(&trace, &allowed)?;
-            let main = match id.split('-').next() {
-                Some("cnn") => "Conv",
-                Some("lstm") => "LSTM",
-                _ => "GRU",
-            };
+            let main = bundle::family_of(id)
+                .ok_or_else(|| format!("unknown model family: {id}"))?
+                .main_operator;
             if !placement.webgpu_ops.contains(main) {
                 return Err(format!("{id}: {main} did not run on WebGPU"));
             }

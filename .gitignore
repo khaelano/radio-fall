@@ -47,3 +47,7 @@ src/fall_detection/_radio_native*.so
 # Re-include repository guides hidden by the global ignore rules
 !AGENTS.md
 !docs/
+
+# Untracked local copies and editor-specific configuration
+/data/normalized/
+.mcp.json

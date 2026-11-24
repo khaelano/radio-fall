@@ -788,9 +788,13 @@ is lag-1 energy averaged over tones and receivers, with transfer AUC
    gain depended on the training participant. Phase 2 (PCA inside the model)
    was dropped. Phase 4 (burst labels) helped at 4 s.
 2. Test how long an installation calibration lasts (needs a second day per
-   participant), and add the calibration step to the live detector.
-3. For live use, register the `tonepool` families in the Rust detector. The
-   quiet-floor variant would also need a still-room calibration step.
+   participant). The live detector gained the calibration step on 24 November
+   ([calibration report](live-calibration-2026-11-24.md)).
+3. Done on 24 November for the 4 s `tonepool_tcn`: it is registered in the Rust
+   detector and published
+   ([live tone-pool report](live-tonepool-2026-11-24.md)). The other `tonepool`
+   families are not live, and the quiet-floor variant would also need a
+   still-room calibration step.
 4. Record non-fall activity with the mattress in place, and if it can be done
    safely, some falls onto a harder surface.
 

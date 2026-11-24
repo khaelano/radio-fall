@@ -203,8 +203,22 @@ on their hardware and data, and are not reproduced here.
   ([hardware check](automatic-radio-recovery.md#hardware-check-18-november-2026));
   35–78% of windows per session were unknown because receiver coverage,
   mainly `rx-3` and `rx-4`, fell below 70% (cause undiagnosed).
-  Unverified: sustained operation and detection accuracy. See the
-  [detector guide](live-fall-detection.md).
+  Unverified: sustained operation and detection accuracy. Since 24 November the
+  default live model is the 4 s `tonepool_tcn` bundle (burst-label positives,
+  seed 45, full-data split `20261123T153725520115Z`), with unchanged
+  preprocessing. Its live inputs matched the offline chain bit for bit and its
+  logits matched PyTorch to 2.4e-6. WebGPU placement was checked on an NVIDIA
+  GPU, not the AMD laptop. Without a calibration it displays
+  alarms at 0.5. `fall-detect` records ten prompted non-fall movements and sets
+  each model's threshold from them. Under live conditions (250 ms hop, 70 %
+  gate) on the held-out sessions, this held the attempt false-positive rate at
+  0.18–0.23 with recall 0.63–0.73; one calibration is noisy and has not been
+  tried with a person. The 70 % gate, which the offline evaluation does not
+  use, leaves 20 of 231 (`akmal`) and 9 of 232 (`khaelano`) attempts without
+  a scored window at the live hop. See the
+  [live tone-pool report](reports/live-tonepool-2026-11-24.md), the
+  [calibration report](reports/live-calibration-2026-11-24.md)
+  and the [detector guide](live-fall-detection.md).
 
 - **Collection:** the desktop collector supports protocol-driven trials,
   continuous activity segments, session resume, synchronized video, and
@@ -275,9 +289,9 @@ on their hardware and data, and are not reproduced here.
   Notebooks must record dataset versions, split policy, and seeds. See
   [amplitude preprocessing](amplitude-preprocessing.md) and the notebook index.
 - **Detection:** `fall-detect` can score four-receiver windows with exported
-  experimental models. Training data comes from one participant/session, and
-  continuous accuracy, false alarms per hour, and event latency are not
-  qualified. Collection-phase scores are not fall probabilities. See the
+  experimental models, trained on two participants' sessions and one hour of
+  continuous non-fall data from one room. Continuous accuracy, false alarms per
+  hour, and event latency are not qualified. Collection-phase scores are not fall probabilities. See the
   [live detector guide](live-fall-detection.md) and
   [model pilot summary](reports/fall-model-pilots.md).
 

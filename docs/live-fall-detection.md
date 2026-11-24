@@ -1,9 +1,11 @@
 # Live four-receiver fall scoring
 
-The native sequence detector uses the existing nine ONNX exports and saved
-normalizers under `artifacts/model/`. It requires no training dataset. Rust owns
-acquisition, preprocessing, resident ONNX sessions, inference scheduling and
-logs; Python supplies controls and displays results.
+The native sequence detector uses the ONNX exports and saved normalizers under
+`artifacts/model/`: the nine CNN, LSTM and GRU models, and `tonepool_tcn-4s`, the
+project's most consistent configuration (4 s, burst-centred training positives;
+[tone-pooling report](reports/tone-pooling-2026-11-23.md)). It requires no
+training dataset. Rust owns acquisition, preprocessing, resident ONNX sessions,
+inference scheduling and logs; Python supplies controls and displays results.
 
 ```sh
 uv sync --extra radio --extra detect
@@ -11,12 +13,17 @@ uv run fall-detect
 ```
 
 Connect the gateway and power the sensing radios. The default selection is
-CNN with four-second windows. Select models in the desktop controls,
+`tonepool_tcn-4s`. Select models in the desktop controls,
 or run a bounded headless session:
 
 ```sh
-uv run fall-detect --headless --duration 30 --models cnn-4s
+uv run fall-detect --headless --duration 30 --models tonepool_tcn-4s cnn-4s
 ```
+
+`tonepool_tcn-4s` reads the same input as the other models, so live
+preprocessing is unchanged. The published bundle, the checks on it and what
+remains unverified are in the
+[live tone-pool report](reports/live-tonepool-2026-11-24.md).
 
 ## Replay without hardware
 
@@ -44,6 +51,35 @@ Captures B and C replay; capture A lacks reference timing evidence. The
 `live_detect` example in `radio_detection` (`cargo run -p radio-detection --example live_detect`)
 runs the same backend from a JSON configuration without Python.
 
+## Installation calibration
+
+Scores shift with how a person moves, so calibrate the threshold once the
+detector is running, with the person who will be monitored. Everyone else should
+stay still or leave the room.
+
+1. Wait until **Start movement** is enabled (the first window of the segment).
+2. Press it, perform the movement shown in the status line, and press **Stop
+   movement** when it ends. The mark must last at least 1 s.
+3. Stay still until the countdown ends (about 6 s for 4 s models). The next movement
+   starts where the last one ended.
+4. After ten movements the threshold is set so that at most two of them would
+   have alarmed, the table shows it as calibrated, and the calibration is saved
+   to `calibration.json` in the run's output directory. Further movements refine
+   it. **Discard movement** drops the one in progress or the last one, and a
+   calibration with fewer than ten is withdrawn.
+
+A movement is rejected, and must be repeated, if a model scored none of its
+windows or if acquisition restarted. All selected models are calibrated on the
+same movements.
+
+Use the prompted mix: calibrating on one kind of movement moved the
+false-positive rate between 0.12 and 0.50 on one held-out session. Reuse a
+calibration with `--calibration FILE`. The detector refuses a file made
+for another bundle, hop, delivery grace, coverage gate or source (replay or
+gateway). It does not check the age of the file, and how long one lasts is
+untested. The rule, its test under live conditions and its limits are in the
+[calibration report](reports/live-calibration-2026-11-24.md).
+
 ## Runtime
 
 The backend defaults to WebGPU through ONNX Runtime 1.31.1, the separately
@@ -66,8 +102,11 @@ Each model keeps one latest pending window; one worker runs inference. The hop
 defaults to 250 ms. A window is built once its future filter context (0.25 s)
 and delivery grace (0.9 s) have passed, so results arrive about 1.2 s after the
 window ends. Coverage below 70% for any receiver, stale input and runtime
-errors produce unknown. Scores of at least 0.5 display a fall candidate; models
-remain independent. Changing the selection restarts the backend. Outputs go to
+errors produce unknown. In the GUI, scores at or above a model's threshold
+display a fall candidate; models remain independent. The threshold is the
+model's [calibration](#installation-calibration), or `--threshold` (default
+0.5) without one; the table shows which. Changing the selection restarts the
+backend. Outputs go to
 a fresh directory under `data/experiments/detector/`: `predictions.jsonl`,
 `detector.json`, and raw gateway journals in live mode. Git ignores these
 `native-<timestamp>` folders; track a run worth keeping with `uv run dvc add`

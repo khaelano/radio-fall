@@ -40,7 +40,18 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--minimum-coverage", type=float, default=0.7)
     result.add_argument("--packet-capacity", type=int, default=2048)
-    result.add_argument("--threshold", type=float, default=0.5)
+    result.add_argument(
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="decision threshold of models without a calibration",
+    )
+    result.add_argument(
+        "--calibration",
+        type=Path,
+        metavar="FILE",
+        help="calibration.json of an earlier run; the window also records a new one",
+    )
     result.add_argument("--headless", action="store_true")
     result.add_argument(
         "--duration", type=float, help="stop live acquisition after this many seconds"
@@ -66,6 +77,8 @@ def main(argv: list[str] | None = None) -> int:
         cli.error("--duration must be positive")
     if not 0 <= args.threshold <= 1:
         cli.error("--threshold must be between 0 and 1")
+    if args.calibration and args.headless:
+        cli.error("--calibration needs the window; headless output has no decisions")
     from .gui import run
 
     try:

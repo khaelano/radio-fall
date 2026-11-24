@@ -16,6 +16,8 @@ import numpy as np
 
 from fall_detection.apps.common.qt import qt_application
 
+from . import calibration
+
 # Model IDs of the live-compatible exports. The Rust bundle loader is the
 # authority on families; a model whose bundle is absent fails at start.
 MODELS = (
@@ -311,12 +313,24 @@ def _gui(args: Any, initial_config: dict) -> int:
     restart = QtWidgets.QPushButton("Apply selection / restart")
     controls.addWidget(restart)
     layout.addLayout(controls)
+    calibration_bar = QtWidgets.QHBoxLayout()
+    mark = QtWidgets.QPushButton("Start movement")
+    mark.setEnabled(False)
+    discard = QtWidgets.QPushButton("Discard movement")
+    discard.setEnabled(False)
+    calibration_status = QtWidgets.QLabel()
+    calibration_bar.addWidget(QtWidgets.QLabel("Calibration:"))
+    calibration_bar.addWidget(mark)
+    calibration_bar.addWidget(discard)
+    calibration_bar.addWidget(calibration_status, 1)
+    layout.addLayout(calibration_bar)
     status = QtWidgets.QLabel("Starting native backend…")
     layout.addWidget(status)
     columns = [
         "Model",
         "State",
         "Score",
+        "Threshold",
         "Data age",
         "Coverage",
         "Backend",
@@ -410,6 +424,12 @@ def _gui(args: Any, initial_config: dict) -> int:
     }
     began = time.monotonic()
     restarts = 0
+    maximum_age_ns = calibration.maximum_age_ns(args.hop_ms, args.grace_ms)
+    calibrator = calibration.Calibrator(
+        fallback=args.threshold,
+        maximum_age_ns=maximum_age_ns,
+        file=args.calibration,
+    )
 
     def robust_levels(values: np.ndarray) -> tuple[float, float] | None:
         """Percentile color range estimated from a subsample of finite values."""
@@ -434,6 +454,7 @@ def _gui(args: Any, initial_config: dict) -> int:
     def start(config: dict) -> None:
         nonlocal backend, selected, stream_buffer
         selected = config["models"]
+        calibrator.start(config)
         latest.clear()
         histories.clear()
         curves.clear()
@@ -524,11 +545,30 @@ def _gui(args: Any, initial_config: dict) -> int:
         )
         state["preview_end_ns"] = metadata["end_ns"]
 
+    def update_calibration(health: dict) -> None:
+        calibrator.update(health)
+        recorder = calibrator.recorder
+        mark.setText(
+            "Stop movement" if recorder.state == "recording" else "Start movement"
+        )
+        mark.setEnabled(calibrator.can_mark(health))
+        discard.setEnabled(recorder.state != "idle" or bool(recorder.movements))
+        calibration_status.setText(calibrator.status(health["clock_ns"]))
+
+    def mark_movement() -> None:
+        if backend is not None:
+            calibrator.mark(json.loads(backend.health()))
+
+    def discard_movement() -> None:
+        if backend is not None:
+            calibrator.discard(json.loads(backend.health()))
+
     def update_results() -> None:
         rows = json.loads(backend.poll(64))
         health = json.loads(backend.health())
         # Result times use the backend clock, which replay shifts.
         now = health.get("clock_ns") or time.monotonic_ns()
+        update_calibration(health)
         for row in rows:
             model = row["model_id"]
             if model not in histories:
@@ -548,10 +588,8 @@ def _gui(args: Any, initial_config: dict) -> int:
             row = latest.get(model, {})
             score = row.get("score")
             end = row.get("end_ns")
-            stale = (
-                end is not None
-                and now - end > (args.grace_ms + 250 + 2 * args.hop_ms) * 1_000_000
-            )
+            stale = end is not None and now - end > maximum_age_ns
+            threshold, calibrated = calibrator.threshold(model)
             if health.get("error"):
                 score = None
                 label = "unknown: backend error"
@@ -560,11 +598,12 @@ def _gui(args: Any, initial_config: dict) -> int:
             else:
                 label = "unknown: stale" if stale else row.get("state", "waiting")
             if score is not None and not stale and not finished:
-                label = "fall candidate" if score >= args.threshold else "non-candidate"
+                label = "fall candidate" if score >= threshold else "non-candidate"
             coverage = row.get("coverage")
             values = [
                 label,
-                "—" if score is None or stale else f"{score:.3f}",
+                "—" if score is None or stale else f"{score:.4f}",
+                f"{threshold:.4f} {'calibrated' if calibrated else 'uncalibrated'}",
                 "—" if end is None else f"{max(0, now - end) / 1e9:.2f} s",
                 "—"
                 if not coverage
@@ -591,6 +630,8 @@ def _gui(args: Any, initial_config: dict) -> int:
             status.setText(str(error))
 
     restart.clicked.connect(apply)
+    mark.clicked.connect(mark_movement)
+    discard.clicked.connect(discard_movement)
     timer = QtCore.QTimer()
     timer.timeout.connect(tick)
     timer.start(33)

@@ -6,7 +6,8 @@
 - `csi_viewer/`: live CSI viewer entry point.
 - `session_inspector/`: offline inspector; its Qt-free frame loading, review,
   export and video modules sit beside the `ui/` window, panels and workers.
-- `detector/`: live detector interface and command.
+- `detector/`: live detector interface and command; `calibration.py` sets its
+  thresholds without Qt or inference.
 - `common/`: dashboard widgets, display preparation (`rendering.py`), pacing,
   shared `--fps` option and Qt bootstrap used by several applications.
 

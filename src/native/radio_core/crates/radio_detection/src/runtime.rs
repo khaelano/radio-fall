@@ -26,6 +26,10 @@ fn amd_drm_devices() -> std::collections::BTreeSet<u32> {
     devices
 }
 
+/// Threads of one CPU session: the 4 s model takes about 5 ms with four, against 4 ms
+/// with eight and 3 ms with the default, and a window arrives every 250 ms.
+const CPU_INTRA_THREADS: usize = 4;
+
 /// Explicitly selected execution backend.
 pub enum Backend<'a> {
     CpuDiagnostic,
@@ -176,6 +180,14 @@ impl Runtime {
                 Some(&options),
             )?;
         } else {
+            // The default pool spins a thread on every physical core between calls, which
+            // keeps the whole machine busy for a few milliseconds of work per window.
+            let threads = std::thread::available_parallelism()
+                .map_or(1, std::num::NonZeroUsize::get)
+                .min(CPU_INTRA_THREADS);
+            builder = builder
+                .with_intra_threads(threads)?
+                .with_config_entry("session.intra_op.allow_spinning", "0")?;
             builder = builder.with_devices(
                 self.environment.devices().filter(|d| {
                     d.ep().is_ok_and(|ep| ep == "CPUExecutionProvider")

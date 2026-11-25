@@ -72,6 +72,12 @@ A movement is rejected, and must be repeated, if a model scored none of its
 windows or if acquisition restarted. All selected models are calibrated on the
 same movements.
 
+In the recorded sessions, a calibration on the first movements was too strict later: early
+movements scored higher, partly because the protocol starts with walking transitions
+([replay report](reports/live-replay-evaluation-2026-11-25.md)). Calibrating on later
+movements holds the false-positive rate of the non-falls near the target, but those
+sessions cannot show its effect on falls.
+
 Use the prompted mix: calibrating on one kind of movement moved the
 false-positive rate between 0.12 and 0.50 on one held-out session. Reuse a
 calibration with `--calibration FILE`. The detector refuses a file made
@@ -88,7 +94,9 @@ the environment; `ORT_DYLIB_PATH` and `ORT_WEBGPU_PLUGIN`, or `--ort-library`
 and `--webgpu-plugin`, override discovery. The only AMD WebGPU adapter is
 selected automatically; `--adapter-id` picks one by PCI device ID. Warmup
 fails if a model's main operator does not run on WebGPU. `--backend cpu` selects
-CPU explicitly; GPU failures never fall back to CPU silently.
+CPU explicitly; GPU failures never fall back to CPU silently. A CPU session uses at most four
+threads and does not spin (about 0.6 of a core for the default model; 20 before the fix;
+[replay report](reports/live-replay-evaluation-2026-11-25.md#cpu-use-of-the-product)).
 
 Preprocessing uses the documented settings of the current exports: 120 Hz,
 centered 0.5-second Hampel span, threshold 3, MAD scale 1.4826 and minimum five

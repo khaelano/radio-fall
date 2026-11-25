@@ -789,7 +789,9 @@ is lag-1 energy averaged over tones and receivers, with transfer AUC
    was dropped. Phase 4 (burst labels) helped at 4 s.
 2. Test how long an installation calibration lasts (needs a second day per
    participant). The live detector gained the calibration step on 24 November
-   ([calibration report](live-calibration-2026-11-24.md)).
+   ([calibration report](live-calibration-2026-11-24.md)), and scores fall
+   within a session, so a calibration at its start transfers less
+   ([replay report](live-replay-evaluation-2026-11-25.md)).
 3. Done on 24 November for the 4 s `tonepool_tcn`: it is registered in the Rust
    detector and published
    ([live tone-pool report](live-tonepool-2026-11-24.md)). The other `tonepool`

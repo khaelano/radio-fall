@@ -6,7 +6,10 @@ that about ten known non-fall movements correct it. Its figures use windows ever
 2 s and no coverage gate. The live detector scores every 250 ms and reports a
 window as unknown when a receiver covers less than 70 % of it. This report
 describes the calibration step added to `fall-detect` and tests its rule under
-those two conditions. Use the
+those two conditions. A later [replay through the real detector](live-replay-evaluation-2026-11-25.md)
+found that a calibration on a session's first movements is too strict later (they score higher,
+partly because the protocol starts with walking transitions), while the random movements used here are
+spread over the session. Use the
 [guide](../live-fall-detection.md#installation-calibration) for operation.
 
 ## Rule
@@ -48,7 +51,8 @@ offline rule); an attempt without a scored window cannot alarm.
 
 Cells are attempt false-positive rate / recall, for a target of 0.2.
 
-- **The target holds at the live hop and gate.** The false-positive rate was
+- **The target holds at the live hop and gate, for movements drawn at random over the whole
+  session.** (A calibration at its start does not: see the replay report.) The false-positive rate was
   0.21 in every holdout with random movements and 0.18–0.23 with the prompted
   mix.
 - **Calibrate at the live hop.** An offline threshold (2 s stride, no gate)
@@ -113,8 +117,10 @@ the continuous hour), and worse on `khaelano` (0.69 against 0.80; 0.63 against
 - The calibration has not run on radio hardware or with a person. The
   9 November sessions lack the journal events that replay needs, so their
   movements entered through recorded signals, not through live timing.
-- Calibration and test attempts come from the same session and day. How long a
-  calibration lasts is untested.
+- Calibration and test attempts come from the same session and day, and the
+  calibration movements were drawn at random over it. Movements at the
+  start of a session score higher (a calibration there was too strict later), and
+  how long one lasts is untested.
 - The held-out sessions are two participants in one room. The mattress confound
   applies, and the published bundle itself was trained on both participants.
 - The operator's marks stand in for the action cue. How precisely they must be

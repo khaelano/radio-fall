@@ -212,8 +212,21 @@ on their hardware and data, and are not reproduced here.
   alarms at 0.5. `fall-detect` records ten prompted non-fall movements and sets
   each model's threshold from them. Under live conditions (250 ms hop, 70 %
   gate) on the held-out sessions, this held the attempt false-positive rate at
-  0.18–0.23 with recall 0.63–0.73; one calibration is noisy and has not been
-  tried with a person. The 70 % gate, which the offline evaluation does not
+  0.18–0.23 with recall 0.63–0.73 when the movements were drawn at random over the
+  session. Replaying the recorded sessions through the real detector (25 November)
+  gave the same rates and reproduced the offline scores (median difference 1e-5), but
+  movements early in a session score higher (partly because the protocol starts with walking
+  transitions, partly a fall within a kind, −0.15 and −0.33 Spearman on average):
+  calibrating on the first ten movements of a session gave recall 0.63 on `akmal` and 0.35 on
+  `khaelano` (false-positive rate 0.15 and 0.03). Recalibrating on newer movements held
+  the non-fall rate near the target, but its effect on falls cannot be judged on these sessions
+  (every fall follows every non-fall). Unknown
+  windows (receiver coverage) were 34 %, 12 % and 32 % of the three recordings. Falls
+  were alarmed a median 2.1–2.6 s after the burst. The CPU backend's ONNX Runtime
+  sessions are limited to four non-spinning threads since 25 November (0.64 cores
+  instead of 20). The
+  calibration has not been tried with a person. See the
+  [replay report](reports/live-replay-evaluation-2026-11-25.md). The 70 % gate, which the offline evaluation does not
   use, leaves 20 of 231 (`akmal`) and 9 of 232 (`khaelano`) attempts without
   a scored window at the live hop. See the
   [live tone-pool report](reports/live-tonepool-2026-11-24.md), the

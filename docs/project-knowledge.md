@@ -408,7 +408,21 @@ on their hardware and data, and are not reproduced here.
   The FallDeFi and WiFall adaptations already exclude it. The per-window
   eigendecomposition has no ONNX operator. A live path (Rust computes the
   53 × 65 features, ONNX runs only the head) is a proposal in that report, not
-  implemented.
+  implemented. Emulating the live hop, gate and ten-movement calibration
+  offline ([evaluation](reports/pcspec-gru-evaluation-2026-11-26.md)),
+  `pcspec_gru` caught 73–90 % of falls at a false-positive rate of 0.20–0.21
+  with random movements (`tonepool_tcn` 65–73 %), and 63–72 % with a session's
+  first ten (`tonepool_tcn` 33–55 %). It beat FallDeFi by 0.11–0.21 attempt
+  AUC on the same attempts. It raised about twice `tonepool_tcn`'s alarm
+  episodes on the held-out idle hour, and walking transitions caused most of its
+  false alarms. Its PCA and STFT front end is now implemented in Rust
+  (`radio_signal::pc_spectrum`, Python `PcSpectrumFrontEnd`; float64 sliding
+  covariance sums, a top-5 tridiagonal solver, AVX2). It matched PyTorch's
+  float64 features to 9e-6 in logits and took 2.2 ms per window on one core
+  (0.86 ms on four), against 5.1 ms for `tonepool_tcn` (which can run on
+  WebGPU) and 0.33 ms for `tiny_tcn1`. The live detector does not use it yet. Training ran cuDNN's GRU with TF32
+  (PyTorch's default); saved probabilities differ from exact float32 by up to
+  0.012.
 - How should collection separate falls from setup, for example non-fall
   activity with the mattress in place or interleaved trial order?
 - How should irregular timestamps and packet loss shape model windows?
@@ -424,8 +438,8 @@ I/O, gateway preparation and startup, clock and reference maintenance,
 acceptance, journals, availability, quality counters, replay and the live
 `session`), `radio_detection` (feeds, aligned history, window building, ONNX
 Runtime sessions, scheduler, worker and the live coordinator) and `radio_signal`
-(I/Q kernels, LTF layouts, phase calibration, and the offline amplitude and
-Hampel kernels). The extension crate in
+(I/Q kernels, LTF layouts, phase calibration, the offline amplitude and
+Hampel kernels, and the `pcspec` principal-component spectrum front end). The extension crate in
 `src/native/radio_core/src/` exposes `NativeAcquisition`, `NativeDetector`,
 the recording writer, record views and offline kernels to Python.
 `tests/test_architecture.py` rejects Python serial I/O or retired acquisition

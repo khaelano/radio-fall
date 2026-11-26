@@ -269,10 +269,13 @@ series become one, the step length. Attempt AUC, mean over four seeds:
   had a median of 8e-6 and a maximum of 2.6e-4. Logits changed by at most
   1.3e-4 and probabilities by at most 1.2e-5. The usable frames were identical.
   The fifth and sixth eigenvalues are close (median ratio 1.07–1.08, 1st
-  percentile 1.007–1.009), but a float32-sized perturbation is far smaller than that gap, so the
-  five-component subspace did not move.
+  percentile 1.007–1.009), but a float32-sized perturbation is far smaller than
+  that gap, so the five-component subspace did not move. Both passed through the
+  same head in the same batch, so the comparison isolates the features; the
+  head's own TF32 rounding in training is discussed under the plan's acceptance
+  checks.
 
-## Plan for the live detector (proposal, not implemented)
+## Plan for the live detector (proposal; front end implemented)
 
 The live detector feeds every model `[1, time, 1964]`: the Hampel-filtered
 amplitude's squared difference after `log1p`, normalized, with validity and
@@ -302,8 +305,10 @@ features: Rust computes the 53 × 65 features, and ONNX runs only the head
    bundles default to the squared difference. Only the representations that the
    resident models need are computed. The model's own normalizer and
    `Normalizer::assemble` stay unchanged.
-3. **Rust front end** (a new `radio_detection` module, or a kernel in
-   `radio_signal`), mirroring `PCSpectrum.frame_features` in evaluation mode:
+3. **Rust front end**, mirroring `PCSpectrum.frame_features` in evaluation mode.
+   Done on 26 November as `radio_signal::pc_spectrum`, with the Python class
+   `PcSpectrumFrontEnd` ([evaluation report](pcspec-gru-evaluation-2026-11-26.md#the-rust-front-end));
+   the detector does not use it yet. It computes:
    - interior tone indices 2–120 and 124–242, and usable samples (at least 90 %
      of those tones valid);
    - weighted centring and a float64 covariance per receiver, and its five leading
@@ -314,10 +319,10 @@ features: Rust computes the 53 × 65 features, and ONNX runs only the head
      log(power + 1e-6);
    - frames usable at 60 %, then mean, maximum and coverage over usable receivers.
 
-   For the eigenvectors, use `faer` (pure Rust, self-adjoint eigendecomposition)
-   or `nalgebra`, not a LAPACK binding, which would add a system library to the
-   wheel. Only the subspace matters, so differences in sign and order between
-   solvers have no effect.
+   The eigenvectors come from a specialized solver in the same crate
+   (`symmetric_eigen`: tridiagonal reduction, bisection, inverse iteration),
+   with no new dependency and no LAPACK binding. Only the subspace matters, so
+   differences in sign and order between solvers have no effect.
 4. **Generalize the model contract.** Today the 1964 width is fixed in several
    places:
    - `bundle::inspect_exports` (`input_shape`);
@@ -352,18 +357,28 @@ Acceptance checks:
 - **Features and logits:** within a tolerance of PyTorch on the parity fixture, an
   ignored test that needs the DVC artifacts. On 1,024 test windows, float64
   features on the CPU moved `pcspec_gru` logits by at most 1.3e-4 from float32 on
-  the GPU, so a logit tolerance of 1e-3 leaves margin. Bit-for-bit parity is not
-  achievable across eigensolvers.
+  the GPU in the same batches. The saved training-time predictions are less
+  exact: training ran cuDNN's GRU with TF32 tensor cores (PyTorch's default).
+  Against exact float32, which agreed with float64 to about 3e-6, 2.1 % of the
+  24,048 saved test probabilities moved by more than 1e-4, and the largest by
+  0.012 (logit 0.052); the features were unaffected
+  ([evaluation report](pcspec-gru-evaluation-2026-11-26.md)). The fixture should
+  therefore be computed with TF32 off or in float64, and against it a logit
+  tolerance of 1e-3 leaves margin. The Rust front end stayed within 9e-6 of
+  float64 PyTorch on 1,816 real windows. Bit-for-bit parity is not achievable across
+  eigensolvers.
 - **Real detector:** replay the recorded sessions through it, as on 25 November.
   Scores should reproduce the offline ones; record the time per hop on the
   i7-14700F and on the AMD laptop.
 
-Cost: the front end took about 8 ms per hop on one i7-14700F core with LAPACK; a
-Rust solver may differ. If the laptop needs less, the covariance can be kept as
-sliding sums of the weights, the samples and their products. Each 250 ms hop adds
-and removes 30 of the 480 samples, so it needs about an eighth of the work, with
-an occasional exact recompute. Subspace iteration is not a good shortcut: the
-fifth and sixth eigenvalues are close, so it converges slowly.
+Cost: the Rust front end keeps the covariance as float64 sliding sums (each
+250 ms hop adds and removes 30 of the 480 samples, after checking the overlap bit
+for bit). On real windows it took a median 2.2 ms per window on one i7-14700F
+core and 0.86 ms with four threads, against about 8 ms for the LAPACK estimate.
+A warm-started subspace iteration would be faster still, but it is an
+approximation: with a block of 12 and four steps it moved logits by up to 0.05.
+An earlier version of this paragraph said subspace iteration converges too
+slowly; that holds for a cold start, not for a warm start with a larger block.
 
 Not decided: whether to deploy at all. The gain is measured on the same two
 participants and the same fall-after-non-fall recording order as every other

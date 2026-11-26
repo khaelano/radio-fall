@@ -27,6 +27,7 @@ MODELS = (
         for duration in (2, 4, 6)
     ),
     "tonepool_tcn-4s",
+    "tiny_tcn1-4s",
 )
 DEFAULT_MODELS = ("tonepool_tcn-4s",)
 

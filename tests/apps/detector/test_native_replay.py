@@ -16,7 +16,10 @@ MODELS = ROOT / "artifacts/model"
 NORMALIZERS = {
     "cnn-4s": "cnn/normalizer-4s.npz",
     "tonepool_tcn-4s": "tonepool_tcn/normalizer-4s.npz",
+    "tiny_tcn1-4s": "tiny_tcn1/normalizer-4s.npz",
 }
+# Models whose Rust logits are checked against ONNX Runtime on the same inputs.
+CHECKED_LOGITS = ("tonepool_tcn-4s", "tiny_tcn1-4s")
 
 
 def _offline_inputs(capture: Path) -> tuple[int, int, np.ndarray, np.ndarray]:
@@ -91,7 +94,7 @@ def _offline_inputs(capture: Path) -> tuple[int, int, np.ndarray, np.ndarray]:
 @pytest.mark.skipif(
     not CAPTURE.is_dir()
     or gui.runtime_library() is None
-    or not (MODELS / "tonepool_tcn").is_dir(),
+    or not all((MODELS / path).parent.is_dir() for path in NORMALIZERS.values()),
     reason="needs the DVC capture and models and an ONNX Runtime library",
 )
 def test_native_replay_matches_offline_preprocessing(tmp_path):
@@ -167,20 +170,27 @@ def test_native_replay_matches_offline_preprocessing(tmp_path):
 
     # Independent inference on the saved inputs must reproduce the Rust logits.
     ort = pytest.importorskip("onnxruntime")
-    session = ort.InferenceSession(
-        str(MODELS / "tonepool_tcn/tonepool_tcn-4s.onnx"),
-        providers=["CPUExecutionProvider"],
-    )
+    sessions = {
+        model: ort.InferenceSession(
+            str(MODELS / f"{model[: -len('-4s')]}/{model}.onnx"),
+            providers=["CPUExecutionProvider"],
+        )
+        for model in CHECKED_LOGITS
+    }
     logits = {
         (row["model_id"], row["end_ns"]): row["logit"]
         for row in rows
         if row["state"] == "score"
     }
+    compared = dict.fromkeys(CHECKED_LOGITS, 0)
     for entry, native in zip(index, tensors):
         logit = logits.get((entry["model_id"], entry["end_ns"]))
-        if entry["model_id"] == "tonepool_tcn-4s" and logit is not None:
+        if entry["model_id"] in sessions and logit is not None:
+            session = sessions[entry["model_id"]]
             expected = session.run(["fall_logit"], {"input": native[None]})[0][0]
             assert logit == pytest.approx(expected, abs=1e-4)
+            compared[entry["model_id"]] += 1
+    assert all(compared.values()), compared
 
     metadata, raw, model_input = preview
     metadata = json.loads(metadata)

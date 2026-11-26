@@ -15,7 +15,7 @@ pub struct Family {
 }
 
 /// Families with a live-compatible export: the default 120 Hz representation.
-pub const FAMILIES: [Family; 4] = [
+pub const FAMILIES: [Family; 5] = [
     Family {
         name: "cnn",
         main_operator: "Conv",
@@ -31,6 +31,11 @@ pub const FAMILIES: [Family; 4] = [
     // Shared per-tone encoder with a temporal head; its export is mostly Conv.
     Family {
         name: "tonepool_tcn",
+        main_operator: "Conv",
+    },
+    // Tone- and receiver-averaged motion energy with a small temporal network.
+    Family {
+        name: "tiny_tcn1",
         main_operator: "Conv",
     },
 ];
@@ -158,19 +163,24 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../../artifacts/model");
         for family in FAMILIES {
             let exports = inspect_exports(&root.join(family.name)).unwrap();
-            // tonepool_tcn publishes only its 4 s model so far.
+            // tonepool_tcn and tiny_tcn1 publish only their 4 s models so far.
             assert_eq!(
                 exports.len(),
-                if family.name == "tonepool_tcn" { 1 } else { 3 }
+                if ["tonepool_tcn", "tiny_tcn1"].contains(&family.name) {
+                    1
+                } else {
+                    3
+                }
             );
         }
     }
     #[test]
     fn family_of_resolves_ids_including_underscored_names() {
         assert_eq!(family_of("tonepool_tcn-4s").unwrap().main_operator, "Conv");
+        assert_eq!(family_of("tiny_tcn1-4s").unwrap().main_operator, "Conv");
         assert_eq!(family_of("gru-6s").unwrap().main_operator, "GRU");
         assert!(family_of("tonepool_tcn").is_none());
         assert!(family_of("unknown-4s").is_none());
-        assert_eq!(MAX_MODELS, 12);
+        assert_eq!(MAX_MODELS, 15);
     }
 }

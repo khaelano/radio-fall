@@ -18,7 +18,7 @@ def test_parser_selects_best_four_second_model_on_webgpu():
     assert args.backend == "webgpu"
     assert args.models == ["tonepool_tcn-4s"]
     # The earlier sequence models stay selectable next to it.
-    assert {"tonepool_tcn-4s", "cnn-4s"} <= set(gui.MODELS)
+    assert {"tonepool_tcn-4s", "tiny_tcn1-4s", "cnn-4s"} <= set(gui.MODELS)
 
 
 def test_native_headless_polls_results_and_stops_on_failure(monkeypatch, capsys):

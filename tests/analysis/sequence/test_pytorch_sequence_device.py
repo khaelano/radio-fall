@@ -236,3 +236,57 @@ def test_tone_pool_lags_reads_lags_as_channels_of_each_tone(training_notebook):
     # The same tone permutation in every lag leaves the output unchanged.
     torch.testing.assert_close(model(inputs(torch.randperm(245))), original)
     assert original.shape == (2,)
+
+
+def _pc_spectrum_window(seed: int = 0) -> torch.Tensor:
+    """A 4 s window [1, 480, 1964]: low-rank motion plus noise per receiver,
+    staggered 12-in-68 receiver gaps and some invalid tones."""
+    generator = np.random.default_rng(seed)
+    t = np.arange(480)[:, None]
+    tones = np.arange(245)[None, :] / 245
+    window = np.zeros((480, 1964), np.float32)
+    for r in range(4):
+        present = (t[:, 0] + 17 * r) % 68 >= 12
+        values = (
+            2 * np.sin(2 * np.pi * 3 * t / 120) * tones
+            + np.sin(2 * np.pi * 37 * t / 120 + r) * (1 - tones)
+            + 0.3 * generator.standard_normal((480, 245))
+        )
+        valid = present[:, None] & ((np.arange(245)[None, :] * 31 + t * 7) % 101 != 0)
+        window[:, r * 245 : (r + 1) * 245] = np.where(valid, values, 0)
+        window[:, 980 + r * 245 : 980 + (r + 1) * 245] = valid
+        window[:, 1960 + r] = present
+    return torch.from_numpy(window[None])
+
+
+def test_pc_spectrum_export_head_equals_the_model(training_notebook):
+    torch.manual_seed(0)
+    model = training_notebook["TorchPCSpectrum"](1964, 8)
+    # Non-trivial batch norm statistics, as after training.
+    model.norm.running_mean.normal_()
+    model.norm.running_var.uniform_(0.5, 2.0)
+    model.norm.weight.data.uniform_(0.5, 1.5)
+    model.norm.bias.data.normal_()
+    model.eval()
+    window = _pc_spectrum_window()
+    with torch.inference_mode():
+        head = model.head_module().eval()
+        torch.testing.assert_close(
+            head(model.frame_features(window)), model(window), rtol=0, atol=1e-5
+        )
+    # The export holds no batch norm: it is folded into the GRU.
+    assert not any(isinstance(m, torch.nn.BatchNorm1d) for m in head.modules())
+
+
+def test_pc_spectrum_features_match_the_native_front_end(training_notebook):
+    from fall_detection._radio_native import PcSpectrumFrontEnd
+
+    model = training_notebook["TorchPCSpectrum"](1964, 8).double().eval()
+    window = _pc_spectrum_window(seed=1)
+    with torch.inference_mode():
+        expected = model.frame_features(window.double())[0].numpy()
+    raw, updates, _ = PcSpectrumFrontEnd(480).features(window[0].numpy().tobytes())
+    assert updates == ["full"] * 4
+    native = np.frombuffer(raw, np.float32).reshape(expected.shape)
+    np.testing.assert_allclose(native, expected, rtol=0, atol=1e-3)
+    assert model.front_end["components"] == model.components

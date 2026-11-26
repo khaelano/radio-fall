@@ -212,27 +212,32 @@ impl Runtime {
     pub fn infer(
         &mut self,
         model: usize,
-        frames: usize,
+        shape: [usize; 2],
         input: Vec<f32>,
     ) -> Result<f32, Box<dyn std::error::Error>> {
-        self.infer_view(model, frames, &input)
+        self.infer_view(model, shape, &input)
     }
 
-    /// Borrow immutable prepared storage for one synchronous native submission.
+    /// Borrow immutable prepared storage for one synchronous native submission;
+    /// `shape` is the input after its batch dimension of one.
     pub fn infer_view(
         &mut self,
         model: usize,
-        frames: usize,
+        shape: [usize; 2],
         input: &[f32],
     ) -> Result<f32, Box<dyn std::error::Error>> {
-        if input.len() != frames.checked_mul(1964).ok_or("input size overflow")? {
-            return Err("input must have shape [1,time,1964]".into());
+        if input.len()
+            != shape[0]
+                .checked_mul(shape[1])
+                .ok_or("input size overflow")?
+        {
+            return Err("input does not match its shape".into());
         }
         let session = self
             .sessions
             .get_mut(model)
             .ok_or("unknown model session")?;
-        let tensor = TensorRef::from_array_view(([1, frames, 1964], input))?;
+        let tensor = TensorRef::from_array_view(([1, shape[0], shape[1]], input))?;
         let outputs = session.run(ort::inputs!["input" => tensor])?;
         let (_, values) = outputs
             .get("fall_logit")

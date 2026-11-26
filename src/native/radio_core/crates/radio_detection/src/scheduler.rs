@@ -11,8 +11,16 @@ pub struct Job {
     pub finalized_ns: u64,
     pub deadline_ns: u64,
     pub coverage: [f32; 4],
+    /// Samples per window.
     pub frames: usize,
+    /// ONNX input `[steps, features]` after the batch dimension: the window
+    /// itself, or the front end's frame features.
+    pub shape: [usize; 2],
     pub input: Arc<[f32]>,
+    /// Time spent in the principal-component spectrum front end, if any.
+    pub front_end_ns: u64,
+    /// How the front end obtained each receiver's covariance, if it ran.
+    pub front_end_updates: Option<[radio_signal::pc_spectrum::Update; 4]>,
 }
 
 /// Explicit result state: unknown never becomes a non-fall decision.
@@ -105,7 +113,8 @@ impl Scheduler {
             || job.finalized_ns < job.end_ns
             || job.deadline_ns < job.finalized_ns
             || job.frames == 0
-            || job.frames.checked_mul(1964) != Some(job.input.len())
+            || job.shape.contains(&0)
+            || job.shape[0].checked_mul(job.shape[1]) != Some(job.input.len())
             || job
                 .coverage
                 .iter()
@@ -201,7 +210,10 @@ mod tests {
             deadline_ns: end + 100,
             coverage: [1.0; 4],
             frames: 1,
+            shape: [1, 1964],
             input: vec![0.0; 1964].into(),
+            front_end_ns: 0,
+            front_end_updates: None,
         }
     }
     #[test]

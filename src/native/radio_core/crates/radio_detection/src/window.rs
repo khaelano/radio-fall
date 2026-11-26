@@ -20,6 +20,8 @@ pub struct Prepared {
     pub filtered: Vec<f64>,
     pub replacements: Vec<u8>,
     pub transformed: Vec<f32>,
+    /// `A[t] - A[t - 1]` cast to float32 (NaN where missing), when requested.
+    pub signed: Vec<f32>,
     pub model_input: Vec<f32>,
     pub coverage: [f32; 4],
 }
@@ -62,12 +64,19 @@ impl Prepared {
             deadline_ns: deadline,
             coverage: self.coverage,
             frames: self.frames,
+            shape: [self.frames, crate::sequence::FEATURES],
             input: self.model_input.into(),
+            front_end_ns: 0,
+            front_end_updates: None,
         })
     }
 }
 
 /// Build an immutable window with explicit context/segment-edge semantics.
+///
+/// With `signed`, also keep the float64 difference cast to float32, as the
+/// offline `signed_difference` export computes it (the `model_input` always
+/// uses the squared difference).
 pub fn prepare(
     snapshot: &Snapshot,
     times: &[f64],
@@ -75,6 +84,7 @@ pub fn prepare(
     edges: SegmentEdges,
     contract: &Preprocessing,
     normalizer: &Normalizer,
+    signed: bool,
 ) -> Result<Prepared, String> {
     contract.validate()?;
     let rows = snapshot.presence.len();
@@ -104,8 +114,13 @@ pub fn prepare(
         contract.hampel_threshold,
     )?;
     let frames = window.len();
-    let mut transformed =
-        vec![f32::NAN; frames.checked_mul(SIGNALS).ok_or("window size overflow")?];
+    let size = frames.checked_mul(SIGNALS).ok_or("window size overflow")?;
+    let mut transformed = vec![f32::NAN; size];
+    let mut signed_values = if signed {
+        vec![f32::NAN; size]
+    } else {
+        Vec::new()
+    };
     for (target, row) in window.clone().enumerate() {
         if row == 0 {
             continue;
@@ -120,6 +135,9 @@ pub fn prepare(
                     return Err("signal transformation overflow".into());
                 }
                 transformed[target * SIGNALS + feature] = value;
+                if signed {
+                    signed_values[target * SIGNALS + feature] = difference as f32;
+                }
             }
         }
     }
@@ -132,6 +150,7 @@ pub fn prepare(
         filtered,
         replacements,
         transformed,
+        signed: signed_values,
         model_input,
         coverage,
     })
@@ -175,9 +194,27 @@ mod tests {
             },
             &contract(),
             &normalizer,
+            true,
         )
         .unwrap();
         assert_eq!(prepared.generation, 4);
+        // The signed difference keeps the sign and skips square and log1p.
+        assert!(prepared.signed[..SIGNALS].iter().all(|v| v.is_nan()));
+        assert_eq!(prepared.signed[SIGNALS], 1.0);
+        assert!(prepared.signed[2 * SIGNALS + 245].is_nan());
+        assert!(prepared.signed[3 * SIGNALS + 245].is_nan());
+        assert_eq!(
+            prepared
+                .signed
+                .iter()
+                .map(|v| v.is_nan())
+                .collect::<Vec<_>>(),
+            prepared
+                .transformed
+                .iter()
+                .map(|v| v.is_nan())
+                .collect::<Vec<_>>()
+        );
         assert_eq!(prepared.model_input.len(), 7 * 1964);
         assert!(prepared.transformed[..SIGNALS].iter().all(|v| v.is_nan()));
         assert_eq!(prepared.transformed[SIGNALS], 2.0f64.ln() as f32);
@@ -195,7 +232,8 @@ mod tests {
                     end: false
                 },
                 &contract(),
-                &normalizer
+                &normalizer,
+                false
             )
             .is_err()
         );
@@ -209,7 +247,8 @@ mod tests {
                     end: false
                 },
                 &contract(),
-                &normalizer
+                &normalizer,
+                false
             )
             .is_err()
         );
@@ -224,6 +263,7 @@ mod tests {
             filtered: vec![],
             replacements: vec![],
             transformed: vec![],
+            signed: vec![],
             model_input: vec![0.0; 240 * 1964],
             coverage: [0.8; 4],
         };

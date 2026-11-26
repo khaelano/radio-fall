@@ -5,7 +5,7 @@
 //! a fixed hop, and submits them to one resident inference worker. Results go
 //! to `predictions.jsonl` and to the latest-result table read by the frontend.
 use crate::{
-    bundle,
+    bundle::{self, Representation},
     feed::{self, Clock, Feed, MappedBatch, RunInfo},
     preprocessing::Preprocessing,
     records::{self, Sequence},
@@ -16,6 +16,7 @@ use crate::{
     window::{self, SegmentEdges},
     worker::{ResultRow, Worker},
 };
+use radio_signal::pc_spectrum::{self, PcSpectrum};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -370,6 +371,11 @@ struct Model {
     normalizer: Normalizer,
     /// Capture time at which the next window ends.
     next_end_ns: Option<u64>,
+    /// Principal-component spectrum front end of front-end families, with the
+    /// state that lets consecutive windows update rather than recompute.
+    front: Option<PcSpectrum>,
+    /// Generation and first frame of the last window the front end processed.
+    last_window: Option<(u64, u64)>,
 }
 
 type LoadedModels = (Runtime, BTreeMap<String, usize>, Vec<Model>);
@@ -420,7 +426,11 @@ fn load_models(
         .map_err(|e| e.to_string())?;
         for _ in 0..3 {
             runtime
-                .infer(session, export.frames, vec![0.0; export.frames * 1964])
+                .infer(
+                    session,
+                    export.input,
+                    vec![0.0; export.input[0] * export.input[1]],
+                )
                 .map_err(|e| e.to_string())?;
         }
         if gpu {
@@ -449,10 +459,18 @@ fn load_models(
             }
         }
         sessions.insert(id.clone(), session);
+        // One thread: the coordinator runs the front end between ONNX calls.
+        let front = if export.front_end {
+            Some(PcSpectrum::new(export.frames, true, 1)?)
+        } else {
+            None
+        };
         models.push(Model {
             export,
             normalizer,
             next_end_ns: None,
+            front,
+            last_window: None,
         });
         lock(shared).health["warmed_models"] = models.len().into();
     }
@@ -706,6 +724,10 @@ impl Coordinator {
         self.generation = self.worker.reset()?;
         for model in &mut self.models {
             model.next_end_ns = None;
+            model.last_window = None;
+            if let Some(front) = &mut model.front {
+                front.reset();
+            }
         }
         self.segment = Some(Segment {
             run,
@@ -885,6 +907,9 @@ impl Coordinator {
             .copied()
             .find(|&i| self.models[i].export.frames == longest)
             .unwrap();
+        let signed = indices
+            .iter()
+            .any(|&i| self.models[i].export.representation == Representation::SignedDifference);
         let started = Instant::now();
         let prepared = window::prepare(
             &snapshot,
@@ -896,24 +921,30 @@ impl Coordinator {
             },
             &self.contract,
             &self.models[reference].normalizer,
+            signed,
         )?;
         let preprocessing_ns = started.elapsed().as_nanos() as u64;
         let segment = self.segment.as_ref().unwrap();
         let anchor = segment.sequences.as_ref().map_or(0, |(anchor, _)| *anchor);
         let run = segment.run.run.to_string();
-        let mut shared_inputs = BTreeMap::<(usize, String), Arc<[f32]>>::new();
+        let mut shared_inputs = BTreeMap::<(usize, String, Representation), Arc<[f32]>>::new();
         for &index in indices {
             let model = &self.models[index];
             let frames = model.export.frames;
+            let representation = model.export.representation;
             let skip = longest - frames;
+            let source = match representation {
+                Representation::SquaredDifference => &prepared.transformed,
+                Representation::SignedDifference => &prepared.signed,
+            };
             let mut buffer = Vec::new();
             let coverage = model.normalizer.assemble(
-                &prepared.transformed[skip * 980..],
+                &source[skip * 980..],
                 &snapshot.presence[range_start + skip..range_start + longest],
                 &mut buffer,
             )?;
             let input = shared_inputs
-                .entry((frames, model.export.normalizer_hash.clone()))
+                .entry((frames, model.export.normalizer_hash.clone(), representation))
                 .or_insert_with(|| buffer.into())
                 .clone();
             let window_start_frame = end_frame - frames as u64;
@@ -971,6 +1002,27 @@ impl Coordinator {
                 self.publish(row)?;
                 continue;
             }
+            // Front-end families: frame features from the assembled window, with
+            // the covariance sums updated from the previous window when it is
+            // the same stream (the front end verifies the overlap itself).
+            let generation = self.generation;
+            let model = &mut self.models[index];
+            let (shape, model_input, front_end_ns, front_end_updates) = match &mut model.front {
+                None => ([frames, crate::sequence::FEATURES], input, 0, None),
+                Some(front) => {
+                    let shift = model
+                        .last_window
+                        .filter(|&(g, start)| g == generation && window_start_frame > start)
+                        .map(|(_, start)| (window_start_frame - start) as usize);
+                    let started = Instant::now();
+                    let mut features = vec![0.0f32; front.outputs()];
+                    let updates = front.features(&input, shift, &mut features)?;
+                    model.last_window = Some((generation, window_start_frame));
+                    let shape = [features.len() / pc_spectrum::OUTPUTS, pc_spectrum::OUTPUTS];
+                    let elapsed = started.elapsed().as_nanos() as u64;
+                    (shape, features.into(), elapsed, Some(updates))
+                }
+            };
             self.worker.submit(Job {
                 model_id,
                 generation: self.generation,
@@ -980,7 +1032,10 @@ impl Coordinator {
                 deadline_ns: deadline,
                 coverage,
                 frames,
-                input,
+                shape,
+                input: model_input,
+                front_end_ns,
+                front_end_updates,
             })?;
         }
         Ok(())
@@ -1008,8 +1063,14 @@ impl Coordinator {
             "end_ns": job.end_ns, "finalized_ns": job.finalized_ns,
             "published_ns": row.published_ns, "logit": logit, "score": score,
             "coverage": job.coverage, "provider": row.provider, "state": state, "error": error,
+            "front_end_updates": job.front_end_updates.map(|updates| updates.map(|update| match update {
+                pc_spectrum::Update::Full => "full",
+                pc_spectrum::Update::Sliding => "sliding",
+                pc_spectrum::Update::Skipped => "skipped",
+            })),
             "timings": {
                 "queue_wait_ns": row.queue_wait_ns,
+                "front_end_ns": job.front_end_ns,
                 "inference_ns": row.inference_ns,
                 "publication_age_ns": row.published_ns.saturating_sub(job.end_ns),
             },

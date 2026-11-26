@@ -37,10 +37,16 @@ pub const BINS: usize = 32;
 /// Features per STFT frame: mean and maximum log power per bin, receiver share.
 pub const OUTPUTS: usize = 2 * BINS + 1;
 const STRIDE: usize = 240;
-const RUNS: [(usize, usize); 2] = [(2, 121), (124, 243)];
-const MINIMUM_TONES: f32 = 0.9;
-const MINIMUM_VALID: f32 = 0.6;
-const LOG_FLOOR: f32 = 1e-6;
+/// Version of the front end's definition, recorded in model bundles.
+pub const VERSION: u32 = 1;
+/// Interior tone index ranges (half-open): physical -120..=-2 and 2..=120.
+pub const RUNS: [(usize, usize); 2] = [(2, 121), (124, 243)];
+/// Share of interior tones a sample needs to be usable.
+pub const MINIMUM_TONES: f32 = 0.9;
+/// Share of usable samples an STFT frame needs to count.
+pub const MINIMUM_VALID: f32 = 0.6;
+/// Added to the power before the logarithm.
+pub const LOG_FLOOR: f32 = 1e-6;
 const RECOMPUTE_AFTER: u32 = 1024;
 const CHUNK: usize = 64;
 

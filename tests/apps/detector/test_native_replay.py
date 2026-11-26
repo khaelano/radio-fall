@@ -17,13 +17,21 @@ NORMALIZERS = {
     "cnn-4s": "cnn/normalizer-4s.npz",
     "tonepool_tcn-4s": "tonepool_tcn/normalizer-4s.npz",
     "tiny_tcn1-4s": "tiny_tcn1/normalizer-4s.npz",
+    "pcspec_gru-4s": "pcspec_gru/normalizer-4s.npz",
 }
+# Models that read the signed difference instead of the default representation.
+SIGNED = {"pcspec_gru-4s"}
 # Models whose Rust logits are checked against ONNX Runtime on the same inputs.
-CHECKED_LOGITS = ("tonepool_tcn-4s", "tiny_tcn1-4s")
+CHECKED_LOGITS = ("tonepool_tcn-4s", "tiny_tcn1-4s", "pcspec_gru-4s")
+# Models whose ONNX head reads the principal-component spectrum front end's
+# frame features, recomputed here from the saved window.
+FRONT_END = {"pcspec_gru-4s"}
 
 
-def _offline_inputs(capture: Path) -> tuple[int, int, np.ndarray, np.ndarray]:
-    """Recompute aligned log1p squared differences with the offline functions."""
+def _offline_inputs(
+    capture: Path,
+) -> tuple[int, int, np.ndarray, np.ndarray, np.ndarray]:
+    """Recompute aligned log1p squared and signed differences offline."""
     from fall_detection._radio_native import prepare_magnitude, read_envelopes
 
     from fall_detection.analysis.preprocessing.amplitude import hampel_subcarriers
@@ -85,10 +93,15 @@ def _offline_inputs(capture: Path) -> tuple[int, int, np.ndarray, np.ndarray]:
         threshold=3.0,
     )
     signal = np.log1p(squared_difference(filtered)).astype(np.float32)
+    # As 20261125-signed-difference/export_signed.py: float64 difference, then float32.
+    signed = np.full(filtered.shape, np.nan, np.float32)
+    signed[1:] = filtered[1:] - filtered[:-1]
     # Live windows may extend past the last recorded sample.
-    signal = np.concatenate((signal, np.full((1000, 980), np.nan, np.float32)))
+    padding = np.full((1000, 980), np.nan, np.float32)
+    signal = np.concatenate((signal, padding))
+    signed = np.concatenate((signed, padding))
     presence = np.concatenate((presence, np.zeros((1000, 4), dtype=bool)))
-    return anchor, lowest, signal, presence
+    return anchor, lowest, signal, signed, presence
 
 
 @pytest.mark.skipif(
@@ -143,7 +156,7 @@ def test_native_replay_matches_offline_preprocessing(tmp_path):
                 "preprocessing deadline exceeded",
             }
 
-    anchor, lowest, signal, presence = _offline_inputs(CAPTURE)
+    anchor, lowest, signal, signed, presence = _offline_inputs(CAPTURE)
     normalizers = {
         model: Normalizer.load(MODELS / path) for model, path in NORMALIZERS.items()
     }
@@ -155,7 +168,8 @@ def test_native_replay_matches_offline_preprocessing(tmp_path):
     assert len(index) == len(tensors) >= len(rows)
     for entry, native in zip(index, tensors):
         start = (entry["first_sequence"] - anchor) % 2**32 - lowest
-        values = signal[start : start + 480]
+        source = signed if entry["model_id"] in SIGNED else signal
+        values = source[start : start + 480]
         mask = np.isfinite(values)
         reference = np.concatenate(
             (
@@ -168,8 +182,13 @@ def test_native_replay_matches_offline_preprocessing(tmp_path):
         )
         np.testing.assert_array_equal(native, reference)
 
-    # Independent inference on the saved inputs must reproduce the Rust logits.
+    # Independent inference on the saved inputs must reproduce the Rust logits;
+    # front-end models' features are recomputed from the saved window with the
+    # same native front end, without the live stream's state.
+    from fall_detection._radio_native import PcSpectrumFrontEnd
+
     ort = pytest.importorskip("onnxruntime")
+    front_end = PcSpectrumFrontEnd(480)
     sessions = {
         model: ort.InferenceSession(
             str(MODELS / f"{model[: -len('-4s')]}/{model}.onnx"),
@@ -187,7 +206,11 @@ def test_native_replay_matches_offline_preprocessing(tmp_path):
         logit = logits.get((entry["model_id"], entry["end_ns"]))
         if entry["model_id"] in sessions and logit is not None:
             session = sessions[entry["model_id"]]
-            expected = session.run(["fall_logit"], {"input": native[None]})[0][0]
+            onnx_input = native
+            if entry["model_id"] in FRONT_END:
+                raw, _, _ = front_end.features(np.ascontiguousarray(native).tobytes())
+                onnx_input = np.frombuffer(raw, np.float32).reshape(-1, 65)
+            expected = session.run(["fall_logit"], {"input": onnx_input[None]})[0][0]
             assert logit == pytest.approx(expected, abs=1e-4)
             compared[entry["model_id"]] += 1
     assert all(compared.values()), compared

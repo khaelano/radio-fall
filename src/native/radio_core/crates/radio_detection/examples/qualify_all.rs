@@ -33,7 +33,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         for export in inspect_exports(&directory)? {
             let bytes = fs::read(Path::new(&args[4]).join(format!("{}.f32le", export.id)))?;
-            if bytes.len() != export.frames * 1964 * 4 {
+            // The ONNX input: the window, or a front-end family's frame features.
+            if bytes.len() != export.input[0] * export.input[1] * 4 {
                 return Err(format!("invalid input size for {}", export.id).into());
             }
             let input: Vec<f32> = bytes
@@ -54,15 +55,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut failed = false;
     for (export, input, cpu_session, gpu_session) in models {
-        let reference = cpu.infer(cpu_session, export.frames, input.clone())?;
+        let reference = cpu.infer(cpu_session, export.input, input.clone())?;
         for _ in 0..3 {
-            gpu.infer(gpu_session, export.frames, input.clone())?;
+            gpu.infer(gpu_session, export.input, input.clone())?;
         }
         let mut times = Vec::new();
         let mut maximum_error = 0.0f32;
         for _ in 0..20 {
             let start = Instant::now();
-            let logit = gpu.infer(gpu_session, export.frames, input.clone())?;
+            let logit = gpu.infer(gpu_session, export.input, input.clone())?;
             times.push(start.elapsed().as_micros());
             maximum_error = maximum_error.max((logit - reference).abs());
         }

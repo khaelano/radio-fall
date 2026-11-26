@@ -94,6 +94,7 @@ mod tests {
         }
         Normalizer::load(&root.join("tonepool_tcn/normalizer-4s.npz")).unwrap();
         Normalizer::load(&root.join("tiny_tcn1/normalizer-4s.npz")).unwrap();
+        Normalizer::load(&root.join("pcspec_gru/normalizer-4s.npz")).unwrap();
     }
     #[test]
     fn ordering_missingness_and_receiver_coverage() {

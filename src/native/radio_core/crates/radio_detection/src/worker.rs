@@ -104,7 +104,7 @@ impl Worker {
                         && job.coverage.iter().all(|&c| c >= minimum_coverage);
                     let logit = if eligible {
                         runtime
-                            .infer_view(sessions[&job.model_id], job.frames, &job.input)
+                            .infer_view(sessions[&job.model_id], job.shape, &job.input)
                             .map_err(|e| e.to_string())
                     } else {
                         Err("input unavailable or stale before inference".into())
@@ -256,12 +256,14 @@ mod tests {
             let profile =
                 std::env::temp_dir().join(format!("radio-worker-{}-{family}", std::process::id()));
             let index = runtime.load(&model, &profile).unwrap();
-            runtime.infer(index, 480, vec![0.0; 480 * 1964]).unwrap();
+            runtime
+                .infer(index, [480, 1964], vec![0.0; 480 * 1964])
+                .unwrap();
             let cpu_index = diagnostic.load_unprofiled(&model).unwrap();
             references.insert(
                 family.to_owned(),
                 diagnostic
-                    .infer(cpu_index, 480, vec![0.0; 480 * 1964])
+                    .infer(cpu_index, [480, 1964], vec![0.0; 480 * 1964])
                     .unwrap(),
             );
             sessions.insert(family.to_owned(), index);
@@ -282,7 +284,10 @@ mod tests {
                     deadline_ns: 10_000_000_000,
                     coverage: [1.0; 4],
                     frames: 480,
+                    shape: [480, 1964],
                     input: vec![0.0; 480 * 1964].into(),
+                    front_end_ns: 0,
+                    front_end_updates: None,
                 })
                 .unwrap();
         }
@@ -332,7 +337,10 @@ mod tests {
                 deadline_ns: 10_000_000_000,
                 coverage: [0.1; 4],
                 frames: 480,
+                shape: [480, 1964],
                 input: vec![0.0; 480 * 1964].into(),
+                front_end_ns: 0,
+                front_end_updates: None,
             })
             .unwrap();
         let mut rejected = None;

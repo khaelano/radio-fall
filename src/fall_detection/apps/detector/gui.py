@@ -28,6 +28,8 @@ MODELS = (
     ),
     "tonepool_tcn-4s",
     "tiny_tcn1-4s",
+    # Rust principal-component spectrum front end, then an ONNX GRU head.
+    "pcspec_gru-4s",
 )
 DEFAULT_MODELS = ("tonepool_tcn-4s",)
 

@@ -275,7 +275,11 @@ series become one, the step length. Attempt AUC, mean over four seeds:
   head's own TF32 rounding in training is discussed under the plan's acceptance
   checks.
 
-## Plan for the live detector (proposal; front end implemented)
+## Plan for the live detector (implemented)
+
+All five steps were done on 26 November; the
+[live PC-spectrum report](live-pcspec-2026-11-26.md) records the published
+bundle and the checks. The plan as written:
 
 The live detector feeds every model `[1, time, 1964]`: the Hampel-filtered
 amplitude's squared difference after `log1p`, normalized, with validity and
@@ -308,7 +312,7 @@ features: Rust computes the 53 × 65 features, and ONNX runs only the head
 3. **Rust front end**, mirroring `PCSpectrum.frame_features` in evaluation mode.
    Done on 26 November as `radio_signal::pc_spectrum`, with the Python class
    `PcSpectrumFrontEnd` ([evaluation report](pcspec-gru-evaluation-2026-11-26.md#the-rust-front-end));
-   the detector does not use it yet. It computes:
+   the detector runs it for `pcspec_gru-4s`. It computes:
    - interior tone indices 2–120 and 124–242, and usable samples (at least 90 %
      of those tones valid);
    - weighted centring and a float64 covariance per receiver, and its five leading

@@ -10,7 +10,7 @@ files; the transport journal is the raw record. Firmware and radio settings are 
 
 | Crate | Responsibility |
 | --- | --- |
-| `radio_signal` | Signed I/Q kernels (AVX2/scalar), Espressif LTF layouts, phase calibration, batch amplitude preparation and Hampel filtering for offline analysis; the `pcspec` principal-component spectrum front end (`pc_spectrum`, `symmetric_eigen`; Python class `PcSpectrumFrontEnd`), not yet used by the live detector |
+| `radio_signal` | Signed I/Q kernels (AVX2/scalar), Espressif LTF layouts, phase calibration, batch amplitude preparation and Hampel filtering for offline analysis; the `pcspec` principal-component spectrum front end (`pc_spectrum`, `symmetric_eigen`; Python class `PcSpectrumFrontEnd`), which the live detector runs for front-end families such as `pcspec_gru` |
 | `radio_transport` | Framing, CSI decoding, serial I/O, startup, clock and reference, acceptance, journals, availability, quality counters, `session` |
 | `radio_detection` | Live sequence windows, ONNX Runtime sessions, scheduling, live and replay feeds |
 | `radio-core` (extension) | PyO3 bindings: `NativeAcquisition`, `NativeDetector`, recording writer, record views, offline kernels |

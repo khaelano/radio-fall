@@ -32,8 +32,11 @@ In short, on the two participant sessions:
   results (logits within 9e-6) takes 2.2 ms on one core and 0.86 ms on four,
   against 5.1 ms for `tonepool_tcn` and 0.33 ms for `tiny_tcn1`. Unlike those,
   the front end cannot run on the GPU through ONNX.
-- **Scope.** None of this has been measured in the live detector, which cannot
-  run the model yet, or on a third participant.
+- **Scope.** The live behaviour here is an offline emulation. The live detector
+  now runs the model, and on a short capture it reproduced the offline features
+  and logits ([live PC-spectrum report](live-pcspec-2026-11-26.md)). The
+  participant sessions have not been replayed through it, and no third
+  participant has been recorded.
 
 ## Conditions
 
@@ -298,8 +301,8 @@ here. Setup:
 `src/native/radio_core/crates/radio_signal/src/pc_spectrum.rs` and
 `symmetric_eigen.rs`, Python class `fall_detection._radio_native.PcSpectrumFrontEnd`;
 checks in `rust_frontend.py`, `rust_benchmark_results.txt`, the crate's tests and
-`tests/analysis/sequence/test_pc_spectrum.py`. The live detector does not use it
-yet (pc-spectrum report, plan step 3).
+`tests/analysis/sequence/test_pc_spectrum.py`. The live detector runs it for
+`pcspec_gru-4s` ([live PC-spectrum report](live-pcspec-2026-11-26.md)).
 
 It computes the same features as the model, exactly. What makes it fast:
 

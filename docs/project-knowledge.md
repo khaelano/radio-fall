@@ -213,6 +213,16 @@ on their hardware and data, and are not reproduced here.
   default; its live inputs matched the offline chain bit for bit, its Rust
   logits equalled ONNX Runtime exactly, and every operator ran on WebGPU on the
   NVIDIA GPU ([live tiny-TCN report](reports/live-tiny-tcn-2026-11-26.md)).
+  Since 26 November `pcspec_gru-4s` (seed 45 of `20261126T104817208746Z`, same
+  split and labels, signed difference) is selectable but not the default. Each
+  family declares its representation and whether the Rust principal-component
+  spectrum front end precedes its ONNX head. On capture C its signed-difference
+  inputs matched the offline chain bit for bit, its live logits equalled ONNX
+  Runtime on the same features exactly and the float64 PyTorch checkpoint to
+  2.3e-6, and the front end took a median 2.29 ms per window on the CPU. The
+  GRU head passed the WebGPU placement rule on the NVIDIA GPU
+  ([live PC-spectrum report](reports/live-pcspec-2026-11-26.md)). The recorded
+  sessions have not been replayed through the detector with it.
   Without a calibration it displays
   alarms at 0.5. `fall-detect` records ten prompted non-fall movements and sets
   each model's threshold from them. Under live conditions (250 ms hop, 70 %
@@ -420,7 +430,8 @@ on their hardware and data, and are not reproduced here.
   covariance sums, a top-5 tridiagonal solver, AVX2). It matched PyTorch's
   float64 features to 9e-6 in logits and took 2.2 ms per window on one core
   (0.86 ms on four), against 5.1 ms for `tonepool_tcn` (which can run on
-  WebGPU) and 0.33 ms for `tiny_tcn1`. The live detector does not use it yet. Training ran cuDNN's GRU with TF32
+  WebGPU) and 0.33 ms for `tiny_tcn1`. The live detector runs it for
+  `pcspec_gru-4s` (see "Native sequence detection"). Training ran cuDNN's GRU with TF32
   (PyTorch's default); saved probabilities differ from exact float32 by up to
   0.012.
 - How should collection separate falls from setup, for example non-fall

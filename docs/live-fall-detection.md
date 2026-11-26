@@ -3,10 +3,13 @@
 The native sequence detector uses the ONNX exports and saved normalizers under
 `artifacts/model/`: the nine CNN, LSTM and GRU models, `tonepool_tcn-4s`, the
 project's most consistent configuration (4 s, burst-centred training positives;
-[tone-pooling report](reports/tone-pooling-2026-11-23.md)), and `tiny_tcn1-4s`,
+[tone-pooling report](reports/tone-pooling-2026-11-23.md)), `tiny_tcn1-4s`,
 a 5,345-parameter model on the motion energy averaged over tones and receivers
 that matched it on the session holdouts
-([energy-inputs report](reports/energy-inputs-2026-11-26.md)). It requires no
+([energy-inputs report](reports/energy-inputs-2026-11-26.md)), and
+`pcspec_gru-4s`, a GRU on the STFT power of each window's principal
+components, which ranked attempts best on the holdouts
+([principal-component spectrum report](reports/pc-spectrum-2026-11-26.md)). It requires no
 training dataset. Rust owns acquisition, preprocessing, resident ONNX sessions,
 inference scheduling and logs; Python supplies controls and displays results.
 
@@ -23,12 +26,18 @@ or run a bounded headless session:
 uv run fall-detect --headless --duration 30 --models tonepool_tcn-4s cnn-4s
 ```
 
-`tonepool_tcn-4s` and `tiny_tcn1-4s` read the same input as the other models,
-so live preprocessing is unchanged. The published bundles, the checks on them
-and what remains unverified are in the
-[live tone-pool report](reports/live-tonepool-2026-11-24.md) and the
-[live tiny-TCN report](reports/live-tiny-tcn-2026-11-26.md). `tiny_tcn1-4s` is
-not the default until a new participant confirms the holdout result.
+`tonepool_tcn-4s` and `tiny_tcn1-4s` read the same input as the other models.
+`pcspec_gru-4s` reads the signed difference instead (computed from the same
+filtered amplitude, with its own normalizer), and a Rust front end turns each
+window into 53 × 65 frame features before its ONNX head. That adds about
+2.3 ms per window on the CPU. The published bundles, the checks on them and
+what remains unverified are in the
+[live tone-pool report](reports/live-tonepool-2026-11-24.md), the
+[live tiny-TCN report](reports/live-tiny-tcn-2026-11-26.md) and the
+[live PC-spectrum report](reports/live-pcspec-2026-11-26.md). Neither
+`tiny_tcn1-4s` nor `pcspec_gru-4s` is the default until a new participant
+confirms the holdout result. Calibrate each selected model on the installation
+movements.
 
 ## Replay without hardware
 

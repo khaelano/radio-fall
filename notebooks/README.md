@@ -14,6 +14,9 @@ excluded from Git. Recordings and reusable derived datasets remain in `data/`.
 - `01_exploration.ipynb` explores session data and capture quality.
 - `01_01_amplitude_exp.ipynb` and `01_02_phase_exp.ipynb` compare amplitude
   and phase inputs.
+- `01_03_amplitude_spectral.ipynb` compares spectrograms of the squared
+  difference, the signed difference and the Hampel-filtered amplitude, from
+  the arrays staged by `02_preprocess`.
 - `02_preprocess.ipynb` directly defines dataset selection, filtering, squared
   differences, cue labels, windows, exports, and stage figures. Its
   `EXPORT_VARIANTS` also write alternative signals for the same windows to

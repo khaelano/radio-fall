@@ -372,6 +372,19 @@ on their hardware and data, and are not reproduced here.
   The fall windows reach the lying phase on the mattress, so the setup
   confound applies
   ([tone-pooling report](reports/tone-pooling-2026-11-23.md)).
+  Explorations on 25–26 November (offline, no source change;
+  [energy-inputs report](reports/energy-inputs-2026-11-26.md)): in
+  spectrograms of the filtered amplitude, falls reach 60 Hz and 30–60 Hz
+  separates them from transitions best, while the squared difference is flat
+  over frequency. The signed difference keeps that structure but, as model
+  input, did not beat the squared difference (7 of 16 paired runs). A causal
+  quiet baseline (lowest 75 % of the last 60 s) removed level drift within a
+  session but did not make thresholds portable between the participants. A
+  5,345-parameter model on the mean energy over tones and receivers
+  (`tiny_tcn1`, not in the live detector) matched `tonepool_tcn` (mean attempt
+  AUC 0.846 against 0.836; better testing on `akmal`, slightly worse on
+  `khaelano`), so most of the separation comes from how overall motion energy
+  develops over about 2 s.
 - How should collection separate falls from setup, for example non-fall
   activity with the mattress in place or interleaved trial order?
 - How should irregular timestamps and packet loss shape model windows?

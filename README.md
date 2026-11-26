@@ -1,187 +1,170 @@
 # Radio fall detection
 
-Rust owns live radio acquisition, CSI decoding, signal preprocessing and
-inference; Python provides the desktop applications, collection workflow and
-offline analysis. A Rust toolchain is required when installing from source; see
-[native processing](docs/rust-radio-pipeline.md).
+Bachelor's thesis project: detecting falls from Wi-Fi channel state
+information (CSI) recorded with ESP32-C5 radios. Three desktop commands cover
+the daily work:
 
-Wi-Fi channel-state-information (CSI) fall-detection research for a bachelor's
-thesis. This branch replaces live BLE with scheduled dual-band ESP-NOW uploads:
+| Command | Use it to |
+| --- | --- |
+| `csi-radio` | check that the radio boards are connected and configured |
+| `csi-live` | watch live CSI and, optionally, detect falls with a trained model |
+| `csi-sessions` | record new collection sessions and review recorded ones |
+
+The hardware: a C5 transmitter sends 5 GHz sensing packets to four C5
+receivers; the receivers upload over 2.4 GHz ESP-NOW to a C6 gateway, which is
+the only board plugged into the laptop.
 
 ```text
-C5 transmitter -> 5 GHz sensing -> C5 receivers
-                                     -> 2.4 GHz ESP-NOW -> C6 gateway -> USB -> laptop
+C5 transmitter ──5 GHz──> 4 × C5 receiver ──ESP-NOW──> C6 gateway ──USB──> laptop
 ```
 
-The default setup uses four C5 receivers, 120 sensing rounds/s, and 125 ms
-round-robin uploads on 2.4 GHz HT20 MCS3. A companion C6 carries transmitter
-control and timing over UART and encrypted ESP-NOW to the laptop's USB gateway.
-The sensing C5 keeps its radio dedicated to 5 GHz sensing. The former USB
-transmitter link was retired with the Python acquisition path.
+## Install
 
-All operational radio settings are in [`configs/radio.json`](configs/radio.json):
-verified identities, sensing profile, upload policy and stable USB paths.
-The [configuration guide](docs/radio-configuration.md) explains the defaults and
-which edits require provisioning. The [relay procedure](docs/uart-transmitter-relay.md)
-records the five-minute hardware qualification and its limits. Historical
-recordings and research reports remain on disk.
+You need [uv](https://docs.astral.sh/uv/) and a Rust toolchain (1.92 or newer);
+the Rust part is compiled during installation. Choose what to install:
 
-## Repository layout
+| To | Run |
+| --- | --- |
+| use the three commands | `uv sync --extra radio` |
+| also detect falls live | `uv sync --extra radio --extra detect` |
+| also run the analysis notebooks (NVIDIA GPU) | `uv sync --extra analysis --extra radio --extra cuda` |
+
+`uv sync` installs exactly the extras you list, so name all of them each time.
+
+Recordings and trained models are stored with DVC, not Git. With access to the
+project's DVC remote, fetch what you need:
+
+```sh
+uv run dvc pull artifacts/model.dvc   # trained models, needed for detection
+uv run dvc pull data/raw.dvc          # recorded sessions
+```
+
+## Use it
+
+The boards listed in [`configs/radio.json`](configs/radio.json) are already
+set up. Plug the C6 gateway into the laptop, and power the transmitter, its
+companion C6 relay and the four receivers.
+
+### 1. Check the radios
+
+```sh
+uv run csi-radio
+```
+
+It lists every configured board, shows which ones are connected and whether
+they store the current settings, and ends with what to do next. If it tells
+you to, run `uv run csi-radio provision` and follow the prompts.
+
+### 2. Watch live data and detect falls
+
+```sh
+uv run csi-live
+```
+
+The window opens on the live CSI plots. To detect falls, open the **Model**
+menu in the toolbar, tick a model (`tonepool_tcn-4s` is the default choice)
+and press **Start detection**. Choose **None — view live data only** and press
+**Switch to live view** to go back. Before relying on the alarms, calibrate
+them with the person being monitored; see the
+[detector guide](docs/live-fall-detection.md#installation-calibration).
+
+### 3. Record a session
+
+```sh
+uv run csi-sessions
+```
+
+1. Press **New session**, fill in the form (protocol, participant ID, which
+   scenario blocks, optional camera) and press **Start recording**.
+2. The collection console opens; the performer's instructions appear
+   full-screen on a second display, if one is connected.
+3. For each trial: press **Start trial**, press **Confirm action** once the
+   performer has done the movement (before the action countdown ends, or the
+   attempt is invalid), then **Accept**, **Retry** or **Skip**.
+4. Between trials, **Edit…** above the queue lets you reorder, remove, add or
+   relabel the trials not yet recorded.
+5. Close the console to finish. The recording is saved to
+   `data/raw/sessions/` and the session list returns with it selected.
+
+To continue an interrupted session, select its folder in the list and press
+**Resume recording**.
+
+### 4. Review a session
+
+In `csi-sessions`, select a session, then an attempt in the table. The
+**Signals** tab plots its CSI (with the video, if one was recorded), and the
+**Attempt review** tab sets its label, inclusion, quality and notes. Press
+**Save review**; reviews go to `data/annotations/` and never change the
+recording. **Export curated bundle…** writes a reviewed copy.
+
+### Without hardware
+
+```sh
+uv run csi-radio check                 # validate configs/radio.json
+uv run csi-sessions                    # browse and review recorded sessions
+uv run dvc pull data/experiments/detector/native-capture-20261112-c.dvc
+uv run csi-live --backend cpu \
+  --replay-capture data/experiments/detector/native-capture-20261112-c
+```
+
+The last command replays a recorded capture through the detector. Use
+`--backend cpu` on machines without an AMD GPU.
+
+Every command accepts `--help` with examples, `--config <file>` for another
+radio setup and `--gateway-port <path>` for another USB path.
+
+## Where things are
 
 | Path | Contents |
 | --- | --- |
-| `src/firmware/radio/` | ESP-IDF transmitter, receiver, gateway and UART relay projects |
-| `src/native/radio_core/` | Rust workspace: gateway transport, signal kernels, live detection, PyO3 extension |
-| `src/fall_detection/` | Python package: applications, collection, provisioning, offline analysis |
-| `configs/` | One radio settings file, collection protocols and scenarios |
-| `tests/` | Unit tests mirroring the package modules |
-| [`docs/`](docs/README.md) | Current guides, engineering reports and presentations |
-| `draft/` | Local thesis drafts and exports; ignored by Git |
-| `resources/Papers/` | Local, ignored literature library (PDFs plus Markdown conversions) |
-| [`tools/`](tools/README.md) | Paper, data, analysis, runtime, and draft tools |
-| `data/` | Raw recordings and reusable derived datasets, versioned with DVC |
-| `artifacts/notebooks/` | History grouped by notebook and run, tracked by `artifacts/notebooks.dvc` |
-| `artifacts/model/` | Latest ONNX bundles by model name, tracked by `artifacts/model.dvc` |
-| [`notebooks/`](notebooks/README.md) | Current analysis and experiment notebooks |
+| `configs/radio.json` | radio boards, sensing settings and USB ports |
+| `configs/collection/` | collection protocols (`fall_simple.json` is the default) |
+| `data/raw/sessions/` | recorded sessions (DVC) |
+| `data/annotations/` | session reviews (Git) |
+| `artifacts/model/` | trained models used for live detection (DVC) |
+| `notebooks/latest/` | preprocessing, training and comparison notebooks |
+| `src/fall_detection/` | Python package: the commands, collection and analysis |
+| `src/native/radio_core/` | Rust: radio acquisition, signal processing, live inference |
+| `src/firmware/radio/` | ESP-IDF firmware for the boards |
+| `docs/` | guides and dated reports ([index](docs/README.md)) |
 
-## Setup
+## More guides
 
-```sh
-uv sync --extra radio
-```
+- **Changing radio settings** (channel, boards, ports):
+  [radio configuration](docs/radio-configuration.md).
+- **New boards or firmware** (ESP-IDF 6.1 or newer):
+  [gateway build and provisioning](docs/espnow-gateway.md),
+  [relay pairing](docs/uart-transmitter-relay.md),
+  [firmware notes](src/firmware/radio/README.md).
+- **Recording**: [collection guide](src/fall_detection/collection/README.md),
+  [protocols](configs/collection/README.md),
+  [video recording](docs/video-recording.md).
+- **Detection**: [live detector guide](docs/live-fall-detection.md).
+- **Data**: [dataset format](docs/dataset-format.md).
+- **Analysis and training**: [notebooks](notebooks/README.md), run in order
+  `02_preprocess` → `03_training` → `04`/`05` baselines → `06` comparison.
+- **Current state and open questions**: [project knowledge](docs/project-knowledge.md).
 
-## Quick start
-
-The current boards are provisioned and paired. With the gateway connected and
-all sensing boards powered, the checked-in configuration supplies the ports
-and radio settings:
-
-```sh
-uv run csi-viewer
-uv run fall-collection
-uv run fall-session-inspector --sessions-dir data/raw/sessions
-```
-
-Use `--config /path/to/radio.json` for another setup, or `--gateway-port` to
-override the gateway USB path.
-For new boards, follow the [gateway build and provisioning procedure](docs/espnow-gateway.md)
-and [relay pairing procedure](docs/uart-transmitter-relay.md).
-Use `uv run csi-radio discover` to inspect connected boards and
-`uv run csi-radio provision --dry-run` to validate the radio settings.
-
-Both live applications use `espnow_gateway`; receiver IDs and model channels
-remain stable regardless of USB arrival order. Firmware protocol 3 is required.
-
-The separate experimental detector runs entirely in Rust: gateway acquisition,
-sequence preprocessing and resident ONNX Runtime sessions (WebGPU or CPU). With
-the current exports in `artifacts/model/` and native ONNX Runtime libraries
-installed, launch its GUI with:
+## Development
 
 ```sh
-uv sync --extra radio --extra detect
-uv run fall-detect
+uv run pytest -q                       # full test suite
+uv run ruff format <files>             # format
+uv run ruff check <files>              # lint
 ```
 
-Add `--headless` for JSON output or `--replay-capture <dir>` to stream a recorded
-native capture without hardware. The [live detector guide](docs/live-fall-detection.md)
-covers model selection, replay, timing and quality gating. Live accuracy remains
-unqualified; see the [historical model pilot summary](docs/reports/fall-model-pilots.md).
+Contribution rules are in [`AGENTS.md`](AGENTS.md); the Rust workspace is
+described in [native processing](docs/rust-radio-pipeline.md).
 
-Optional synchronized phone video is available through a DroidCam USB virtual
-webcam. Install with `uv sync --extra radio` and add
-`--video-device /dev/video2` using the actual DroidCam device. Each attempt saves
-an MP4 and frame timing sidecars, with no inference model. See
-[video recording](docs/video-recording.md) for setup and synchronization limits.
+## Limitations
 
-The collector uses the same dashboard as `csi-viewer`, wrapped in a collection
-sidebar. Startup first asks for a scenario protocol JSON, unless `--protocol`
-supplies one directly. The default `fall_simple.json` has 116 conditions and
-232 trials across nine transitions. The next dialog asks for session metadata
-and which scenario blocks this session covers; select the blocks you can finish. The operator then sees the live
-CSI plots, the scenario queue with per-trial progress, the current scenario and
-instruction, the phase countdown, and the collection controls in one window.
-Double-clicking any queued trial — or pressing **Details** on the current one —
-opens a read-only card with its instruction, phase timings, start and end
-direction, safety note, and scenario id.
-A second display shows the full-screen performer guidance.
-
-Both live apps share a gateway transport panel with one fixed row per receiver.
-It shows host-delivered records/s over the last second, the last reported radio
-state, data age, queue occupancy, expiry, dropped records and send errors.
-The header shows the requested/applied sensing and backhaul settings plus
-reference and gateway freshness. Configured sensing Hz, delivered records/s,
-plot refresh FPS and UI FPS are labeled separately. Tooltips retain counters
-and explain their limits; sequence gaps alone do not identify a cause.
-
-The separate session inspector scans recorded manifests in session directories
-and version-3 archives (read in place, never extracted up front), then loads CSI
-frames only when an attempt is selected. It provides searchable session
-and trial views, interactive signal plots, exact CSV tables, and reviewed
-labels, inclusion, quality, and notes. Review edits are saved to
-`data/annotations/<session-id>/session_review.json` (`--annotations-dir`);
-acquisition manifests and raw CSV files remain unchanged. The inspector can also create a portable curated copy that retains
-and flags excluded attempts.
-On the **Signals** tab, recorded video plays beside the plots with a shared
-attempt-time cursor, scrubbing and frame stepping. Playback is part of the `radio`
-extra. Alignment uses saved host-clock timing; see
-[recorded video playback](docs/video-recording.md#recorded-session-playback).
-
-The default `fall_simple.json` uses front, right, back, and left, excluding
-backward seated falls. Trials run with a clear floor, chair only, chair and
-mattress, then mattress only; chair orientations are grouped across activities.
-Pass another protocol file with `--protocol`; see
-[`configs/collection/README.md`](configs/collection/README.md).
-
-## Band and channel
-
-Edit the `sensing` object in `configs/radio.json`, then provision the C5 boards
-before recording with that profile. The current gateway path requires 5 GHz C5
-sensing; Indonesia non-DFS channels and 20 MHz bandwidth are validated. The
-sensing rate comes from this profile; there is no separate rate override.
-
-## Recording format
-
-Each session writes one directory under `data/raw/sessions/<session-id>/`:
-
-- `session.json` — session identity, protocol hash, radio environment, status.
-- `protocol.json` — pinned protocol snapshot used for the trial queue.
-- `events.jsonl` — append-only phase and operator events.
-- `trials/<trial>/attempt_<n>/attempt.json` — attempt disposition and telemetry.
-- `transport/gateway/<run-id>/` — raw batch envelopes, clock exchanges, round logs,
-  connection/queue events, and immutable availability bins. This journal is the
-  only raw record of the radio data; conversion assigns frames to attempts by
-  capture time. Sessions recorded before 18 November 2026 also have per-receiver
-  `csi.csv`, `radio_timing.csv` and `gateway_timing.jsonl` sidecars under
-  `trials/<trial>/attempt_<n>/receivers/<rx>/`.
-
-The same transmitted frame appears once under every receiver that heard it; do
-not merge those rows. Historical USB captures can include ambient traffic; gateway firmware verifies the
-sensing transmitter, run, and profile before retaining records. See [`docs/dataset-format.md`](docs/dataset-format.md)
-for every field and the exact CSV schemas.
-
-## Firmware
-
-Requires ESP-IDF 6.1 or newer.
-
-The transmitter and receiver build C5 gateway-mode images; the dedicated gateway
-builds for C6. Bluetooth is disabled. Use isolated build directories and the
-[build and flash instructions](docs/espnow-gateway.md).
-The transmitter caps RF power at 11 dBm initially and turns Wi-Fi off while idle
-or after host control expires. Actual temperature reduction is unmeasured.
-
-## Tests
-
-```sh
-uv run pytest -q      # run the complete test suite
-```
-
-## Known limitations
-
-- A production classifier and independent-session evaluation are not implemented.
-- Dual-band switching, gateway throughput and four-receiver coverage require hardware qualification.
-- Lower transmit power changes link margin; validate it at the intended placements.
-- Reset diagnostics distinguish reported reset causes; a lost power supply may
-  prevent the board from reporting anything until it is powered again.
+- Live detection accuracy, false alarms per hour and alarm latency are not
+  qualified. The models were trained on two participants' sessions and one
+  hour of continuous non-fall data, all in one room.
+- Gateway throughput and four-receiver coverage need further hardware
+  qualification at the intended placements.
+- The combined `csi-live` and `csi-sessions` windows and protocol editing are
+  tested offline; they have not yet been used with the radio hardware.
 
 ## License
 

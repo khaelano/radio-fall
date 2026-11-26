@@ -10,7 +10,7 @@ from fall_detection.apps.common.transport_status import (
     format_transport_status,
     receiver_cells,
 )
-from fall_detection.apps.csi_viewer.app import _parser
+from fall_detection.apps.live.app import parser as _parser
 from fall_detection.radio.live import LiveRadio
 
 

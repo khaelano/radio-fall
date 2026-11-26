@@ -396,7 +396,7 @@ def test_pairing_verifies_both_usb_identities_before_storing_keys(
 
 
 def test_status_rejects_wrong_gateway_before_forwarding_a_transmitter_request(
-    monkeypatch,
+    monkeypatch, capsys
 ):
     from fall_detection.radio import wireless_control
 
@@ -419,16 +419,20 @@ def test_status_rejects_wrong_gateway_before_forwarding_a_transmitter_request(
         "discover_port",
         lambda *a, **k: pytest.fail("a wrong gateway must not forward a request"),
     )
-    with pytest.raises(RuntimeError, match="gateway identity"):
-        wireless_control.main(
+    from fall_detection.radio import cli
+
+    assert (
+        cli.main(
             [
+                "transmitter",
                 "status",
-                "--transmitter-link",
-                "espnow_uart",
                 "--gateway-port",
                 "wrong",
                 "--config",
                 str(ROOT / "configs/radio.json"),
             ]
         )
+        == 1
+    )
+    assert "gateway identity" in capsys.readouterr().err
     assert bridge.closed

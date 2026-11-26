@@ -18,10 +18,11 @@ that AGENTS.md does not cover.
   (setuptools-rust, PyO3). A plain `uv run` rebuilds it when Rust sources change,
   but `--no-sync` skips that step. After editing Rust, rebuild once with
   `uv sync --extra analysis --extra radio --extra cuda --reinstall-package radio-fall-detection`.
-- Apps (entry points in `pyproject.toml`): `csi-viewer`, `fall-collection`,
-  `fall-session-inspector`, `csi-radio`, `fall-detect` (needs the `detect`
-  extra). Without hardware, use `fall-detect --replay-capture <dir>` or
-  `fall-session-inspector --sessions-dir data/raw/sessions`.
+- Apps (entry points in `pyproject.toml`): `csi-live` (live view; model
+  inference needs the `detect` extra), `csi-sessions` (record and review
+  sessions) and `csi-radio` (board status, provisioning, pairing). Without
+  hardware, use `csi-live --replay-capture <dir>`, `csi-sessions` (browsing
+  works without a gateway) or `csi-radio check`.
 - Firmware in `src/firmware/radio/` needs ESP-IDF 6.1+; see `docs/espnow-gateway.md`.
 
 ## Architecture

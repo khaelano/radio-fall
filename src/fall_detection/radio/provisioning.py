@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -389,206 +389,89 @@ class SerialProvisioningDevice:
         self.connection.close()
 
 
-def _open_serial_devices() -> list[SerialProvisioningDevice]:
+ESPRESSIF_USB_VID = 0x303A
+DISCOVERY_TIMEOUT_S = 1.0
+
+
+@dataclass
+class Discovery:
+    """Boards that answered discovery, and Espressif ports that did not.
+
+    Attributes:
+        devices: Open adapters of every board that reported its status.
+        silent: Espressif USB ports that opened but sent no status.
+        unavailable: Espressif USB ports that could not be opened, with the
+            reason; an exclusive reader such as a running app makes a port busy.
+    """
+
+    devices: list[SerialProvisioningDevice]
+    silent: list[str]
+    unavailable: dict[str, str]
+
+    def close(self) -> None:
+        """Close every opened board."""
+        for device in self.devices:
+            device.close()
+
+
+def _probe(connection: Any, timeout: float) -> DeviceStatus | None:
+    decoder = SerialFrameStreamDecoder()
+    connection.write(encode_serial_frame(TYPE_DISCOVER_REQUEST, b""))
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        chunk = connection.read(max(1, getattr(connection, "in_waiting", 0)))
+        if not chunk:
+            continue
+        for frame in decoder.feed(chunk):
+            if frame.type == TYPE_DEVICE_STATUS:
+                return DeviceStatus.from_payload(frame.payload)
+    return None
+
+
+def discover_boards(timeout: float = DISCOVERY_TIMEOUT_S) -> Discovery:
+    """Ask every serial port for a board status without resetting the boards.
+
+    Args:
+        timeout: Seconds to wait for each port's status.
+
+    Returns:
+        The discovered boards (open; call :meth:`Discovery.close`) and the
+        Espressif ports that were busy or silent.
+
+    Raises:
+        ProvisioningError: pyserial is not installed.
+    """
     try:
         import serial
         from serial.tools import list_ports
     except ImportError as exc:
         raise ProvisioningError("pyserial is required for USB provisioning") from exc
 
-    devices: list[SerialProvisioningDevice] = []
+    result = Discovery([], [], {})
     for port in sorted(list_ports.comports(), key=lambda item: item.device):
-        connection = None
+        espressif = getattr(port, "vid", None) == ESPRESSIF_USB_VID
         try:
             connection = serial.Serial(port.device, 921600, timeout=0.1)
-            decoder = SerialFrameStreamDecoder()
-            connection.write(encode_serial_frame(TYPE_DISCOVER_REQUEST, b""))
-            deadline = time.monotonic() + 1.0
-            status: DeviceStatus | None = None
-            while time.monotonic() < deadline and status is None:
-                chunk = connection.read(max(1, getattr(connection, "in_waiting", 0)))
-                if not chunk:
-                    continue
-                for frame in decoder.feed(chunk):
-                    if frame.type == TYPE_DEVICE_STATUS:
-                        status = DeviceStatus.from_payload(frame.payload)
-                        break
-            if status is None:
-                connection.close()
-                continue
-            devices.append(SerialProvisioningDevice(connection, status))
-        except Exception:  # noqa: BLE001 — a port that fails discovery is skipped
-            if connection is not None:
-                try:
-                    connection.close()
-                except AttributeError:
-                    pass
-    return devices
-
-
-def configure_connected_devices(
-    inventory: RadioInventory,
-    profile: RadioProfile,
-    *,
-    reboot_wait_s: float = 0.6,
-    log: Callable[[str], None] | None = None,
-) -> tuple[str, ...]:
-    """Push ``profile`` to connected boards that are not already running it.
-
-    This is what lets the viewer and the collector configure the radios
-    themselves instead of requiring a separate provisioning step.  Only boards
-    present in ``inventory`` are touched, so an unplugged transmitter is simply
-    skipped.  Boards reboot on commit, hence the wait before the caller
-    re-discovers them.  Returns the MACs that were reconfigured.
-    """
-
-    expected = {inventory.transmitter.mac: inventory.transmitter}
-    expected.update({device.mac: device for device in inventory.receivers})
-    expected_fingerprint = profile_fingerprint(profile, inventory)
-    payload = _profile_payload(inventory, profile, expected_fingerprint)
-
-    devices = _open_serial_devices()
-    stale = [
-        device
-        for device in devices
-        if device.status.mac in expected
-        and device.status.profile_fingerprint != expected_fingerprint
-    ]
-    configured: list[str] = []
-    try:
-        # Stage everything first so a rejected stage leaves every board alone.
-        for device in stale:
-            device.stage_profile(payload)
-        for device in stale:
-            device.commit_profile()
-            configured.append(device.status.mac)
-            if log is not None:
-                log(f"configured {device.status.role} {device.status.mac}")
-    finally:
-        for device in devices:
-            device.close()
-    if configured:
-        time.sleep(reboot_wait_s)
-    return tuple(configured)
-
-
-def discover(argv: list[str] | None = None) -> int:
-    """CLI entry point for USB device discovery."""
-
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        prog="csi-radio discover", description="Discover CSI radio boards over USB"
-    )
-    parser.add_argument(
-        "--json", action="store_true", help="emit machine-readable JSON"
-    )
-    args = parser.parse_args(argv)
-    try:
-        devices = _open_serial_devices()
-    except ProvisioningError as exc:
-        parser.error(str(exc))
-    values = [
-        {
-            **device.status.__dict__,
-            "usb_port": getattr(device.connection, "port", None),
-        }
-        for device in devices
-    ]
-    for device in devices:
-        device.close()
-    if args.json:
-        print(json.dumps(values, indent=2, sort_keys=True))
-    else:
-        for value in values:
-            print(
-                f"{value['role']} {value['mac']} target={value['target']} "
-                f"port={value['usb_port'] or '?'} firmware={value['firmware_version']} "
-                f"protocol={value['protocol_version']} "
-                f"profile={value['profile_id'] or 'unprovisioned'} "
-                f"fingerprint={value['profile_fingerprint'] or '-'}"
-            )
-    return 0
-
-
-def provision(argv: list[str] | None = None) -> int:
-    """CLI entry point for profile provisioning."""
-
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        prog="csi-radio provision",
-        description="Provision a selectable CSI radio profile",
-    )
-    from .settings import add_config_argument, resolve_settings
-
-    add_config_argument(parser)
-    parser.add_argument(
-        "--sequential",
-        action="store_true",
-        help="provision exactly one connected registered board using the complete inventory",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="validate and print the profile without opening USB devices",
-    )
-    args = parser.parse_args(argv)
-    try:
-        settings = resolve_settings(args)
-        inventory, profile = settings.inventory, settings.profile
-        fingerprint = settings.profile_fingerprint
-        if args.dry_run:
-            print(
-                json.dumps(
-                    {
-                        "profile_id": profile.profile_id,
-                        "band": profile.band,
-                        "channel": profile.channel,
-                        "fingerprint": fingerprint,
-                        "devices": len(inventory.receivers) + 1,
-                        "provisioning_mode": "sequential" if args.sequential else "all",
-                    },
-                    indent=2,
-                    sort_keys=True,
-                )
-            )
-            return 0
-        devices = _open_serial_devices()
+        except Exception as exc:  # noqa: BLE001 — a port that cannot open is reported
+            if espressif:
+                result.unavailable[port.device] = str(exc) or type(exc).__name__
+            continue
         try:
-            report = RadioProvisioner(devices).provision(
-                inventory, profile, sequential=args.sequential
-            )
-        finally:
-            for device in devices:
-                device.close()
-    except (ValueError, OSError, ProvisioningError) as exc:
-        parser.error(str(exc))
-    print(f"provisioned {report.profile_id} fingerprint={report.fingerprint}")
-    if args.sequential:
-        print(
-            f"verified device {report.devices[0].mac}; "
-            "other configured boards were not checked"
-        )
-    return 0
+            status = _probe(connection, timeout)
+        except Exception:  # noqa: BLE001 — a port that fails discovery is skipped
+            status = None
+        if status is None:
+            try:
+                connection.close()
+            except AttributeError:
+                pass
+            if espressif:
+                result.silent.append(port.device)
+            continue
+        result.devices.append(SerialProvisioningDevice(connection, status))
+    return result
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Dispatch radio discovery, provisioning and transmitter control."""
-    import argparse
-    import sys
-
-    arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments and arguments[0] == "transmitter":
-        from .wireless_control import main as transmitter_main
-
-        return transmitter_main(arguments[1:])
-    actions = {"discover": discover, "provision": provision}
-    if arguments and arguments[0] in actions:
-        return actions[arguments[0]](arguments[1:])
-    parser = argparse.ArgumentParser(description="Manage CSI radios")
-    parser.add_argument(
-        "command", choices=(*actions, "transmitter"), help="radio operation"
-    )
-    parser.parse_args(arguments)
-    return 2
+def _open_serial_devices() -> list[SerialProvisioningDevice]:
+    """Return open adapters of every board that answers discovery."""
+    return discover_boards().devices

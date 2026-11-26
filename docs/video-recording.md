@@ -26,11 +26,13 @@ Install the optional recording dependency:
 uv sync --extra radio
 ```
 
-Add video options to the existing collection command. For the currently
-provisioned four-C5 120 Hz setup:
+In `csi-sessions`, press **New session** and choose the DroidCam device in the
+**Camera** field of the setup form. The form lists the `/dev/video*` nodes;
+not every node is a capture device. To preselect the camera and its size and
+rate for the currently provisioned four-C5 120 Hz setup:
 
 ```sh
-uv run --extra radio fall-collection \
+uv run --extra radio csi-sessions --new \
   --config configs/radio.json \
   --protocol configs/collection/fall_simple.json \
   --video-device /dev/video2 \
@@ -128,7 +130,7 @@ stops playback and clears the previous clip.
 
 ```sh
 uv sync --extra radio
-uv run --extra radio fall-session-inspector --sessions-dir data/raw/sessions
+uv run --extra radio csi-sessions --sessions-dir data/raw/sessions
 ```
 
 Playback reads `video.json`, `camera_frames.csv` and `camera.mp4` without editing

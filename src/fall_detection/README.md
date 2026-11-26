@@ -2,23 +2,29 @@
 
 `apps/` contains application entry points and presentation code:
 
-- `collector/`: operator and performer interfaces and collection presenter.
-- `csi_viewer/`: live CSI viewer entry point.
-- `session_inspector/`: offline inspector; its Qt-free frame loading, review,
-  export and video modules sit beside the `ui/` window, panels and workers.
-- `detector/`: live detector interface and command; `calibration.py` sets its
+- `live/` (`csi-live`): live CSI view with optional fall detection.
+  `window.py` runs one engine at a time on the gateway: the CSI dashboard when
+  no model is selected, the native detector otherwise. `detection.py` encodes
+  the detector configuration and runs it headless without Qt;
+  `detection_view.py` shows scores and previews; `calibration.py` sets the
   thresholds without Qt or inference.
+- `sessions/` (`csi-sessions`): session browser and collection console.
+  `window.py` adds recording to the inspector window. `collector/` holds the
+  setup form, the run lifecycle (`run.py`), the presenter and the operator and
+  performer views; `inspector/` holds the Qt-free frame loading, review, export
+  and video modules beside its `ui/` window, panels and workers.
 - `common/`: dashboard widgets, display preparation (`rendering.py`), pacing,
-  shared `--fps` option and Qt bootstrap used by several applications.
+  shared `--fps` option and Qt bootstrap used by both applications.
 
 The other packages contain reusable functionality, listed from the bottom of
 the dependency order up:
 
-- `protocol/`: planned trials and scenarios (`model.py`, `loader.py`). Imports
+- `protocol/`: planned trials and scenarios (`model.py`, `loader.py`) and
+  revisions of the remaining queue during recording (`revision.py`). Imports
   no other project package.
 - `radio/`: radio settings, profiles, live delivery, record types, display
-  buffers, provisioning and the Rust-backed `phase.py`. Imports no other
-  project package.
+  buffers, provisioning, the `csi-radio` command (`cli.py`) and the
+  Rust-backed `phase.py`. Imports no other project package.
 - `session/`: the neutral session model (manifests, directory/archive reader,
   schema version). Imports `protocol`.
 - `collection/`: collection workflow (controller, capture, resume, video).
@@ -36,7 +42,8 @@ preprocessing, labels, plots, model definitions, and training procedures live
 in `notebooks/latest/`.
 
 The installed commands are defined in `pyproject.toml`. Each application can
-also be run as a module, for example `python -m fall_detection.apps.collector`.
+also be run as a module, for example `python -m fall_detection.apps.sessions`.
+`csi-radio` is `fall_detection.radio.cli`.
 
 The processing architecture has three layers:
 

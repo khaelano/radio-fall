@@ -400,7 +400,7 @@ def test_identity_mismatch_stops_without_retrying(tmp_path, pty_gateway):
 
 
 def test_live_radio_delivers_native_records_to_the_host(tmp_path, pty_gateway):
-    from fall_detection.apps.csi_viewer.app import _parser
+    from fall_detection.apps.live.app import parser as _parser
     from fall_detection.radio.live import LiveRadio
     from fall_detection.radio.settings import RadioSettings
 

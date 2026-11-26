@@ -21,7 +21,7 @@ datasets belong under `data/` and are versioned with DVC. Notebook run history
 belong under `artifacts/model/<model-name>/`. The two directories are versioned
 independently by `artifacts/notebooks.dvc` and `artifacts/model.dvc`, with contents
 excluded from Git.
-CSI viewer journals default to `data/experiments/viewer/`, outside the
+Live-view journals of `csi-live` default to `data/experiments/viewer/`, outside the
 DVC-tracked `data/raw/`. Git ignores detector run folders
 (`data/experiments/detector/native-*`); runs worth keeping are added with DVC,
 as the 12 November runs are in `runs-20261112`.
@@ -188,7 +188,7 @@ on their hardware and data, and are not reproduced here.
   [automatic recovery](automatic-radio-recovery.md).
 - **Native sequence detection:** Rust owns acquisition, sequence alignment,
   preprocessing, resident ONNX Runtime sessions (WebGPU/Vulkan or CPU) and
-  serial inference scheduling; `fall-detect` (Python) supplies controls through
+  serial inference scheduling; `csi-live` (Python) supplies controls through
   PyO3. Deployment is model-only: the
   current exports, their saved normalizers and the documented operational
   preprocessing settings; no training dataset is required. A replay feed
@@ -224,7 +224,7 @@ on their hardware and data, and are not reproduced here.
   ([live PC-spectrum report](reports/live-pcspec-2026-11-26.md)). The recorded
   sessions have not been replayed through the detector with it.
   Without a calibration it displays
-  alarms at 0.5. `fall-detect` records ten prompted non-fall movements and sets
+  alarms at 0.5. `csi-live` records ten prompted non-fall movements and sets
   each model's threshold from them. Under live conditions (250 ms hop, 70 %
   gate) on the held-out sessions, this held the attempt false-positive rate at
   0.18–0.23 with recall 0.63–0.73 when the movements were drawn at random over the
@@ -248,7 +248,29 @@ on their hardware and data, and are not reproduced here.
   [calibration report](reports/live-calibration-2026-11-24.md)
   and the [detector guide](live-fall-detection.md).
 
-- **Collection:** the desktop collector supports protocol-driven trials,
+- **Desktop commands (26 November 2026):** three commands. `csi-live` merges
+  the former `csi-viewer` and `fall-detect`: with no model selected it shows
+  the CSI dashboard through `LiveRadio`; selecting models hands the gateway to
+  the native detector, one engine at a time because the port is opened
+  exclusively. `csi-sessions` merges `fall-collection` and
+  `fall-session-inspector`: the session browser records new sessions and
+  resumes unfinished folders in-process, then reselects the new archive.
+  `csi-radio` matches connected boards to the inventory and guides
+  provisioning (`status`, `check`, `provision`, `pair`, `transmitter`). The
+  merged flows are tested offline with scripted acquisition and detection; they
+  have not run on radio hardware yet. See [live applications](live-applications.md).
+- **Protocol revisions while recording (26 November 2026):** between trials
+  the operator can reorder, remove, duplicate and relabel (title, instruction,
+  timing) the trials not yet recorded. Each revision is saved as
+  `protocol_revisions/<NNN>.json` and listed in `session.json`;
+  `protocol.json` and `protocol_hash` stay the starting protocol, so reviews
+  remain bound. Readers use the last revision for planned trials. Edited
+  scenarios with recorded trials fork to `<id>__rev<n>`. The editor also adds
+  scenarios from any protocol file or defined by hand, and saves an edited
+  queue as a new protocol file with `derived_from` provenance. Tested offline,
+  including resume and archiving; not yet used in a hardware session. See the
+  [dataset format](dataset-format.md#protocol-revisions-made-while-recording).
+- **Collection:** the desktop collector (`csi-sessions`) supports protocol-driven trials,
   continuous activity segments, session resume, synchronized video, and
   automatic radio recovery (performed by the native session). Accepted recordings are finalized before an attempt
   is accepted. See the [collector guide](../src/fall_detection/collection/README.md),
@@ -316,7 +338,7 @@ on their hardware and data, and are not reproduced here.
   Both 96 Hz and 120 Hz exports remain current; version-1 exports are retired.
   Notebooks must record dataset versions, split policy, and seeds. See
   [amplitude preprocessing](amplitude-preprocessing.md) and the notebook index.
-- **Detection:** `fall-detect` can score four-receiver windows with exported
+- **Detection:** `csi-live` can score four-receiver windows with exported
   experimental models, trained on two participants' sessions and one hour of
   continuous non-fall data from one room. Continuous accuracy, false alarms per
   hour, and event latency are not qualified. Collection-phase scores are not fall probabilities. See the
@@ -461,15 +483,15 @@ modules in live application code.
 
 | Package | Role | May import |
 | --- | --- | --- |
-| `protocol/` | planned trials and scenarios (model, loader) | none |
-| `radio/` | settings, profiles, live delivery, records, buffers, provisioning, Rust-backed `phase.py` | none |
+| `protocol/` | planned trials and scenarios (model, loader), revisions of the remaining queue | none |
+| `radio/` | settings, profiles, live delivery, records, buffers, provisioning and the `csi-radio` command (`cli.py`), Rust-backed `phase.py` | none |
 | `session/` | session manifests, directory/archive reader, schema version | `protocol` |
 | `collection/` | collection controller, capture, resume, video | `protocol`, `radio`, `session` |
 | `analysis/` | `session_frames.py` plus `preprocessing/` (shared amplitude), `sequence/` (our approach), `baselines/`, `diagnostics/` | `protocol`, `radio`, `session` |
-| `apps/` | collector, CSI viewer, session inspector, detector, and `common/` shared Qt code | all of the above |
+| `apps/` | `live/` (`csi-live`), `sessions/` (`csi-sessions`: `collector/` and `inspector/`), and `common/` shared Qt code | all of the above |
 
 The inspector backend (frame loading, review, export, video) lives in
-`apps/session_inspector/` beside its `ui/` package, where the main window is
+`apps/sessions/inspector/` beside its `ui/` package, where the main window is
 split into concern mixins (`ui/window_*.py`). `analysis/` keeps its
 private helpers (`_io`, `_cache_keys`, `_frames`) at the top level, and no
 package `__init__.py` re-exports names; import from the defining module

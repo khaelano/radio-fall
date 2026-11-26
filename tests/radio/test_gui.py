@@ -9,7 +9,8 @@ from fall_detection.apps.common.pacing import (
 from fall_detection.apps.common.pacing import (
     frame_interval_ms,
 )
-from fall_detection.apps.csi_viewer.app import GUI_INTERVAL_MS, _parser
+from fall_detection.apps.live.app import GUI_INTERVAL_MS
+from fall_detection.apps.live.app import parser as _parser
 from fall_detection.radio.buffer import RollingCsiBuffer
 from fall_detection.radio.state import LiveState
 

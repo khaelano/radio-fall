@@ -1,9 +1,10 @@
-# Live viewer and collection code
+# Live view and collection code
 
-The viewer and collector share radio setup, buffer selection, plotting and
-transport diagnostics. Rust owns the radio session; Python moves accepted
-records to recording sinks and display buffers. Collection activities, artifact
-writing and trial timing remain in the collection controller and capture modules.
+`csi-live` (live view with optional detection) and the collection console of
+`csi-sessions` share radio setup, buffer selection, plotting and transport
+diagnostics. Rust owns the radio session; Python moves accepted records to
+recording sinks and display buffers. Collection activities, artifact writing
+and trial timing remain in the collection controller and capture modules.
 
 | Module | Responsibility |
 | --- | --- |
@@ -16,24 +17,44 @@ writing and trial timing remain in the collection controller and capture modules
 | `apps/common/qt.py` | Create the `QApplication` and report a missing PySide6 install uniformly |
 | `apps/common/rendering.py` | Numerical preparation and a bounded one-snapshot/one-frame cache |
 | `apps/common/gaps.py` | Receiver-by-time heatmap of CSI availability at delivery deadlines |
-| `apps/collector/app.py` | Parse options, gather metadata, compose the controller and windows, enter the Qt event loop |
-| `apps/collector/runtime.py` | Evaluate health, advance trial timing, update both windows and drain a run on exit |
-| `apps/collector/views/` | Setup/detail dialogs, operator controls, performer cues and presentation styles |
+| `apps/live/app.py` | Parse `csi-live` options, validate the radio configuration before Qt opens, run headless detection |
+| `apps/live/window.py` | Run one engine at a time on the gateway: `LiveRadio` and the dashboard with no model, the native detector with models; the toolbar model menu and apply button |
+| `apps/live/detection.py`, `detection_view.py` | Detector configuration, library and bundle checks without Qt; the detection page (scores, raw stream, window previews, calibration) |
+| `apps/sessions/app.py` | Parse `csi-sessions` options and open the browser, optionally with the setup form or a resume |
+| `apps/sessions/window.py` | Session inspector plus **New session** and **Resume recording**; hides the browser while a session records and reselects the new session afterwards |
+| `apps/sessions/collector/run.py` | Compose the recording worker, camera, radio, controller and windows of one session; on close, end, drain, flush, close and archive it |
+| `apps/sessions/collector/plan.py` | The operator's choices for one new or resumed session, without Qt |
+| `apps/sessions/collector/runtime.py` | Evaluate health, advance trial timing, update both windows and drain a run on exit |
+| `apps/sessions/collector/views/` | Setup form, detail card, operator controls, performer cues, the protocol editor (`protocol_editor.py`) with its scenario sources and file export (`protocol_sources.py`), and presentation styles |
+| `protocol/revision.py` | Build a revised protocol from an edited queue without Qt: locked trials unchanged, forks for edited scenarios with recorded trials, adopted and custom scenarios, standalone protocols for later sessions, change summaries |
 | `collection/controller.py`, `capture.py` | Collection state transitions and immutable recording artifacts |
 
-The viewer writes no CSV: Rust journals every accepted record, and the viewer's
+The live view writes no CSV: Rust journals every accepted record, and
 `--output-dir` only selects where the journal (`transport/gateway/<run>`) goes;
 it defaults to `data/experiments/viewer/`, outside the DVC-tracked `data/raw/`,
-and Git ignores that folder.
+and Git ignores that folder. Detector starts write `native-<timestamp>` folders
+below the same option, by default under `data/experiments/detector/`.
 The collector journals into its session directory.
+
+The gateway serial port admits one reader (the native session opens it with
+`TIOCEXCL`), so `csi-live` never runs the live view and the detector together.
+Applying a new model selection stops the running engine, waiting for its
+acquisition to close, before the next one opens the port. The dashboard's trace
+count, inspected subcarrier and window length carry over to the next live-view
+start. A failed start leaves the window open with the error above the plots;
+pressing the toolbar button retries.
 
 `LiveRadio` binds configured identities without opening hardware. Its `start`
 method runs only after recording sinks and the UI are ready. Both applications
 register cleanup before starting acquisition. The collector ends the current
 attempt, stops/drains radio acceptance and flushes pending records before its
-outer resource scope closes the camera. Cleanup continues if an earlier cleanup
-raises. Canceling setup also releases an initialized camera. Closing the operator
-console exits collection even while performer guidance is open.
+resource scope closes the camera. Cleanup continues if an earlier cleanup
+raises. The setup form creates no radio or camera, so canceling it opens no
+hardware. Closing the operator console ends the session even while performer
+guidance is open; `csi-sessions` then publishes the raw archive behind a
+progress dialog and shows the browser again. While a session records, the
+browser is hidden and the application does not quit when the last window
+closes, so the console always returns to it.
 
 During an interrupted live link, the native session ends the failed run and
 starts a new run with a fresh identity, journal and clock fit. `LiveRadio`
@@ -69,7 +90,7 @@ of the preview cache.
 
 ## CSI gap heatmap
 
-Both `csi-viewer` and `fall-collection` include a **CSI gaps** tab. Each row is
+The live view of `csi-live` and the collection console of `csi-sessions` both include a **CSI gaps** tab. Each row is
 one configured receiver; columns follow a common synchronized capture-time axis
 relative to the current host monotonic time. The window control selects one to
 ten seconds of history. The receiver selector still selects the phase/amplitude
@@ -108,9 +129,11 @@ receiver selection, cache invalidation and immediate health-loss handling.
 `tests/radio/test_native_session.py` runs the real Rust session against a fake
 gateway on a pseudo-terminal: startup, journal-before-ACK, rounds, availability,
 duplicate removal, restart after lost gateway status and fatal identity mismatch.
-These tests do not exercise radio timing, USB behavior or firmware. The
-collector entry point decreased from 1,076 to approximately 200 lines; the
-extracted views retain their existing behavior tests.
+These tests do not exercise radio timing, USB behavior or firmware.
+`tests/radio/test_live_apps.py` also runs `csi-live` through a live-view to
+detection to live-view switch with a scripted detector, and `csi-sessions`
+from the setup form through recording, archiving and the return to the browser,
+including a failed start and a resume.
 
 A local offscreen comparison on 3 November 2026 used 1,200 synthetic HE20 records,
 a three-second visible window and 80 forced display-control refreshes after

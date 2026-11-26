@@ -253,34 +253,3 @@ def test_sequential_requires_post_commit_verification(provisioning_setup):
     board.refresh_status = lambda: replace(board.status, ready=False)
     with pytest.raises(ProvisioningError, match="did not complete"):
         RadioProvisioner([board]).provision(inventory, profile, sequential=True)
-
-
-@pytest.mark.parametrize("command", ["discover", "provision"])
-def test_radio_cli_dispatches_arguments_to_operation(command, monkeypatch):
-    from fall_detection.radio import provisioning
-
-    calls = []
-    monkeypatch.setattr(provisioning, command, lambda argv: calls.append(argv) or 7)
-    assert provisioning.main([command, "--example"]) == 7
-    assert calls == [["--example"]]
-
-
-def test_radio_cli_help_and_unknown_command(capsys):
-    from fall_detection.radio import provisioning
-
-    with pytest.raises(SystemExit) as help_exit:
-        provisioning.main(["--help"])
-    assert help_exit.value.code == 0
-    assert "discover" in capsys.readouterr().out
-    with pytest.raises(SystemExit) as error:
-        provisioning.main(["unknown"])
-    assert error.value.code == 2
-
-
-def test_radio_cli_dispatches_transmitter_control(monkeypatch):
-    from fall_detection.radio import provisioning, wireless_control
-
-    calls = []
-    monkeypatch.setattr(wireless_control, "main", lambda argv: calls.append(argv) or 3)
-    assert provisioning.main(["transmitter", "status"]) == 3
-    assert calls == [["status"]]

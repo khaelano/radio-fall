@@ -1,6 +1,6 @@
 # Automatic radio recovery
 
-The viewer and collector reconnect automatically after an interrupted radio
+The live view, the detector and the collector reconnect automatically after an interrupted radio
 link while the application remains open. The transmitter still waits for a host
 run configuration and start command after boot; it does not transmit autonomously
 when the desktop application is closed.
@@ -8,7 +8,8 @@ when the desktop application is closed.
 ## Recovery behavior
 
 The native session (`radio_transport::session`, driven through
-`NativeAcquisition` by `radio/live.py` and directly by `fall-detect`) owns
+`NativeAcquisition` by `radio/live.py` and directly by the detector of
+`csi-live`) owns
 recovery. A transmitter, companion or gateway restart ends the affected run.
 USB framing errors after acceptance starts also end that run; a damaged frame
 is never treated as a valid packet. Recovery then:
@@ -19,7 +20,7 @@ is never treated as a valid packet. Recovery then:
    are retained. The operator must retry or skip it.
 2. Closes the serial port, sending best-effort stop commands to the gateway and
    relayed transmitter. Reconnection starts after three seconds (two in
-   `fall-detect`) and backs off
+   the detector) and backs off
    linearly to at most 30 seconds while hardware remains unavailable; a run that
    accepted data resets the backoff. Stopping the application cancels retries.
 3. Discovers the configured gateway identity. A gateway still configured for an
@@ -61,10 +62,11 @@ native session's USB-loss and relay-recovery paths through `fall-detect`; the
 
 ## Resume a saved collection session
 
-After closing the old collector normally, reopen its session directory:
+After closing the old collection console normally, select its session folder
+in `csi-sessions` and press **Resume recording**, or run:
 
 ```sh
-uv run fall-collection --resume-session data/raw/sessions/20261104T081805521126Z
+uv run csi-sessions --resume-session data/raw/sessions/20261104T081805521126Z
 ```
 
 The collector loads the saved protocol, participant metadata and explicit trial

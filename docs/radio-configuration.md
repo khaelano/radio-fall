@@ -31,10 +31,11 @@ boards on Linux; update them on a different laptop. An explicit `--gateway-port`
 overrides the file value for one command. For example:
 
 ```sh
-uv run csi-viewer
-uv run fall-collection
-uv run csi-radio transmitter status
-uv run csi-radio provision --dry-run
+uv run csi-live
+uv run csi-sessions
+uv run csi-radio                 # configured boards, what is connected, next step
+uv run csi-radio check           # validate this file without opening hardware
+uv run csi-radio transmitter     # read the transmitter through the gateway relay
 ```
 
 The host accepts gateway transport policy version 7 and operational inventory
@@ -45,12 +46,17 @@ is opened.
 
 Changes to the sensing profile require provisioning all C5 sensing boards before
 acquisition. Changes to receiver identities/order require provisioning the
-transmitter's complete roster as well. Connect boards one at a time and run
-`csi-radio provision --sequential` with the same file throughout the pass. The
-C6 gateway receives its upload configuration automatically at each run.
+transmitter's complete roster as well. Run `csi-radio provision` with the same
+file throughout the pass: it writes and verifies each connected C5 board that
+does not store the current profile, then asks you to connect the next one.
+Boards that already report the profile fingerprint are skipped; after a roster
+change, add `--force` while the transmitter is connected, because the
+fingerprint does not cover the receiver list. `--one` provisions exactly one
+connected board and stops; `--all` stages all six boards together. The C6
+gateway receives its upload configuration automatically at each run.
 
 Changing the backhaul channel also requires pairing both C6 endpoints on that
-channel while sensing is stopped: `csi-radio transmitter pair`. Pairing uses
+channel while sensing is stopped: `csi-radio pair`. Pairing uses
 the configured companion and gateway USB ports, verifies their identities and
 stores keys only in board NVS. Do not put keys in the JSON file. The already
 paired setup does not need pairing or reprovisioning for this consolidation.
@@ -60,7 +66,7 @@ fingerprints. The current sensing fingerprint remains `8b28a906a0fbcd1f`.
 Recordings pin the resolved inventory, profile and transport settings rather
 than relying on the mutable configuration path. Unknown fields and incompatible
 radio/transport settings are rejected. Collection requires four registered C5
-receivers; viewer/probe mode can use one to four.
+receivers; the live view of `csi-live` can use one to four.
 
 ## Defaults and retained experiment definitions
 
@@ -69,7 +75,7 @@ the existing versioned protocol defaults: no early return, no minimum revisit,
 10 ms send guard and no bitmap ACKs. The file explicitly selects the tested
 policy rather than changing defaults in legacy wire-contract constructors.
 The benchmark defaults to a 30 s warm-up, 300 s measurement and an 80-record/s
-per-receiver target. The viewer and collector use the profile's sensing rate;
+per-receiver target. The live view and collector use the profile's sensing rate;
 there is no independent `--nominal-rate-hz` setting to contradict it.
 
 Output folders, UI controls, optional camera settings and protocol selection

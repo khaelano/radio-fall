@@ -13,17 +13,27 @@ components, which ranked attempts best on the holdouts
 training dataset. Rust owns acquisition, preprocessing, resident ONNX sessions,
 inference scheduling and logs; Python supplies controls and displays results.
 
+Detection is part of `csi-live`, which opens on the live CSI dashboard with no
+model selected:
+
 ```sh
 uv sync --extra radio --extra detect
-uv run fall-detect
+uv run csi-live                            # live view; pick models in the window
+uv run csi-live --models tonepool_tcn-4s   # start with detection
 ```
 
-Connect the gateway and power the sensing radios. The default selection is
-`tonepool_tcn-4s`. Select models in the desktop controls,
-or run a bounded headless session:
+Connect the gateway and power the sensing radios. In the window, the **Model**
+menu lists every live-compatible export; `tonepool_tcn-4s` is marked as the
+default. Tick one or more models and press **Start detection**; choose
+**None — view live data only** and press **Switch to live view** to return to
+the dashboard. The gateway admits one reader, so the window stops the running
+engine before it starts the next. Models without an exported bundle under
+`--model-root` are disabled, and so is every model when the native ONNX Runtime
+libraries of the `detect` extra are missing; the menu tooltip names the cause.
+For a bounded run without a window:
 
 ```sh
-uv run fall-detect --headless --duration 30 --models tonepool_tcn-4s cnn-4s
+uv run csi-live --headless --duration 30 --models tonepool_tcn-4s cnn-4s
 ```
 
 `tonepool_tcn-4s` and `tiny_tcn1-4s` read the same input as the other models.
@@ -46,14 +56,15 @@ in real time instead of opening the gateway. Each capture directory needs
 `radio.cgcf` and its `transport/gateway/<run>/` journal; consecutive captures
 start new segments. `--replay-speed` changes the pace and `--replay-repeat`
 loops. Both the GUI and `--headless` work; headless exits when the replay
-finishes.
+finishes. Replay always runs through the detector: without `--models` the
+window starts with `tonepool_tcn-4s`, and headless replay needs `--models`.
 
 ```sh
 uv run dvc pull data/experiments/detector/native-capture-20261112-c.dvc
-uv run fall-detect --replay-capture data/experiments/detector/native-capture-20261112-c
+uv run csi-live --replay-capture data/experiments/detector/native-capture-20261112-c
 ```
 
-The GUI also shows a scrolling heatmap of the last ten seconds of raw CSI
+The detection page also shows a scrolling heatmap of the last ten seconds of raw CSI
 magnitudes from all four receivers, redrawn at about 30 frames per second as
 packets arrive. Below it, two heatmaps show the latest window of a selected
 model: its raw magnitudes and the normalized model input (`log1p` squared
@@ -127,17 +138,18 @@ window ends. Coverage below 70% for any receiver, stale input and runtime
 errors produce unknown. In the GUI, scores at or above a model's threshold
 display a fall candidate; models remain independent. The threshold is the
 model's [calibration](#installation-calibration), or `--threshold` (default
-0.5) without one; the table shows which. Changing the selection restarts the
-backend. Outputs go to
-a fresh directory under `data/experiments/detector/`: `predictions.jsonl`,
+0.5) without one; the table shows which. Applying a new selection restarts the
+backend. Each start writes to a fresh `native-<timestamp>` directory below
+`--output-dir` (default `data/experiments/detector/`): `predictions.jsonl`,
 `detector.json`, and raw gateway journals in live mode. Git ignores these
-`native-<timestamp>` folders; track a run worth keeping with `uv run dvc add`
-(the 12 November runs are in `runs-20261112`).
+folders; track a run worth keeping with `uv run dvc add` (the 12 November runs
+are in `runs-20261112`). Before 26 November 2026 the `fall-detect` command
+wrote the first run directly into an explicit `--output-dir`.
 
 A new run, an all-receiver gap of at least one second, or a history overflow
 discards buffered samples and starts a new segment and generation; pending
 windows from the old segment are dropped. Live acquisition uses the shared
-transport session also used by the viewer and collector. After a recoverable
+transport session also used by the live view and the collector. After a recoverable
 radio failure it waits `restart_delay_ms` (2 s), increasing linearly up to
 30 s while the radio stays unavailable, and configures a fresh run; identity,
 configuration and storage failures stop the detector. See

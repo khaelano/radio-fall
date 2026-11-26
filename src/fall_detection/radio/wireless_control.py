@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import secrets
 import struct
@@ -16,12 +15,10 @@ from .provisioning import (
     TYPE_WIRELESS_REQUEST,
     DeviceStatus,
     ProvisioningError,
-    RadioProvisioner,
     SerialFrameStreamDecoder,
     SerialProvisioningDevice,
     encode_serial_frame,
 )
-from .settings import add_config_argument, resolve_settings
 
 
 class WirelessReferenceSerial:
@@ -299,84 +296,3 @@ def pair_devices(
     finally:
         for connection in devices:
             connection.close()
-
-
-def main(argv: list[str] | None = None) -> int:
-    """Pair hardware once, or configure the transmitter through gateway USB."""
-    parser = argparse.ArgumentParser(prog="csi-radio transmitter", description=__doc__)
-    parser.add_argument("action", choices=("pair", "status", "provision"))
-    parser.add_argument("--gateway-port")
-    parser.add_argument("--transmitter-link", choices=("espnow_uart",))
-    parser.add_argument("--channel", type=int, help="paired ESP-NOW backhaul channel")
-    parser.add_argument("--port", help="initial pairing USB for the companion C6")
-    add_config_argument(parser)
-    args = parser.parse_args(argv)
-    pairing_port = args.port
-    try:
-        settings = resolve_settings(args)
-    except (OSError, ValueError) as exc:
-        parser.error(str(exc))
-    inventory = settings.inventory
-    if args.transmitter_link == "usb":
-        parser.error("wireless control requires espnow_uart transmitter_link")
-    if not args.gateway_port:
-        parser.error("gateway port is required")
-    if args.channel is not None and args.channel != settings.transport.channel:
-        parser.error(
-            "--channel must match transport.channel in the radio configuration"
-        )
-    args.channel = settings.transport.channel
-    if args.action == "pair":
-        # Pairing uses the companion USB port, while USB fallback uses the C5.
-        if pairing_port is None:
-            args.port = settings.connection.get("companion_port")
-        if not args.port:
-            parser.error("pair requires --port for the identified source board")
-        pair_devices(
-            args.port,
-            args.gateway_port,
-            inventory,
-            transmitter_link=args.transmitter_link,
-            channel=args.channel,
-        )
-        source = "companion C6"
-        print(
-            f"Paired identified {source} and gateway; keys stored only on the boards."
-        )
-        return 0
-    bridge = GatewayWirelessPort(
-        args.gateway_port, transmitter_link=args.transmitter_link
-    )
-    try:
-        if (
-            bridge.gateway_status.get("role"),
-            bridge.gateway_status.get("target"),
-            bridge.gateway_status.get("mac"),
-        ) != ("gateway", "esp32c6", inventory.gateway.mac):
-            raise RuntimeError("wireless setup gateway identity mismatch")
-        raw = discover_port(bridge.serial, timeout=5)
-        if (raw.get("mac"), raw.get("role")) != (
-            inventory.transmitter.mac,
-            "transmitter",
-        ):
-            raise RuntimeError("wireless transmitter identity mismatch")
-        if args.action == "status":
-            print(json.dumps(raw, indent=2))
-        else:
-            profile = settings.profile
-            adapter = WirelessProvisioningDevice(
-                bridge.serial,
-                DeviceStatus.from_payload(json.dumps(raw).encode()),
-                timeout=5,
-            )
-            report = RadioProvisioner([adapter]).provision(
-                inventory, profile, sequential=True
-            )
-            print("Wireless transmitter profile committed:", report.fingerprint)
-    finally:
-        bridge.close()
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -52,11 +52,13 @@ Flash a positively identified device using `idf.py -C ... -B ... -p <stable-port
 flash`. All images report protocol 3; C5 sensing frames use version 4.
 
 Provision the same complete sensing inventory/profile on the C5 transmitter and
-receivers. Connect sensing boards one at a time and use:
+receivers. `csi-radio` lists the connected boards against the inventory;
+`csi-radio provision` then writes each connected board that needs the profile
+and asks for the next one, so the boards can be connected one at a time:
 
 ```sh
-uv run csi-radio discover --json
-uv run csi-radio provision --sequential
+uv run csi-radio
+uv run csi-radio provision
 ```
 
 The C6 gateway does not store a sensing profile. Its identity is verified and its
@@ -220,7 +222,7 @@ are distinct from gateway and host application acceptance.
 
 ## Live diagnostics
 
-The viewer and collector share the same gateway transport panel. A stable row
+The live view of `csi-live` and the collector share the same gateway transport panel. A stable row
 per inventory receiver reports link freshness, last reported state, host
 records/s over the trailing second, last data age, receiver queue occupancy,
 expiry, drops and send errors. The plotted receiver's row is bold. Native
@@ -316,8 +318,8 @@ single-receiver probe alone does not establish that ceiling.
 
 ```sh
 uv sync --extra radio
-uv run csi-viewer
-uv run fall-collection
+uv run csi-live
+uv run csi-sessions
 ```
 
 Live acquisition now runs in the Rust transport session. The Python

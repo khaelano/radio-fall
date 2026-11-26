@@ -5,7 +5,7 @@ gateway startup and relay recovery, USB framing, CRC and CSI decoding,
 journal-before-ACK acceptance, clock fitting and capture mapping, availability
 bins, duplicate-capture removal, signal preprocessing and inference. Python
 applications receive accepted records and health snapshots; they display data,
-run the collection workflow. Neither the collector nor the viewer writes CSV
+run the collection workflow. Neither the collector nor the live view writes CSV
 files; the transport journal is the raw record. Firmware and radio settings are unchanged.
 
 | Crate | Responsibility |
@@ -22,9 +22,9 @@ and run:
 
 ```bash
 uv sync --extra radio
-uv run csi-viewer
+uv run csi-live
 # Or resume an existing collection with its saved protocol:
-uv run fall-collection --resume-session data/raw/sessions/<session>
+uv run csi-sessions --resume-session data/raw/sessions/<session>
 ```
 
 The setuptools build compiles an optimized release extension with thin LTO.

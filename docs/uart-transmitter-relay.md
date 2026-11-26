@@ -61,8 +61,8 @@ cleared NVS, with sensing stopped and both C6 USB ports connected. The shared
 `--port` override for pairing names the companion C6:
 
 ```sh
-uv run csi-radio transmitter pair
-uv run csi-radio transmitter status
+uv run csi-radio pair
+uv run csi-radio transmitter
 ```
 
 Pairing checks the companion's role and the gateway's inventory identity,
@@ -72,12 +72,12 @@ channel must match the receiver backhaul policy; a conflicting gateway
 configuration is rejected. The transmitter's logical sensing MAC is verified
 through the complete relay after pairing.
 
-Only the gateway requires laptop USB data during operation. The viewer and
-collector load the same configuration automatically:
+Only the gateway requires laptop USB data during operation. `csi-live` and
+`csi-sessions` load the same configuration automatically:
 
 ```sh
-uv run csi-viewer
-uv run fall-collection
+uv run csi-live
+uv run csi-sessions
 ```
 
 The five-minute qualification below used the retired Python

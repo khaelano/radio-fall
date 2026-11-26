@@ -80,6 +80,7 @@ data/
 │   │   └── <session-id>/                    one collection session
 │   │       ├── session.json                 session manifest
 │   │       ├── protocol.json                pinned protocol snapshot
+│   │       ├── protocol_revisions/<NNN>.json  optional queue edits made while recording
 │   │       ├── events.jsonl                 append-only event log
 │   │       ├── session_review.json          optional review overlay
 │   │       └── trials/
@@ -136,7 +137,8 @@ alone.
 | File | Required | Written by | Purpose |
 | --- | --- | --- | --- |
 | `session.json` | yes | collector | Session identity, protocol hash, environment, lifecycle status |
-| `protocol.json` | yes | collector | Exact expanded protocol snapshot used for the trial queue |
+| `protocol.json` | yes | collector | Exact expanded protocol snapshot the session started with |
+| `protocol_revisions/<NNN>.json` | no | collector | Complete protocol after each edit made while recording; see [2.2](#22-protocoljson) |
 | `events.jsonl` | yes | collector | Append-only operator/phase/attempt event stream |
 | `session_review.json` | no | session inspector | Reviewed labels, inclusion, quality, notes, revision history |
 | `trials/` | when trials ran | collector | One directory per trial and attempt |
@@ -208,7 +210,8 @@ finishes. A trimmed example:
 | `location` | string | Free text; may be empty |
 | `notes` | string | Free text; may be empty |
 | `protocol_id` | string | `protocol_id` from the pinned protocol |
-| `protocol_hash` | string | SHA-256 of the resolved protocol source; joins a session to its review sidecar |
+| `protocol_hash` | string | SHA-256 of the resolved `protocol.json` source the session started with; joins a session to its review sidecar and stays unchanged by protocol revisions |
+| `protocol_revisions` | array | Optional; one entry per protocol edit made while recording, oldest first; see [2.2](#22-protocoljson) |
 | `started_at_utc` | string | ISO 8601 wall-clock start time |
 | `status` | string | `open` while recording, `complete` when the queue finished, `ended` when the operator stopped early |
 | `ended_monotonic_ns` | integer | Host monotonic clock at session finish |
@@ -258,6 +261,8 @@ Top-level fields:
 | `defaults` | Default `countdown_seconds`, `action_seconds`, `recovery_seconds` |
 | `blocks` | Ordered blocks, each with `id`, `title`, and `scenarios` |
 | `trial_order` | Optional `declared` (default) or `equipment` execution order |
+| `trial_sequence` | Optional explicit execution order; see below |
+| `derived_from` | Optional provenance of a protocol saved from a recording: source `protocol_id`, `protocol_hash`, `session_id`, `saved_at_utc` |
 | `scenario_manifests` | Optional relative paths of the source manifests |
 | `resolved_manifest_sources` | Optional array of `{path, source}` for reproducibility |
 
@@ -288,6 +293,51 @@ The expansion produces the
 sessions with the same protocol id but a different block selection have
 different hashes, which is deliberate: they represent different trial queues.
 
+A protocol may instead carry an explicit `trial_sequence`: an array of scenario
+ids in execution order. A scenario's repetition number is then its occurrence
+count so far, and each scenario must appear exactly `repetitions` times;
+`trial_order` is ignored.
+
+#### Protocol revisions made while recording
+
+Between trials, the operator can edit the trials that have not been recorded
+yet: reorder, remove or duplicate them, and change their label, title,
+instruction or phase timing. Resolved trials, and the current trial once it has
+an attempt, are locked. Each edit writes the complete revised protocol to
+`protocol_revisions/<NNN>.json`, a new file that is never rewritten, and appends
+an entry to `session.json`'s `protocol_revisions`:
+
+| Field | Meaning |
+| --- | --- |
+| `revision` | 1, 2, … in order |
+| `path` | Revision file relative to the session root |
+| `protocol_hash` | SHA-256 of the revision's resolved source |
+| `trials` | Planned trials after the revision |
+| `effective_from_trial` | First trial ordinal the revision could change |
+| `revised_at_utc`, `revised_monotonic_ns` | When the revision was saved |
+| `note` | The operator's reason; may be empty |
+| `changes` | Human-readable summary, e.g. `reordered the remaining trials` |
+
+`protocol.json` and `protocol_hash` keep describing the starting protocol, so a
+review bound to the session stays valid. The planned trials of the session are
+those of the last revision: `load_session()` and resume read it, and use
+`fall_detection.session.schema.protocol_snapshot_name(manifest)` to find it.
+Revised protocols use `trial_sequence`; trial ordinals remain execution
+positions, so only trials without attempts are renumbered. When a scenario with
+a recorded trial is edited for later trials, those trials move to a new scenario
+`<id>__rev<revision>` whose `attributes` add `revised_from` (the original id)
+and `protocol_revision`; a scenario without recorded trials is edited in place.
+Attempts always store the label that was planned when they were recorded.
+
+A revision may also add scenarios the session protocol did not contain. A
+scenario taken from another protocol file keeps its id and block unless they
+already name something different in the session; then they get the suffixes
+`__<source-protocol-id>` and `--<source-protocol-id>`. Its `attributes` add
+`added_from_protocol`. A scenario defined by the operator gets the id
+`custom__<title>` and `attributes.added_by_operator: true`. Both also record the
+`protocol_revision` that added them. An added scenario joins its block when the
+session has it; otherwise its block is appended after the existing ones.
+
 ### 2.3 `events.jsonl`
 
 One JSON object per line, appended in event order. The live collector can batch
@@ -308,6 +358,7 @@ Known event kinds in current sessions:
 | `phase_changed` | `state`, `trial_ordinal`, `attempt` | The operator state changes (`countdown`, `action`, `recovery`) |
 | `action_confirmed` | `trial_ordinal`, `attempt`, `activity_label` | Operator confirms the planned action |
 | `trial_resolved` | `trial_ordinal`, `attempt`, `disposition` | Trial advances after accept or skip |
+| `protocol_revised` | the `protocol_revisions` entry fields | The operator saved an edit of the remaining trials |
 | `receiver_status` | `message`, `connected` | Acquisition adapter reports a receiver connection change |
 
 The log is append-only and can be longer than the current state: use the last
@@ -317,7 +368,7 @@ event kind appears in every session; aborted sessions may stop early, and
 
 ### 2.4 `session_review.json`
 
-This optional sidecar is created by `fall-session-inspector` when the operator
+This optional sidecar is created by `csi-sessions` when the operator
 saves a review. It never modifies `session.json`, `attempt.json`, or the CSV
 data.
 
@@ -388,7 +439,7 @@ sessions (`status: open`, or any attempt still `recording`) are read-only.
 
 ### 2.5 Curated exports
 
-`fall-session-inspector` can export a session plus its review to a new directory.
+`csi-sessions` can export a session plus its review to a new directory.
 The export keeps the same schema-2 layout and raw CSV bytes, and adds:
 
 - `session.json` → `curation`: `exported_at_utc`, `source_session_id`,
@@ -421,6 +472,8 @@ trials/002_walk-to-fall__start_front__end_left/attempt_01/
   retried trial leaves earlier attempts in place.
 - Trial directories normally cover the selected protocol queue. A trial with no
   attempts was planned but never started.
+- After a protocol revision, the planned queue is the last revision's; ordinals
+  of trials recorded before it never change.
 - `attempt.json.trial_ordinal` is authoritative if a directory name and manifest
   ever disagree.
 
@@ -706,12 +759,12 @@ Reading caveats for USB sessions:
 
 ## 5. How to read the dataset
 
-### 5.1 Session inspector (recommended for browsing and review)
+### 5.1 Session browser (recommended for browsing and review)
 
 ```sh
-uv run fall-session-inspector --sessions-dir data/raw/sessions
+uv run csi-sessions --sessions-dir data/raw/sessions
 # or open one session directly
-uv run fall-session-inspector data/raw/sessions/20261109T161519702956Z.zip
+uv run csi-sessions data/raw/sessions/20261109T161519702956Z.zip
 ```
 
 The inspector opens session directories and version-3 archives alike and never
@@ -739,7 +792,7 @@ explicitly; raw files remain unchanged. See
 ```python
 from pathlib import Path
 
-from fall_detection.apps.session_inspector.data import load_attempt_data
+from fall_detection.apps.sessions.inspector.data import load_attempt_data
 from fall_detection.session.models import scan_sessions
 
 sessions = scan_sessions(Path("data/raw/sessions"))
@@ -866,6 +919,9 @@ per-receiver files are the spatial-diversity axis. If you concatenate, add a
   directory.
 - **Protocol hash binds the review.** Do not copy `session_review.json` between
   sessions; `load_session`/`ReviewStore` will reject the hash mismatch.
+- **Revised sessions plan from the last revision.** Read planned trials through
+  `load_session()` or `protocol_snapshot_name()`, not `protocol.json` directly,
+  when `session.json` lists `protocol_revisions`.
 - **JSON is canonical-ish.** Keys are sorted and indented, but do not rely on
   byte-for-byte formatting for equality; use the parsed values.
 - **Schema mismatch is an error.** A session without
@@ -974,7 +1030,8 @@ empty and legacy sessions.
 
 ```text
 session.json                 identity, protocol hash, environment, status
-protocol.json                pinned expanded protocol
+protocol.json                pinned expanded protocol the session started with
+protocol_revisions/<NNN>.json  optional edits of the remaining trials; the last is the plan
 events.jsonl                 append-only kind/monotonic_ns events
 session_review.json          optional review overlay (schema 1)
 trials/<NNN>_<scenario>/attempt_<NN>/
@@ -988,7 +1045,7 @@ Most useful commands:
 
 ```sh
 # Browse and review
-uv run fall-session-inspector --sessions-dir data/raw/sessions
+uv run csi-sessions --sessions-dir data/raw/sessions
 
 # Find sessions
 find data/raw/sessions -maxdepth 2 -name session.json -print

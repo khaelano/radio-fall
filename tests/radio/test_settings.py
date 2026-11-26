@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from fall_detection.apps.collector.app import _parser as collection_parser
-from fall_detection.apps.csi_viewer.app import _parser as viewer_parser
+from fall_detection.apps.live.app import parser as viewer_parser
+from fall_detection.apps.sessions.app import _parser as collection_parser
 from fall_detection.radio.settings import (
     DEFAULT_CONFIG,
     RadioSettings,
@@ -128,23 +128,9 @@ def test_configuration_rejects_invalid_settings(tmp_path, change):
         RadioSettings.load(path)
 
 
-def test_dry_run_uses_configuration_without_opening_usb(monkeypatch, capsys):
-    from fall_detection.radio import provisioning
-
-    monkeypatch.setattr(
-        provisioning,
-        "_open_serial_devices",
-        lambda: pytest.fail("dry run must not open hardware"),
-    )
-    assert provisioning.provision(["--dry-run"]) == 0
-    report = json.loads(capsys.readouterr().out)
-    assert report["fingerprint"] == "8b28a906a0fbcd1f"
-    assert report["devices"] == 5
-
-
 @pytest.mark.parametrize("override", [None, "explicit-companion-port"])
 def test_pairing_uses_companion_port_and_configured_channel(monkeypatch, override):
-    from fall_detection.radio import wireless_control
+    from fall_detection.radio import cli, wireless_control
 
     calls = []
     monkeypatch.setattr(
@@ -152,8 +138,8 @@ def test_pairing_uses_companion_port_and_configured_channel(monkeypatch, overrid
         "pair_devices",
         lambda *args, **kwargs: calls.append((args, kwargs)),
     )
-    arguments = ["pair"] + (["--port", override] if override else [])
-    assert wireless_control.main(arguments) == 0
+    arguments = ["pair", "--yes"] + (["--port", override] if override else [])
+    assert cli.main(arguments) == 0
     args, kwargs = calls[0]
     assert args[0] == (override or RadioSettings.load().connection["companion_port"])
     assert args[1] == RadioSettings.load().connection["gateway_port"]
@@ -163,11 +149,12 @@ def test_pairing_uses_companion_port_and_configured_channel(monkeypatch, overrid
     }
 
 
-def test_pairing_rejects_channel_mismatch_before_opening_hardware(monkeypatch):
-    from fall_detection.radio import wireless_control
+def test_pairing_needs_confirmation_before_opening_hardware(monkeypatch, capsys):
+    from fall_detection.radio import cli, wireless_control
 
     monkeypatch.setattr(
         wireless_control, "pair_devices", lambda *a, **k: pytest.fail("must not pair")
     )
-    with pytest.raises(SystemExit):
-        wireless_control.main(["pair", "--channel", "1"])
+    monkeypatch.setattr(cli, "_interactive", lambda: False)
+    assert cli.main(["pair"]) == 1
+    assert "pass --yes" in capsys.readouterr().out

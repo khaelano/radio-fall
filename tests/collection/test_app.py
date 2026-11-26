@@ -1,39 +1,42 @@
 from __future__ import annotations
 
-from fall_detection.apps.collector.app import (
-    COLLECTOR_UI_INTERVAL_MS,
-    COLLECTOR_VIEW_SECONDS,
-    DEFAULT_PROTOCOL,
-    _parser,
-)
+import pytest
+
 from fall_detection.apps.common.dashboard import DEFAULT_VIEW_SECONDS
 from fall_detection.apps.common.pacing import (
     FPS_CHOICES,
     FPS_DEFAULT,
     frame_interval_ms,
 )
-from fall_detection.apps.csi_viewer.app import GUI_INTERVAL_MS
-from fall_detection.apps.csi_viewer.app import _parser as viewer_parser
+from fall_detection.apps.live.app import GUI_INTERVAL_MS
+from fall_detection.apps.live.app import parser as viewer_parser
+from fall_detection.apps.sessions.app import _parser
+from fall_detection.apps.sessions.collector.run import (
+    COLLECTOR_UI_INTERVAL_MS,
+    COLLECTOR_VIEW_SECONDS,
+    DEFAULT_PROTOCOL,
+)
 
 
-def test_collection_parser_defaults_to_gateway_protocol():
+def test_sessions_parser_writes_new_sessions_to_the_browsed_folder():
     args = _parser().parse_args(
         [
             "--gateway-port",
             "/dev/ttyACM0",
-            "--output-dir",
+            "--sessions-dir",
             "data/test-sessions",
         ]
     )
 
     assert args.gateway_port == "/dev/ttyACM0"
-    assert args.output_dir.name == "test-sessions"
+    assert args.sessions_dir.name == "test-sessions"
     assert args.config is None  # resolved centrally to configs/radio.json
-    assert args.protocol is None  # selected in the startup dialog
+    assert args.protocol is None  # selected in the setup form
+    assert not args.new and args.resume_session is None
     assert DEFAULT_PROTOCOL.name == "fall_simple.json"
 
 
-def test_collection_protocol_can_be_selected_from_command_line():
+def test_collection_protocol_can_be_preselected_from_command_line():
     args = _parser().parse_args(["--protocol", "configs/collection/fall_simple.json"])
 
     assert str(args.protocol) == "configs/collection/fall_simple.json"
@@ -54,3 +57,20 @@ def test_collection_video_is_optional_and_device_is_explicit():
     args = _parser().parse_args(["--video-device", "/dev/video2", "--video-fps", "25"])
     assert args.video_device == "/dev/video2"
     assert args.video_fps == 25 and args.fps == FPS_DEFAULT
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (["--continuous", "--protocol", "p.json"], "cannot be combined"),
+        (["--continuous", "--video-device", "/dev/video2"], "CSI only"),
+        (["--resume-session", "s", "--continuous"], "saved protocol"),
+        (["--resume-session", "s", "--new"], "either --new"),
+    ],
+)
+def test_sessions_rejects_conflicting_collection_options(arguments, message, capsys):
+    from fall_detection.apps.sessions import app
+
+    with pytest.raises(SystemExit):
+        app.main(arguments)
+    assert message in capsys.readouterr().err

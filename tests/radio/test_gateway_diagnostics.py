@@ -6,7 +6,7 @@ import time
 import pytest
 from fake_acquisition import FakeAcquisition
 
-from fall_detection.apps.csi_viewer.app import _parser
+from fall_detection.apps.live.app import parser as _parser
 from fall_detection.radio.gateway_diagnostics import DeliveryRates
 from fall_detection.radio.live import LiveRadio
 

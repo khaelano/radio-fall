@@ -82,3 +82,13 @@ four-direction protocol had 80 conditions and 160 trials; its recordings keep
 their pinned snapshots.
 The revised four-direction protocol has a new protocol id. Existing condition
 ids are reused where the activity and direction pair are unchanged.
+
+## Protocols saved from a recording
+
+The protocol editor of `csi-sessions` can save an edited queue as a new
+protocol file here (**Save as protocol file…**). Such a file lists its blocks
+explicitly, fixes the execution order with `trial_sequence` instead of
+`trial_order`, and records its origin in `derived_from` (source protocol id and
+hash, session id and save time). It needs a protocol id of its own, so sessions
+recorded with it stay distinguishable. Choose it in the setup form like any
+other protocol.

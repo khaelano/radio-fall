@@ -15,9 +15,9 @@ pytest.importorskip("pyqtgraph")
 
 from PySide6 import QtCore, QtWidgets
 
-from fall_detection.apps.collector.views.dialogs import MetadataDialog
-from fall_detection.apps.collector.views.operator import OperatorWindow
 from fall_detection.apps.common.dashboard import CsiDashboardPanel
+from fall_detection.apps.sessions.collector.views.dialogs import NewSessionDialog
+from fall_detection.apps.sessions.collector.views.operator import OperatorWindow
 from fall_detection.collection.capture import SessionMetadata
 from fall_detection.collection.controller import (
     HealthSnapshot,
@@ -237,10 +237,12 @@ def test_operator_window_renders_the_complete_state(qt_app, tmp_path):
     assert window.trial_list.item(0).text().startswith("✓")
 
 
-def test_metadata_dialog_defaults_to_every_block(qt_app):
+def test_new_session_dialog_defaults_to_every_block(qt_app, tmp_path):
     protocol = load_protocol(PROTOCOL_PATH)
 
-    dialog = MetadataDialog(QtWidgets, protocol)
+    dialog = NewSessionDialog(
+        QtWidgets, protocol_path=PROTOCOL_PATH, output_dir=tmp_path, cameras=()
+    )
 
     assert dialog.block_ids() == tuple(block[0] for block in protocol.blocks)
     assert "232 trials" in dialog.total_label.text()
@@ -252,115 +254,47 @@ def test_metadata_dialog_defaults_to_every_block(qt_app):
     assert "0 trials" in dialog.total_label.text()
 
 
-def test_dashboard_panel_lists_bound_receivers_and_switches_stream(qt_app):
-    from fall_detection.radio.buffer import RollingCsiBuffer
-
-    state = LiveState(100)
-    first, second = RollingCsiBuffer(), RollingCsiBuffer()
-    state.configure_receivers({"rx-1": first, "rx-2": second})
-
-    panel = CsiDashboardPanel(state, fps=24, receivers=["rx-1", "rx-2"])
-
-    assert panel.receiver_combo.count() == 2
-    assert panel.receiver_combo.currentData() == "rx-1"
-
-    panel.receiver_combo.setCurrentIndex(1)
-
-    assert state.selected_receiver_id == "rx-2"
-    assert state.buffer is second
-
-
-def test_scenario_detail_card_shows_every_field(qt_app, tmp_path):
-    protocol, _controller, snapshot = _session(tmp_path, ["walk-to-fall"])
-    window = _window(qt_app, protocol)
-    _apply(window, snapshot)
-
-    window.show_current_details()
-
-    assert len(window._detail_windows) == 1
-    detail = window._detail_windows[0]
-    assert "current trial" in detail.status_label.text()
-    assert detail.title_label.text() == "wf · Walk to fall (front → front)"
-    assert "walk_to_fall" in detail.meta_label.text()
-    assert detail.instruction_label.text().startswith(
-        "Mattress only. Walk toward front"
+def test_new_session_dialog_builds_a_plan_or_explains_what_is_missing(qt_app, tmp_path):
+    dialog = NewSessionDialog(
+        QtWidgets,
+        protocol_path=PROTOCOL_PATH,
+        output_dir=tmp_path,
+        video_device="/dev/video2",
+        cameras=("/dev/video0",),
     )
-    assert "countdown 5 s" in detail.timing_label.text()
-    assert "action 8 s" in detail.timing_label.text()
-    assert "recovery 5 s" in detail.timing_label.text()
-    assert "start front" in detail.direction_label.text()
-    assert "end front" in detail.direction_label.text()
-    assert detail.safety_label is not None
-    assert "crash mat" in detail.safety_label.text()
-    assert detail.id_label.text() == "walk-to-fall__start_front__end_front"
+    with pytest.raises(ValueError, match="participant"):
+        dialog.plan()
+    dialog.participant.setText(" p07 ")
+    first_block = dialog._blocks[0][0]
+    for block_id, checkbox, _trials in dialog._blocks:
+        checkbox.setChecked(block_id == first_block)
+
+    plan = dialog.plan()
+
+    assert plan.metadata.participant_id == "p07"
+    assert plan.output_dir == tmp_path
+    assert {trial.scenario.block_id for trial in plan.protocol.trials} == {first_block}
+    assert plan.video is not None and plan.video.device == "/dev/video2"
+    assert not plan.continuous
 
 
-def test_scenario_detail_reports_upcoming_and_resolved_trials(qt_app, tmp_path):
-    protocol, controller, snapshot = _session(tmp_path, ["walk-to-fall"])
-    window = _window(qt_app, protocol)
-    _apply(window, snapshot)
-
-    window._show_detail(3)
-    assert "upcoming" in window._detail_windows[0].status_label.text()
-
-    resolved = controller.dispatch(OperatorCommand.SKIP)
-    _apply(window, resolved)
-    window._show_detail(1)
-
-    assert len(window._detail_windows) == 1
-    assert "already resolved" in window._detail_windows[0].status_label.text()
-
-
-def test_queue_double_click_opens_that_scenario_without_dispatching(qt_app, tmp_path):
-    protocol, _controller, snapshot = _session(tmp_path, ["walk-to-fall"])
-    commands: list[OperatorCommand] = []
-    window = _window(qt_app, protocol, commands)
-    _apply(window, snapshot)
-
-    window.trial_list.itemDoubleClicked.emit(window.trial_list.item(4))
-
-    assert len(window._detail_windows) == 1
-    assert "Scenario 005" in window._detail_windows[0].window.windowTitle()
-    assert commands == []
-
-
-def test_scenario_detail_marks_every_trial_resolved_after_completion(qt_app, tmp_path):
-    protocol = protocol_from_mapping(
-        {
-            "schema_version": 1,
-            "protocol_id": "single-trial",
-            "title": "Single trial",
-            "defaults": {
-                "countdown_seconds": 1,
-                "action_seconds": 2,
-                "recovery_seconds": 1,
-            },
-            "blocks": [
-                {
-                    "id": "only",
-                    "title": "Only block",
-                    "scenarios": [
-                        {
-                            "id": "only-scenario",
-                            "activity_label": "walk",
-                            "title": "Walk",
-                            "instruction": "Walk forward",
-                            "repetitions": 1,
-                        }
-                    ],
-                }
-            ],
-        }
+def test_new_session_dialog_continuous_mode_records_csi_only(qt_app, tmp_path):
+    dialog = NewSessionDialog(
+        QtWidgets,
+        protocol_path=PROTOCOL_PATH,
+        output_dir=tmp_path,
+        continuous=True,
+        segment_seconds=60,
+        segments=3,
+        video_device="/dev/video2",
+        cameras=(),
     )
-    controller = SessionController(protocol, tmp_path, environment=RECEIVER_ENV)
-    controller.start_session(SessionMetadata(participant_id="p01"))
-    snapshot = controller.update_health(HealthSnapshot(radio_live=True))
-    window = _window(qt_app, protocol)
-    _apply(window, snapshot)
+    dialog.participant.setText("p01")
 
-    complete = controller.dispatch(OperatorCommand.SKIP)
-    _apply(window, complete)
-    window._show_detail(1)
+    plan = dialog.plan()
 
-    assert "already resolved" in window._detail_windows[0].status_label.text()
-    assert not window.detail_button.isEnabled()
+    assert plan.continuous and plan.video is None
+    assert plan.protocol.protocol_id == "continuous-activity-v1"
+    assert len(plan.protocol.trials) == 3
+    assert "Up to 3 segments" in dialog.total_label.text()
+    assert not dialog.camera_combo.isEnabled()

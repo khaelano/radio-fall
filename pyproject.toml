@@ -50,11 +50,9 @@ cuda = [
 ]
 
 [project.scripts]
-csi-viewer = "fall_detection.apps.csi_viewer.app:main"
-csi-radio = "fall_detection.radio.provisioning:main"
-fall-collection = "fall_detection.apps.collector.app:main"
-fall-session-inspector = "fall_detection.apps.session_inspector.app:main"
-fall-detect = "fall_detection.apps.detector.app:main"
+csi-live = "fall_detection.apps.live.app:main"
+csi-sessions = "fall_detection.apps.sessions.app:main"
+csi-radio = "fall_detection.radio.cli:main"
 
 [dependency-groups]
 dev = [

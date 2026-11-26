@@ -208,7 +208,12 @@ on their hardware and data, and are not reproduced here.
   seed 45, full-data split `20261123T153725520115Z`), with unchanged
   preprocessing. Its live inputs matched the offline chain bit for bit and its
   logits matched PyTorch to 2.4e-6. WebGPU placement was checked on an NVIDIA
-  GPU, not the AMD laptop. Without a calibration it displays
+  GPU, not the AMD laptop. Since 26 November `tiny_tcn1-4s` (seed 45 of
+  `20261126T005404382343Z`, same split and labels) is selectable but not the
+  default; its live inputs matched the offline chain bit for bit, its Rust
+  logits equalled ONNX Runtime exactly, and every operator ran on WebGPU on the
+  NVIDIA GPU ([live tiny-TCN report](reports/live-tiny-tcn-2026-11-26.md)).
+  Without a calibration it displays
   alarms at 0.5. `fall-detect` records ten prompted non-fall movements and sets
   each model's threshold from them. Under live conditions (250 ms hop, 70 %
   gate) on the held-out sessions, this held the attempt false-positive rate at
@@ -381,10 +386,12 @@ on their hardware and data, and are not reproduced here.
   quiet baseline (lowest 75 % of the last 60 s) removed level drift within a
   session but did not make thresholds portable between the participants. A
   5,345-parameter model on the mean energy over tones and receivers
-  (`tiny_tcn1`, not in the live detector) matched `tonepool_tcn` (mean attempt
+  (`tiny_tcn1`) matched `tonepool_tcn` (mean attempt
   AUC 0.846 against 0.836; better testing on `akmal`, slightly worse on
   `khaelano`), so most of the separation comes from how overall motion energy
-  develops over about 2 s.
+  develops over about 2 s. The tiny models are now defined in `03_training`;
+  `tiny_tcn1-4s` is selectable in the live detector but not the default
+  ([live tiny-TCN report](reports/live-tiny-tcn-2026-11-26.md)).
 - How should collection separate falls from setup, for example non-fall
   activity with the mattress in place or interleaved trial order?
 - How should irregular timestamps and packet loss shape model windows?

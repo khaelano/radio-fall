@@ -1,9 +1,12 @@
 # Live four-receiver fall scoring
 
 The native sequence detector uses the ONNX exports and saved normalizers under
-`artifacts/model/`: the nine CNN, LSTM and GRU models, and `tonepool_tcn-4s`, the
+`artifacts/model/`: the nine CNN, LSTM and GRU models, `tonepool_tcn-4s`, the
 project's most consistent configuration (4 s, burst-centred training positives;
-[tone-pooling report](reports/tone-pooling-2026-11-23.md)). It requires no
+[tone-pooling report](reports/tone-pooling-2026-11-23.md)), and `tiny_tcn1-4s`,
+a 5,345-parameter model on the motion energy averaged over tones and receivers
+that matched it on the session holdouts
+([energy-inputs report](reports/energy-inputs-2026-11-26.md)). It requires no
 training dataset. Rust owns acquisition, preprocessing, resident ONNX sessions,
 inference scheduling and logs; Python supplies controls and displays results.
 
@@ -20,10 +23,12 @@ or run a bounded headless session:
 uv run fall-detect --headless --duration 30 --models tonepool_tcn-4s cnn-4s
 ```
 
-`tonepool_tcn-4s` reads the same input as the other models, so live
-preprocessing is unchanged. The published bundle, the checks on it and what
-remains unverified are in the
-[live tone-pool report](reports/live-tonepool-2026-11-24.md).
+`tonepool_tcn-4s` and `tiny_tcn1-4s` read the same input as the other models,
+so live preprocessing is unchanged. The published bundles, the checks on them
+and what remains unverified are in the
+[live tone-pool report](reports/live-tonepool-2026-11-24.md) and the
+[live tiny-TCN report](reports/live-tiny-tcn-2026-11-26.md). `tiny_tcn1-4s` is
+not the default until a new participant confirms the holdout result.
 
 ## Replay without hardware
 

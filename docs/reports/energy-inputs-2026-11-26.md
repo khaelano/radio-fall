@@ -297,19 +297,20 @@ in which the first model was higher):
   cover the tested attempts, not training randomness; recorded history covers only
   attempts (21 % and 45 % of the two participant sessions' time).
 
-## Next steps (not run)
+## Next steps
 
-1. Register `tiny_tcn1` in the live detector as an alternative to
-   `tonepool_tcn-4s` and check replay parity; keep `tonepool_tcn` as the default
-   until a new participant confirms the result.
-2. Collect sessions from more participants, with non-falls on the mattress and
-   interleaved trial order; this addresses threshold portability and the
-   direction dependence that every representation change met.
+1. Done the same day: `tiny_tcn1-4s` is selectable in the live detector and
+   matched the offline chain on replay; `tonepool_tcn` stays the default until a
+   new participant confirms the result
+   ([live tiny-TCN report](live-tiny-tcn-2026-11-26.md)).
+2. Not run: collect sessions from more participants, with non-falls on the
+   mattress and interleaved trial order; this addresses threshold portability
+   and the direction dependence that every representation change met.
 
 ## Runs and files
 
 Diagnostics under `artifacts/notebooks/diagnostics/`; training runs under
-`artifacts/notebooks/03_training/`. Not yet added to `artifacts/notebooks.dvc`.
+`artifacts/notebooks/03_training/`, tracked by `artifacts/notebooks.dvc`.
 
 | Experiment | Directory or runs |
 | --- | --- |

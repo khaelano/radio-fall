@@ -392,6 +392,23 @@ on their hardware and data, and are not reproduced here.
   develops over about 2 s. The tiny models are now defined in `03_training`;
   `tiny_tcn1-4s` is selectable in the live detector but not the default
   ([live tiny-TCN report](reports/live-tiny-tcn-2026-11-26.md)).
+  Explorations on 26 November (offline, no source or notebook change; classes
+  only in the diagnostic harnesses;
+  [principal-component spectrum report](reports/pc-spectrum-2026-11-26.md)):
+  projecting each receiver's 238 interior tones of the signed difference on the
+  window's five leading principal components, then taking the masked STFT power
+  summed over the components, raised mean attempt AUC to 0.903 with a GRU
+  (`pcspec_gru`) and 0.886 with `tonepool_tcn`'s temporal convolutions (`pctcn`),
+  against 0.836 (`tonepool_tcn`) and 0.846 (`tiny_tcn1`). The GRU was higher than
+  `tonepool_tcn` in 15 of 16 paired runs, so most of the gain comes from the
+  input. The STFT of the distance moved in component space lost it (0.654),
+  because a norm rectifies the signal. Edge tone index 243 (physical +121)
+  fluctuates far more than interior tones (relative change 22–23 times the
+  median tone's spread) and alone forms the first component of an all-tone PCA.
+  The FallDeFi and WiFall adaptations already exclude it. The per-window
+  eigendecomposition has no ONNX operator. A live path (Rust computes the
+  53 × 65 features, ONNX runs only the head) is a proposal in that report, not
+  implemented.
 - How should collection separate falls from setup, for example non-fall
   activity with the mattress in place or interleaved trial order?
 - How should irregular timestamps and packet loss shape model windows?

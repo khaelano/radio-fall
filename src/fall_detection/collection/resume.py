@@ -10,7 +10,12 @@ from typing import Any
 from ..protocol.loader import load_protocol
 from ..protocol.model import CollectionProtocol
 from ..session.models import read_json_object
-from ..session.schema import ARTIFACT_SCHEMA_VERSION
+from ..session.schema import (
+    ARTIFACT_SCHEMA_VERSION,
+    PROTOCOL_SNAPSHOT,
+    latest_protocol_hash,
+    protocol_snapshot_name,
+)
 from ..session.source import SessionSource
 from .capture import SessionMetadata
 
@@ -32,6 +37,9 @@ class SessionResume:
 def load_session_resume(root: Path) -> SessionResume:
     """Read the saved protocol and recover the first unresolved trial.
 
+    The protocol is the session's latest revision when it was revised while
+    recording; ``protocol.json`` must still match the manifest's hash.
+
     Accepted/skipped trials must form a contiguous prefix. Incomplete attempts
     reserve their names and are retried under new numbers; old streams are never
     reopened. Malformed or conflicting progress fails before any file mutation.
@@ -41,12 +49,22 @@ def load_session_resume(root: Path) -> SessionResume:
     manifest = read_json_object(source, "session.json", "session manifest")
     if manifest.get("artifact_schema_version") != ARTIFACT_SCHEMA_VERSION:
         raise ValueError("unsupported session artifact schema for resume")
-    protocol = load_protocol(root / "protocol.json")
+    original = load_protocol(root / PROTOCOL_SNAPSHOT)
     if (manifest.get("protocol_hash"), manifest.get("protocol_id")) != (
-        protocol.source_hash,
-        protocol.protocol_id,
+        original.source_hash,
+        original.protocol_id,
     ):
         raise ValueError("saved session protocol identity/hash mismatch")
+    snapshot = protocol_snapshot_name(manifest)
+    protocol = original
+    if snapshot != PROTOCOL_SNAPSHOT:
+        # Revisions made while recording replace the queue after recorded trials.
+        protocol = load_protocol(root / snapshot)
+        if (
+            protocol.source_hash != latest_protocol_hash(manifest)
+            or protocol.protocol_id != original.protocol_id
+        ):
+            raise ValueError(f"saved protocol revision {snapshot} does not match")
     metadata = SessionMetadata(
         **{
             key: manifest.get(key, "")

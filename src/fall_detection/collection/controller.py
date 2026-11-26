@@ -13,6 +13,7 @@ from threading import RLock
 from typing import Any, Protocol
 
 from ..protocol.model import CollectionProtocol, Trial
+from ..protocol.revision import same_trials
 from ..radio.recording_io import RecordingIO
 from ..radio.telemetry import (
     BackhaulTelemetrySnapshot,
@@ -175,6 +176,12 @@ class SessionController:
             return self._health
 
     @property
+    def session_id(self) -> str | None:
+        """Return the session id once the session has started."""
+        with self._lock:
+            return self._session_id
+
+    @property
     def session_root(self) -> Path:
         """Return the active session directory for additive transport journals."""
         if self._store is None:
@@ -320,6 +327,90 @@ class SessionController:
                 f"resumed at trial {saved.trial_index + 1}; "
                 "previous recordings retained; wait for inputs before starting"
             )
+            return self._notify_locked()
+
+    @property
+    def protocol_locked_trials(self) -> int:
+        """Number of leading trials a protocol revision must keep unchanged.
+
+        Resolved trials are locked, and so is the current trial once it has an
+        attempt or one is running or awaiting review.
+        """
+        with self._lock:
+            return self._locked_trials_locked()
+
+    @property
+    def protocol_revisions(self) -> int:
+        """Number of protocol revisions recorded in this session."""
+        with self._lock:
+            return self._store.protocol_revisions if self._store is not None else 0
+
+    @property
+    def can_revise_protocol(self) -> bool:
+        """Whether :meth:`revise_protocol` is available in the current state."""
+        with self._lock:
+            return self._store is not None and self._state in (
+                SessionState.READY,
+                SessionState.REVIEW,
+            )
+
+    def _locked_trials_locked(self) -> int:
+        locked = self._trial_index
+        trial = self._current_trial
+        if trial is not None and (
+            self._attempt_numbers.get(trial.ordinal, 0) > 0
+            or self._state is not SessionState.READY
+        ):
+            locked += 1
+        return min(locked, len(self.protocol.trials))
+
+    def revise_protocol(
+        self,
+        protocol: CollectionProtocol,
+        *,
+        note: str = "",
+        changes: list[str] | None = None,
+    ) -> SessionSnapshot:
+        """Replace the queue after the locked trials with a revised protocol.
+
+        Only available between trials (``READY`` or ``REVIEW``). The revision
+        is saved in the session before it takes effect.
+
+        Args:
+            protocol: Revised protocol, e.g. from
+                :func:`~fall_detection.protocol.revision.revise_protocol`.
+            note: Operator's reason, saved with the revision.
+            changes: Human-readable summary, saved with the revision.
+
+        Raises:
+            RuntimeError: A trial is running or the session is not open.
+            ValueError: The revision changes a locked trial or the protocol id.
+        """
+        with self._lock:
+            if not self.can_revise_protocol:
+                raise RuntimeError("the protocol can only be edited between trials")
+            locked = self._locked_trials_locked()
+            if protocol.protocol_id != self.protocol.protocol_id:
+                raise ValueError("a revision must keep the protocol id")
+            if not same_trials(protocol.trials[:locked], self.protocol.trials[:locked]):
+                raise ValueError("recorded trials cannot change in a revision")
+            if protocol.source_hash == self.protocol.source_hash:
+                return self._notify_locked()
+            assert self._store is not None
+            self._store.revise_protocol(
+                protocol,
+                self._monotonic_ns(),
+                effective_from_trial=locked + 1,
+                note=note,
+                changes=changes,
+            )
+            self.protocol = protocol
+            if self._state is SessionState.READY and self._current_trial is None:
+                self._complete_locked("protocol complete after revision")
+            else:
+                self._message = (
+                    f"protocol revised; changes apply from trial {locked + 1}"
+                )
             return self._notify_locked()
 
     def tick(self, now: float | None = None) -> SessionSnapshot:

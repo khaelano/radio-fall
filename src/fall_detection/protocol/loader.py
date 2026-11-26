@@ -27,6 +27,8 @@ _PROTOCOL_KEYS = {
     "scenario_manifests",
     "resolved_manifest_sources",
     "trial_order",
+    "trial_sequence",
+    "derived_from",
 }
 _DEFAULT_KEYS = {"countdown_seconds", "action_seconds", "recovery_seconds"}
 _BLOCK_KEYS = {"id", "title", "scenarios"}
@@ -316,6 +318,41 @@ def _ordered_trials(
     )
 
 
+def _sequenced_trials(
+    blocks: Iterable[tuple[str, str, tuple[Scenario, ...]]], sequence: Any
+) -> tuple[Trial, ...]:
+    """Expand an explicit execution order of scenario ids.
+
+    A scenario's repetition number is its occurrence count so far, so each
+    scenario must appear exactly ``repetitions`` times.
+    """
+
+    if not isinstance(sequence, list) or not sequence:
+        raise ProtocolError("protocol.trial_sequence: expected a non-empty array")
+    scenarios = {
+        scenario.id: scenario for _id, _title, group in blocks for scenario in group
+    }
+    counts: dict[str, int] = {}
+    trials: list[Trial] = []
+    for index, raw in enumerate(sequence):
+        scenario_id = _string(raw, f"protocol.trial_sequence[{index}]")
+        scenario = scenarios.get(scenario_id)
+        if scenario is None:
+            raise ProtocolError(
+                f"protocol.trial_sequence[{index}]: unknown scenario {scenario_id!r}"
+            )
+        counts[scenario_id] = counts.get(scenario_id, 0) + 1
+        trials.append(Trial(index + 1, counts[scenario_id], scenario))
+    for scenario_id, scenario in scenarios.items():
+        if counts.get(scenario_id, 0) != scenario.repetitions:
+            raise ProtocolError(
+                f"protocol.trial_sequence: {scenario_id!r} appears "
+                f"{counts.get(scenario_id, 0)} times but has "
+                f"{scenario.repetitions} repetitions"
+            )
+    return tuple(trials)
+
+
 def _load_source(
     source: Mapping[str, Any], *, base_dir: Path | None = None
 ) -> CollectionProtocol:
@@ -325,6 +362,8 @@ def _load_source(
         raise ProtocolError("protocol.schema_version: only version 1 is supported")
     protocol_id = _string(source.get("protocol_id"), "protocol.protocol_id")
     title = _string(source.get("title"), "protocol.title")
+    if source.get("derived_from") is not None:
+        _mapping(source["derived_from"], "protocol.derived_from")
 
     defaults = _mapping(source.get("defaults"), "protocol.defaults")
     _check_keys(defaults, _DEFAULT_KEYS, "protocol.defaults")
@@ -413,7 +452,10 @@ def _load_source(
             scenarios.append(scenario)
         blocks.append((block_id, block_title, tuple(scenarios)))
 
-    trials = _ordered_trials(blocks, source.get("trial_order", "declared"))
+    if source.get("trial_sequence") is not None:
+        trials = _sequenced_trials(blocks, source["trial_sequence"])
+    else:
+        trials = _ordered_trials(blocks, source.get("trial_order", "declared"))
     canonical = json.dumps(
         resolved_source, sort_keys=True, separators=(",", ":")
     ).encode()
@@ -480,9 +522,17 @@ def select_blocks(
         for block_id, title, scenarios in protocol.blocks
         if block_id in set(wanted)
     )
-    trials = _ordered_trials(selected, protocol.source.get("trial_order", "declared"))
-
     source = dict(protocol.source)
+    sequence = protocol.source.get("trial_sequence")
+    if sequence is not None:
+        kept = {scenario.id for _id, _title, group in selected for scenario in group}
+        source["trial_sequence"] = [item for item in sequence if item in kept]
+        trials = _sequenced_trials(selected, source["trial_sequence"])
+    else:
+        trials = _ordered_trials(
+            selected, protocol.source.get("trial_order", "declared")
+        )
+
     source["blocks"] = [
         {
             "id": block_id,

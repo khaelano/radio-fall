@@ -57,6 +57,14 @@ class ContinuousController(SessionController):
             )
         return super().dispatch(command)
 
+    @property
+    def can_revise_protocol(self) -> bool:
+        """Continuous recording has no editable trial queue."""
+        return False
+
+    def revise_protocol(self, *args: Any, **kwargs: Any):
+        raise RuntimeError("continuous recording has no editable trial queue")
+
     def _open_gap(self, reason: str) -> None:
         if self._gap_start is None and self._store is not None:
             self._gap_start = self._monotonic_ns()

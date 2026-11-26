@@ -4,7 +4,7 @@ Loading and scanning read only the small JSON manifests.  The receivers of an
 attempt come from the typed frame tables derived from the raw journals (see
 the Rust ``radio_storage`` library); they are resolved explicitly when a
 single session is opened.  The session inspector loads a selected attempt
-on demand (:mod:`fall_detection.apps.session_inspector.data`).
+on demand (:mod:`fall_detection.apps.sessions.inspector.data`).
 """
 
 from __future__ import annotations
@@ -21,7 +21,12 @@ import pyarrow as pa
 from .._radio_native import FrameStore
 from ..protocol.loader import protocol_from_mapping
 from ..protocol.model import CollectionProtocol, ProtocolError, Trial
-from .schema import ARTIFACT_SCHEMA_VERSION
+from .schema import (
+    ARTIFACT_SCHEMA_VERSION,
+    PROTOCOL_SNAPSHOT,
+    latest_protocol_hash,
+    protocol_snapshot_name,
+)
 from .source import SessionSource
 
 
@@ -123,9 +128,19 @@ class SessionBundle:
 
     @property
     def protocol_hash(self) -> str:
-        """Return the acquisition-time protocol hash when available."""
+        """Return the hash of the protocol the session started with.
+
+        Protocol revisions made while recording leave it unchanged, so reviews
+        and caches bound to it stay valid; ``protocol`` is the latest revision.
+        """
 
         return str(self.manifest.get("protocol_hash") or "")
+
+    @property
+    def protocol_revisions(self) -> tuple[dict[str, Any], ...]:
+        """Return the protocol revisions recorded during collection."""
+
+        return tuple(self.manifest.get("protocol_revisions") or ())
 
     @property
     def status(self) -> str:
@@ -414,16 +429,25 @@ def load_session(path: Path, *, resolve_receivers: bool = False) -> SessionBundl
     warnings: list[str] = []
     protocol_source: dict[str, Any] = {}
     protocol: CollectionProtocol | None = None
-    if source.exists("protocol.json"):
+    try:
+        snapshot = protocol_snapshot_name(manifest)
+    except ValueError as exc:
+        warnings.append(str(exc))
+        snapshot = None
+    if snapshot is not None and source.exists(snapshot):
         try:
-            protocol_source = read_json_object(
-                source, "protocol.json", "protocol snapshot"
-            )
+            protocol_source = read_json_object(source, snapshot, "protocol snapshot")
             protocol = protocol_from_mapping(protocol_source)
         except (SessionReadError, ProtocolError) as exc:
             warnings.append(str(exc))
-    else:
-        warnings.append("missing protocol.json")
+        if (
+            protocol is not None
+            and snapshot != PROTOCOL_SNAPSHOT
+            and protocol.source_hash != latest_protocol_hash(manifest)
+        ):
+            warnings.append(f"{snapshot} does not match its recorded hash")
+    elif snapshot is not None:
+        warnings.append(f"missing {snapshot}")
 
     frames_path = session_frames_directory(root, _session_identifier(manifest, root))
     keys = source.attempt_keys()

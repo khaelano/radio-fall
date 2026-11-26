@@ -14,7 +14,7 @@ from typing import Any, TextIO
 from .._radio_native import storage_read_file
 from ..protocol.model import CollectionProtocol, Trial
 from ..radio.recording_io import RecordingIO
-from ..session.schema import ARTIFACT_SCHEMA_VERSION
+from ..session.schema import ARTIFACT_SCHEMA_VERSION, PROTOCOL_REVISIONS_DIR
 
 
 def _slug(value: str) -> str:
@@ -229,6 +229,76 @@ class SessionArtifactStore:
         if data and not data.endswith(b"\n"):
             self._event_file.write("\n")
         self.event("session_resumed", monotonic_ns, **value)
+
+    @property
+    def protocol_revisions(self) -> int:
+        """Number of protocol revisions recorded in this session."""
+        return len(self._session.get("protocol_revisions") or ())
+
+    def revise_protocol(
+        self,
+        protocol: CollectionProtocol,
+        monotonic_ns: int,
+        *,
+        effective_from_trial: int,
+        note: str = "",
+        changes: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Save a revised protocol beside the original and list it in the manifest.
+
+        ``protocol.json`` and ``protocol_hash`` keep describing the starting
+        protocol. Each revision is a new file that is never rewritten.
+
+        Args:
+            protocol: The complete revised protocol.
+            monotonic_ns: Host time of the revision.
+            effective_from_trial: First trial ordinal the revision can affect.
+            note: Operator's reason for the change.
+            changes: Human-readable summary of what changed.
+
+        Returns:
+            The manifest entry of the revision.
+        """
+        if self._closed:
+            raise RuntimeError("session is closed")
+        revisions = self._session.setdefault("protocol_revisions", [])
+        number = len(revisions) + 1
+        folder = self.root / PROTOCOL_REVISIONS_DIR
+        folder.mkdir(exist_ok=True)
+        suffix = number
+        while True:
+            # A crash between file and manifest leaves an unlisted file; skip it.
+            relative = f"{PROTOCOL_REVISIONS_DIR}/{suffix:03d}.json"
+            try:
+                with (self.root / relative).open("x", encoding="utf-8") as stream:
+                    stream.write(
+                        json.dumps(
+                            protocol.source,
+                            indent=2,
+                            sort_keys=True,
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+                break
+            except FileExistsError:
+                suffix += 1
+        entry = {
+            "revision": number,
+            "path": relative,
+            "protocol_hash": protocol.source_hash,
+            "trials": len(protocol.trials),
+            "effective_from_trial": effective_from_trial,
+            "revised_at_utc": datetime.now(UTC).isoformat(),
+            "revised_monotonic_ns": monotonic_ns,
+            "note": note,
+            "changes": list(changes or ()),
+        }
+        revisions.append(entry)
+        self.protocol = protocol
+        _write_json(self.root / "session.json", self._session)
+        self.event("protocol_revised", monotonic_ns, **entry)
+        return entry
 
     def event(self, kind: str, monotonic_ns: int, **data: Any) -> None:
         """Append an event with a host monotonic timestamp."""

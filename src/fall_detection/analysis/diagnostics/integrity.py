@@ -17,6 +17,7 @@ import polars as pl
 from ..._radio_native import storage_read as read_session_file
 from ...protocol.loader import protocol_from_mapping
 from ...radio import phase as phase_module
+from ...session.schema import protocol_snapshot_name
 from .. import _cache_keys, _frames, session_frames
 from .._frames import as_polars
 from .._io import atomic_bytes
@@ -339,7 +340,7 @@ def analyze_session(
     if cache is not None and cache.is_relative_to(_cache_keys.raw_root_of(session)):
         raise ValueError("Place integrity caches outside raw data")
     protocol = protocol_from_mapping(
-        json.loads(read_session_file(source, "protocol.json"))
+        json.loads(read_session_file(source, protocol_snapshot_name(manifest)))
     )
     trials = {trial.ordinal: trial for trial in protocol.trials}
     environment = manifest.get("environment", {})

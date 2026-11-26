@@ -1,4 +1,5 @@
-//! Python bindings for the offline HE20 amplitude and Hampel kernels in `radio_signal`.
+//! Python bindings for the offline HE20 amplitude and Hampel kernels and the
+//! principal-component spectrum front end in `radio_signal`.
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyBytes};
 
 type Buffers<'py> = (
@@ -118,4 +119,104 @@ pub fn prepare_amplitude<'py>(
         PyBytes::new(py, bytes(&lower)),
         PyBytes::new(py, bytes(&upper)),
     ))
+}
+
+fn floats(data: &[u8]) -> std::borrow::Cow<'_, [f32]> {
+    // SAFETY: every bit pattern is a valid f32; misaligned input is copied.
+    let (head, body, tail) = unsafe { data.align_to::<f32>() };
+    if head.is_empty() && tail.is_empty() {
+        std::borrow::Cow::Borrowed(body)
+    } else {
+        std::borrow::Cow::Owned(
+            data.chunks_exact(4)
+                .map(|chunk| f32::from_ne_bytes(chunk.try_into().unwrap()))
+                .collect(),
+        )
+    }
+}
+
+fn float_bytes(values: &[f32]) -> &[u8] {
+    // SAFETY: initialized contiguous f32s have no padding; view cannot outlive values.
+    unsafe { std::slice::from_raw_parts(values.as_ptr().cast(), std::mem::size_of_val(values)) }
+}
+
+/// Principal-component spectrum front end of the `pcspec` models, with the
+/// state that lets consecutive windows reuse their covariance sums.
+///
+/// Windows are native-endian float32 `[frames, 1964]` (normalized signals,
+/// validity, presence); features are float32 `[stft_frames, 65]`.
+#[pyclass(module = "fall_detection._radio_native")]
+pub struct PcSpectrumFrontEnd {
+    inner: std::sync::Mutex<radio_signal::pc_spectrum::PcSpectrum>,
+}
+
+#[pymethods]
+impl PcSpectrumFrontEnd {
+    #[new]
+    #[pyo3(signature = (frames=480, simd=true, threads=1))]
+    fn new(frames: usize, simd: bool, threads: usize) -> PyResult<Self> {
+        let inner = radio_signal::pc_spectrum::PcSpectrum::new(frames, simd, threads)
+            .map_err(PyValueError::new_err)?;
+        Ok(Self {
+            inner: std::sync::Mutex::new(inner),
+        })
+    }
+
+    /// Samples per window.
+    #[getter]
+    fn frames(&self) -> usize {
+        self.inner.lock().unwrap().frames()
+    }
+
+    /// Floats per output (`stft_frames * 65`).
+    #[getter]
+    fn outputs(&self) -> usize {
+        self.inner.lock().unwrap().outputs()
+    }
+
+    /// Whether the AVX2 kernels are in use.
+    #[getter]
+    fn simd(&self) -> bool {
+        self.inner.lock().unwrap().simd()
+    }
+
+    /// Forget the previous window.
+    fn reset(&self) {
+        self.inner.lock().unwrap().reset();
+    }
+
+    /// Features of one window. `shift` claims the window starts that many
+    /// samples after the previous one; the overlap is verified before it is
+    /// used. Returns the features, each receiver's update (`full`, `sliding` or
+    /// `skipped`) and the kernel time in nanoseconds.
+    #[pyo3(signature = (window, shift=None))]
+    fn features<'py>(
+        &self,
+        py: Python<'py>,
+        window: &[u8],
+        shift: Option<usize>,
+    ) -> PyResult<(Bound<'py, PyBytes>, Vec<&'static str>, u64)> {
+        let (out, updates, nanoseconds) = py
+            .detach(|| {
+                let window = floats(window);
+                if window.iter().any(|v| !v.is_finite()) {
+                    return Err("PC spectrum window must be finite".to_string());
+                }
+                let mut front = self.inner.lock().unwrap();
+                let mut out = vec![0.0f32; front.outputs()];
+                let started = std::time::Instant::now();
+                let updates = front.features(&window, shift, &mut out)?;
+                Ok((out, updates, started.elapsed().as_nanos() as u64))
+            })
+            .map_err(PyValueError::new_err)?;
+        let names = updates
+            .iter()
+            .map(|update| match update {
+                radio_signal::pc_spectrum::Update::Full => "full",
+                radio_signal::pc_spectrum::Update::Sliding => "sliding",
+                radio_signal::pc_spectrum::Update::Skipped => "skipped",
+            })
+            .collect();
+        Ok((PyBytes::new(py, float_bytes(&out)), names, nanoseconds))
+    }
 }

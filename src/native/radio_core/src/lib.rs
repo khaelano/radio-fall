@@ -42,5 +42,6 @@ fn _radio_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
         preprocessing_bindings::prepare_magnitude,
         m
     )?)?;
+    m.add_class::<preprocessing_bindings::PcSpectrumFrontEnd>()?;
     Ok(())
 }

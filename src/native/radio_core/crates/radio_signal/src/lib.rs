@@ -1,7 +1,10 @@
-//! Exact signed-I/Q reductions, runtime AVX2 dispatch, phase detrending, and
-//! offline HE20 amplitude and Hampel kernels.
+//! Exact signed-I/Q reductions, runtime AVX2 dispatch, phase detrending,
+//! offline HE20 amplitude and Hampel kernels, and the principal-component
+//! spectrum front end with its symmetric eigensolver.
 pub mod amplitude;
 pub mod hampel;
+pub mod pc_spectrum;
+pub mod symmetric_eigen;
 
 use std::f64::consts::{PI, TAU};
 

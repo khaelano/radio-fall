@@ -32,7 +32,10 @@ excluded from Git. Recordings and reusable derived datasets remain in `data/`.
   Its last step writes `main_bursts.parquet` beside each default export: the
   main motion burst of every fall segment, for burst training labels.
 - `03_training.ipynb` runs PyTorch sequence models on CPU or NVIDIA
-  CUDA, with independent pilot and full-data training sections. Its final cell
+  CUDA, with independent pilot and full-data training sections. Besides the
+  CNN, LSTM, GRU and tone-pool models, it defines the tiny energy models
+  (`tiny_tcn1`, `tiny_tcn3`, `tiny_cnn3`), which average the default input
+  over tones and receivers inside the model. Its final cell
   exports available checkpoints to ONNX and verifies logits with ONNX Runtime.
   It also saves each model's per-window test predictions for the comparison.
   `REPRESENTATION` selects the default export or a variant and is recorded in

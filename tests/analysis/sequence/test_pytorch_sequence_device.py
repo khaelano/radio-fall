@@ -149,6 +149,9 @@ def test_notebook_trainer_saves_and_reloads_checkpoint(tmp_path, training_notebo
         "TorchTonePoolGeM",
         "TorchTonePoolTemporal",
         "TorchTonePoolTemporalCentered",
+        "TorchTinyTCN1",
+        "TorchTinyTCN3",
+        "TorchTinyCNN3",
     ],
 )
 def test_tone_pool_ignores_tone_and_receiver_order(training_notebook, name):
@@ -172,6 +175,24 @@ def test_tone_pool_ignores_tone_and_receiver_order(training_notebook, name):
     shuffled = model(inputs(torch.randperm(245), torch.tensor([2, 0, 3, 1])))
     assert original.shape == (2,)
     torch.testing.assert_close(shuffled, original)
+
+
+def test_tiny_energy_collapse_uses_only_valid_tones(training_notebook):
+    model = training_notebook["TorchTinyTCN3"](1964, 4).eval()
+    values = torch.randn(2, 24, 980)
+    valid = (torch.rand(2, 24, 980) > 0.3).float()
+    valid[0, 5] = 0  # a sample without any valid tone
+    present = torch.ones(2, 24, 4)
+    noisy = values + 100 * (1 - valid)  # invalid values must not matter
+    mean, spread, coverage = model.collapse(
+        torch.cat((noisy, valid, present), dim=-1)
+    ).unbind(1)
+    count = valid.sum(-1)
+    expected = (values * valid).sum(-1) / count.clamp_min(1)
+    torch.testing.assert_close(mean, expected)
+    torch.testing.assert_close(coverage, count / 980)
+    assert mean[0, 5] == 0 and torch.isfinite(spread).all()
+    assert sum(p.numel() for p in model.parameters()) == 5505
 
 
 def test_tone_pool_gem_gradient_is_finite_when_all_tones_are_dropped(
